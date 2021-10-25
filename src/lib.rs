@@ -3,19 +3,18 @@
 
 extern crate alloc;
 
-#[allow(clippy::module_name_repetitions)]
 mod node;
 
-use node::{NodeVariant, NodeVariantMut, TreeArrayNode};
+use node::{Node, NodeVariant, NodeVariantMut};
 
-pub struct TreeArray<T, const B: usize, const C: usize> {
+pub struct BTreeVec<T, const B: usize, const C: usize> {
     // TODO: maybe add these
     // first_leaf: Option<()>,
     // last_leaf: Option<()>,
-    root_node: Option<TreeArrayNode<T, B, C>>,
+    root_node: Option<Node<T, B, C>>,
 }
 
-impl<T, const B: usize, const C: usize> TreeArray<T, B, C> {
+impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
@@ -49,7 +48,7 @@ impl<T, const B: usize, const C: usize> TreeArray<T, B, C> {
         let mut cur_node = self.root_node.as_ref()?;
 
         loop {
-            match cur_node.get_variant() {
+            match cur_node.variant() {
                 NodeVariant::Internal { children } => {
                     for child in children.iter().flatten() {
                         if index < child.len() {
@@ -91,17 +90,17 @@ impl<T, const B: usize, const C: usize> TreeArray<T, B, C> {
             todo!();
         }
 
-        if let Some(node) = self.root_node.as_mut() {
-            if let Some(new_node) = node.insert(index, value) {
-                root_node = todo!();
+        if let Some(mut root) = self.root_node.take() {
+            if let Some(new_node) = root.insert(index, value) {
+                self.root_node = Some(Node::from_child_array([root, new_node]));
             }
         } else {
-            self.root_node = Some(TreeArrayNode::from_value(value));
+            self.root_node = Some(Node::from_value(value));
         }
     }
 }
 
-impl<T, const B: usize, const C: usize> Default for TreeArray<T, B, C> {
+impl<T, const B: usize, const C: usize> Default for BTreeVec<T, B, C> {
     fn default() -> Self {
         Self::new()
     }
@@ -113,6 +112,25 @@ mod tests {
 
     #[test]
     fn test_new() {
-        let _ = TreeArray::<i32, 7, 2>::new();
+        let _ = BTreeVec::<i32, 7, 2>::new();
+    }
+
+    #[test]
+    fn test_insert_and_get() {
+        let mut v = BTreeVec::<i32, 4, 3>::new();
+        assert_eq!(v.len(), 0);
+
+        v.insert(0, 3);
+        assert_eq!(v.len(), 1);
+
+        v.insert(0, 1);
+        assert_eq!(v.len(), 2);
+
+        v.insert(1, 2);
+        assert_eq!(v.len(), 3);
+
+        assert_eq!(v.get(0), Some(&1));
+        assert_eq!(v.get(1), Some(&2));
+        assert_eq!(v.get(2), Some(&3));
     }
 }

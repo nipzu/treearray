@@ -4,7 +4,7 @@ use core::{ptr, slice};
 
 use alloc::boxed::Box;
 
-pub struct TreeArrayNode<T, const B: usize, const C: usize> {
+pub struct Node<T, const B: usize, const C: usize> {
     // Invariant: `length` is the number of values that this node eventually has as children
     //
     // If `self.length <= C`, this node is a leaf node with
@@ -20,13 +20,13 @@ pub struct TreeArrayNode<T, const B: usize, const C: usize> {
 }
 
 union NodeInner<T, const B: usize, const C: usize> {
-    children: ManuallyDrop<Box<[Option<TreeArrayNode<T, B, C>>; B]>>,
+    children: ManuallyDrop<Box<[Option<Node<T, B, C>>; B]>>,
     values: ManuallyDrop<Box<[MaybeUninit<T>; C]>>,
 }
 
 pub enum NodeVariant<'a, T, const B: usize, const C: usize> {
     Internal {
-        children: &'a [Option<TreeArrayNode<T, B, C>>; B],
+        children: &'a [Option<Node<T, B, C>>; B],
     },
     Leaf {
         values: &'a [T],
@@ -35,7 +35,7 @@ pub enum NodeVariant<'a, T, const B: usize, const C: usize> {
 
 pub enum NodeVariantMut<'a, T, const B: usize, const C: usize> {
     Internal {
-        children: &'a mut [Option<TreeArrayNode<T, B, C>>; B],
+        children: &'a mut [Option<Node<T, B, C>>; B],
     },
     Leaf {
         values: &'a mut [T],
@@ -47,7 +47,7 @@ enum InsertTo {
     Right(usize),
 }
 
-impl<T, const B: usize, const C: usize> TreeArrayNode<T, B, C> {
+impl<T, const B: usize, const C: usize> Node<T, B, C> {
     const UNINIT: MaybeUninit<T> = MaybeUninit::uninit();
     const NONE: Option<Self> = None;
 
@@ -57,7 +57,7 @@ impl<T, const B: usize, const C: usize> TreeArrayNode<T, B, C> {
     }
 
     fn is_full(&self) -> bool {
-        match self.get_variant() {
+        match self.variant() {
             NodeVariant::Leaf { values } => values.len() == C,
             NodeVariant::Internal { children } => matches!(children.last(), Some(&Some(_))),
         }
@@ -70,6 +70,17 @@ impl<T, const B: usize, const C: usize> TreeArrayNode<T, B, C> {
                 children: ManuallyDrop::new(children),
             },
         }
+    }
+
+    pub fn from_child_array<const N: usize>(children: [Self; N]) -> Self {
+        let mut inner_children = [Self::NONE; B];
+        let mut length = 0;
+        for (i, child) in children.into_iter().enumerate() {
+            length += child.len();
+            inner_children[i] = Some(child);
+        }
+
+        Self::from_children(length, Box::new(inner_children))
     }
 
     unsafe fn from_values(length: usize, values: Box<[MaybeUninit<T>; C]>) -> Self {
@@ -94,11 +105,11 @@ impl<T, const B: usize, const C: usize> TreeArrayNode<T, B, C> {
 
     fn split(&mut self, index: usize) -> Self {
         let len = self.len();
-        match self.get_variant_mut() {
+        match self.variant_mut() {
             NodeVariantMut::Internal { children } => {
                 let left_len = children[..index]
                     .iter()
-                    .flat_map(|maybe_child| maybe_child.as_ref().map(TreeArrayNode::len))
+                    .filter_map(|maybe_child| maybe_child.as_ref().map(Self::len))
                     .sum();
                 let right_len = len - left_len;
                 let tail_len = children.len() - index;
@@ -122,7 +133,7 @@ impl<T, const B: usize, const C: usize> TreeArrayNode<T, B, C> {
     }
 
     fn insert_fitting(&mut self, index: usize, value: T) {
-        match self.get_variant_mut() {
+        match self.variant_mut() {
             NodeVariantMut::Internal { children } => {
                 let insert_index = find_insert_index(children, index);
                 if let Some(new_child) = children[insert_index]
@@ -142,24 +153,20 @@ impl<T, const B: usize, const C: usize> TreeArrayNode<T, B, C> {
                 assert!(index < values.len());
                 unsafe {
                     let index_ptr = values.as_mut_ptr().add(index);
-                    ptr::copy(index_ptr, index_ptr.add(1), self.len() - index);
+                    ptr::copy(index_ptr, index_ptr.add(1), values.len() - index);
                     ptr::write(index_ptr, value);
                 }
             }
         }
 
         // TODO: integer overflow
-        self.length = NonZeroUsize::new(self.len() + 1).expect("length overflow");
+        self.length = NonZeroUsize::new(self.len().wrapping_add(1)).expect("length overflow");
     }
 
     fn get_split(&self, index: usize) -> (usize, InsertTo) {
-        let (insert_index, mid) = match self.get_variant() {
-            NodeVariant::Internal { children} => {
-                (find_insert_index(children, index), B / 2)
-            }
-            NodeVariant::Leaf { .. } => {
-                (index, C / 2)
-            },
+        let (insert_index, mid) = match self.variant() {
+            NodeVariant::Internal { children } => (find_insert_index(children, index), B / 2),
+            NodeVariant::Leaf { .. } => (index, C / 2),
         };
 
         if insert_index <= mid {
@@ -175,10 +182,10 @@ impl<T, const B: usize, const C: usize> TreeArrayNode<T, B, C> {
             let mut right = self.split(split_index);
             match insert_spot {
                 InsertTo::Left(insert_index) => {
-                    self.insert_fitting(insert_index, value)
-                },
+                    self.insert_fitting(insert_index, value);
+                }
                 InsertTo::Right(insert_index) => {
-                    right.insert_fitting(insert_index, value)
+                    right.insert_fitting(insert_index, value);
                 }
             }
             Some(right)
@@ -188,7 +195,7 @@ impl<T, const B: usize, const C: usize> TreeArrayNode<T, B, C> {
         }
     }
 
-    pub fn get_variant(&self) -> NodeVariant<T, B, C> {
+    pub fn variant(&self) -> NodeVariant<T, B, C> {
         unsafe {
             if self.len() <= C {
                 let values_ptr = (*self.inner.values).as_ptr().cast::<T>();
@@ -204,7 +211,7 @@ impl<T, const B: usize, const C: usize> TreeArrayNode<T, B, C> {
         }
     }
 
-    pub fn get_variant_mut(&mut self) -> NodeVariantMut<T, B, C> {
+    pub fn variant_mut(&mut self) -> NodeVariantMut<T, B, C> {
         unsafe {
             if self.len() <= C {
                 let values_ptr = (*self.inner.values).as_mut_ptr().cast::<T>();
@@ -222,11 +229,11 @@ impl<T, const B: usize, const C: usize> TreeArrayNode<T, B, C> {
 }
 
 fn find_insert_index<T, const B: usize, const C: usize>(
-    children: &[Option<TreeArrayNode<T, B, C>>; B],
+    children: &[Option<Node<T, B, C>>; B],
     mut index: usize,
 ) -> usize {
-    for i in 0..children.len() {
-        if let Some(child) = children[i].as_ref() {
+    for (i, maybe_child) in children.iter().enumerate() {
+        if let Some(child) = maybe_child {
             if index <= child.len() {
                 return i;
             }
@@ -236,10 +243,10 @@ fn find_insert_index<T, const B: usize, const C: usize>(
     unreachable!();
 }
 
-impl<T, const B: usize, const C: usize> Drop for TreeArrayNode<T, B, C> {
+impl<T, const B: usize, const C: usize> Drop for Node<T, B, C> {
     fn drop(&mut self) {
         unsafe {
-            match self.get_variant_mut() {
+            match self.variant_mut() {
                 NodeVariantMut::Leaf { values } => {
                     ptr::drop_in_place(values);
                     ManuallyDrop::drop(&mut self.inner.values);
@@ -259,16 +266,21 @@ mod test {
     #[test]
     fn test_node_size() {
         use core::mem::size_of;
+
+        assert_eq!(size_of::<Node<i32, 10, 32>>(), 2 * size_of::<usize>());
+        assert_eq!(size_of::<Node<i128, 3, 3>>(), 2 * size_of::<usize>());
+        assert_eq!(size_of::<Node<i64, 0, 0>>(), 2 * size_of::<usize>());
+
         assert_eq!(
-            size_of::<TreeArrayNode<i32, 10, 32>>(),
+            size_of::<Option<Node<i32, 10, 32>>>(),
             2 * size_of::<usize>()
         );
         assert_eq!(
-            size_of::<TreeArrayNode<i128, 3, 3>>(),
+            size_of::<Option<Node<i128, 3, 3>>>(),
             2 * size_of::<usize>()
         );
         assert_eq!(
-            size_of::<TreeArrayNode<i64, 0, 0>>(),
+            size_of::<Option<Node<u128, 0, 0>>>(),
             2 * size_of::<usize>()
         );
     }
