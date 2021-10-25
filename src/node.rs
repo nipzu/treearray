@@ -163,6 +163,37 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         self.length = NonZeroUsize::new(self.len().wrapping_add(1)).expect("length overflow");
     }
 
+    fn insert_value(&mut self, index: usize, value: T) {
+        match self.variant_mut() {
+            NodeVariantMut::Internal { children } => {
+                let insert_index = find_insert_index(children, index);
+                if let Some(new_child) = children[insert_index]
+                    .as_mut()
+                    .unwrap()
+                    .insert(index, value)
+                {
+                    assert!(index < children.len());
+                    unsafe {
+                        let index_ptr = children.as_mut_ptr().add(index);
+                        ptr::copy(index_ptr, index_ptr.add(1), children.len() - 1 - index);
+                        ptr::write(index_ptr, Some(new_child));
+                    }
+                }
+            }
+            NodeVariantMut::Leaf { values } => {
+                assert!(index < values.len());
+                unsafe {
+                    let index_ptr = values.as_mut_ptr().add(index);
+                    ptr::copy(index_ptr, index_ptr.add(1), values.len() - index);
+                    ptr::write(index_ptr, value);
+                }
+            }
+        }
+
+        // TODO: integer overflow
+        self.length = NonZeroUsize::new(self.len().wrapping_add(1)).expect("length overflow");
+    }
+
     fn get_split(&self, index: usize) -> (usize, InsertTo) {
         let (insert_index, mid) = match self.variant() {
             NodeVariant::Internal { children } => (find_insert_index(children, index), B / 2),
@@ -177,6 +208,26 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     pub fn insert(&mut self, index: usize, value: T) -> Option<Self> {
+        match self.variant_mut() {
+            NodeVariantMut::Internal { children } => {
+                let i = find_insert_index(children, index);
+                if let Some(new_child) = children[i].as_mut().unwrap().insert(index, value) {
+                    if self.is_full() {
+                        self.split_and_insert_node(i, new_child);
+                    } else {
+                        self.insert_node(i, new_child);
+                    }
+                }
+            },
+            NodeVariantMut::Leaf { values } => {
+                if self.is_full() {
+                    self.split_and_insert_value(index, value);
+                } else {
+                    self.insert_value(index, value);
+                }
+            },
+        };
+
         if self.is_full() {
             let (split_index, insert_spot) = self.get_split(index);
             let mut right = self.split(split_index);
