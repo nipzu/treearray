@@ -53,12 +53,21 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
         }
     }
 
+    pub fn into_values_mut(self) -> &'a mut [T] {
+        debug_assert!(self.node.len() <= C);
+        unsafe {
+            let values_ptr = (*self.node.inner.values).as_mut_ptr().cast::<T>();
+            slice::from_raw_parts_mut(values_ptr, self.node.len())
+        }
+    }
+
     pub fn is_full(&self) -> bool {
         self.node.is_full()
     }
 
     pub unsafe fn insert_fitting(&mut self, index: usize, value: T) {
         debug_assert!(self.node.len() < C);
+        debug_assert!(index < self.node.len());
         unsafe {
             let index_ptr = (*self.node.inner.values).as_mut_ptr().add(index);
             ptr::copy(index_ptr, index_ptr.add(1), self.values_mut().len() - index);
@@ -132,7 +141,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
     }
 
     pub fn is_full(&self) -> bool {
-        matches!(self.children().last(), Some(&Some(_)))
+        self.node.is_full()
     }
 
     pub fn children(&self) -> &[Option<Node<T, B, C>>; B] {
@@ -141,6 +150,11 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
     }
 
     pub fn children_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
+        debug_assert!(self.node.len() > C);
+        unsafe { &mut self.node.inner.children }
+    }
+
+    pub fn into_children_mut(self) -> &'a mut [Option<Node<T, B, C>>; B] {
         debug_assert!(self.node.len() > C);
         unsafe { &mut self.node.inner.children }
     }

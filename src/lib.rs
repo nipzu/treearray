@@ -47,19 +47,47 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         let mut cur_node = self.root_node.as_ref()?;
 
-        loop {
+        'd: loop {
             match cur_node.variant() {
                 NodeVariant::Internal { handle } => {
                     for child in handle.children().iter().flatten() {
                         if index < child.len() {
                             cur_node = child;
-                            break;
+                            continue 'd;
                         }
                         index -= child.len();
                     }
+                    unreachable!();
                 }
                 NodeVariant::Leaf { handle } => {
                     return handle.values().get(index);
+                }
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn get_mut(&mut self, mut index: usize) -> Option<&mut T> {
+        if index >= self.len() {
+            return None;
+        }
+
+        let mut cur_node = self.root_node.as_mut()?;
+
+        'd: loop {
+            match cur_node.variant_mut() {
+                NodeVariantMut::Internal { handle } => {
+                    for child in handle.into_children_mut().iter_mut().flatten() {
+                        if index < child.len() {
+                            cur_node = child;
+                            continue 'd;
+                        }
+                        index -= child.len();
+                    }
+                    unreachable!();
+                }
+                NodeVariantMut::Leaf { handle } => {
+                    return handle.into_values_mut().get_mut(index);
                 }
             }
         }
@@ -77,6 +105,30 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         // If `self.len() == 0`, we wrap to `usize::MAX` which
         // is definitely outside the range of an empty array.
         self.get(self.len().wrapping_sub(1))
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn first_mut(&mut self) -> Option<&mut T> {
+        self.get_mut(0)
+    }
+
+    #[must_use]
+    #[inline]
+    pub fn last_mut(&mut self) -> Option<&mut T> {
+        // If `self.len() == 0`, we wrap to `usize::MAX` which
+        // is definitely outside the range of an empty array.
+        self.get_mut(self.len().wrapping_sub(1))
+    }
+
+    #[inline]
+    pub fn push_front(&mut self, value: T) {
+        self.insert(0, value);
+    }
+
+    #[inline]
+    pub fn push_back(&mut self, value: T) {
+        self.insert(self.len(), value);
     }
 
     // TODO: should this be inlined?
@@ -137,6 +189,7 @@ mod tests {
         assert_eq!(v.get(0), Some(&0));
         assert_eq!(v.get(1), Some(&1));
         assert_eq!(v.get(2), Some(&2));
+        assert_eq!(v.get(3), None);
 
         let mut v = BTreeVec::<i32, 4, 1>::new();
         assert_eq!(v.len(), 0);
@@ -155,6 +208,7 @@ mod tests {
         assert_eq!(v.get(0), Some(&1));
         assert_eq!(v.get(1), Some(&2));
         assert_eq!(v.get(2), Some(&3));
+        assert_eq!(v.get(3), None);
 
         let mut v = BTreeVec::<i32, 4, 3>::new();
         assert_eq!(v.len(), 0);
@@ -171,8 +225,9 @@ mod tests {
         assert_eq!(v.get(0), Some(&1));
         assert_eq!(v.get(1), Some(&2));
         assert_eq!(v.get(2), Some(&3));
+        assert_eq!(v.get(3), None);
 
-        let mut v = BTreeVec::<(), 4, 3>::new();
+        let mut v = BTreeVec::<(), 4, { usize::MAX }>::new();
         assert_eq!(v.len(), 0);
 
         v.insert(0, ());
@@ -187,5 +242,6 @@ mod tests {
         assert_eq!(v.get(0), Some(&()));
         assert_eq!(v.get(1), Some(&()));
         assert_eq!(v.get(2), Some(&()));
+        assert_eq!(v.get(3), None);
     }
 }
