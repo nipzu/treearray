@@ -20,9 +20,13 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
-        // TODO: do something about this runtime check
+        // Each internal node has to have at least two children
+        // to be considered an internal node.
         assert!(B >= 3);
-        assert!(C >= 1);
+        // If the root consist of 2 leaves of size `C/2`, 
+        // then it is also considered to be a leaf.
+        // Also takes care of the `C == 0` case.
+        assert!(C % 2 == 1);
         Self { root_node: None }
     }
 
@@ -169,92 +173,15 @@ impl<T, const B: usize, const C: usize> Default for BTreeVec<T, B, C> {
 
 #[cfg(test)]
 mod tests {
-    use rand::Rng;
-
     use super::*;
 
     #[test]
     fn test_new() {
-        let _ = BTreeVec::<i32, 7, 2>::new();
+        const _: BTreeVec<i32, 7, 3> = BTreeVec::new();
     }
 
     #[test]
-    fn test_insert_and_get() {
-        let mut v = BTreeVec::<i32, 3, 1>::new();
-        assert_eq!(v.len(), 0);
-
-        v.insert(0, 0);
-        assert_eq!(v.len(), 1);
-        assert_eq!(v.get(0), Some(&0));
-
-        v.insert(1, 1);
-        assert_eq!(v.len(), 2);
-        assert_eq!(v.get(0), Some(&0));
-        assert_eq!(v.get(1), Some(&1));
-
-        v.insert(2, 2);
-        assert_eq!(v.len(), 3);
-        assert_eq!(v.get(0), Some(&0));
-        assert_eq!(v.get(1), Some(&1));
-        assert_eq!(v.get(2), Some(&2));
-        assert_eq!(v.get(3), None);
-
-        let mut v = BTreeVec::<i32, 4, 1>::new();
-        assert_eq!(v.len(), 0);
-
-        v.insert(0, 3);
-        assert_eq!(v.len(), 1);
-        assert_eq!(v.get(0), Some(&3));
-
-        v.insert(0, 1);
-        assert_eq!(v.len(), 2);
-        assert_eq!(v.get(0), Some(&1));
-        assert_eq!(v.get(1), Some(&3));
-
-        v.insert(1, 2);
-        assert_eq!(v.len(), 3);
-        assert_eq!(v.get(0), Some(&1));
-        assert_eq!(v.get(1), Some(&2));
-        assert_eq!(v.get(2), Some(&3));
-        assert_eq!(v.get(3), None);
-
-        let mut v = BTreeVec::<i32, 4, 3>::new();
-        assert_eq!(v.len(), 0);
-
-        v.insert(0, 3);
-        assert_eq!(v.len(), 1);
-
-        v.insert(0, 1);
-        assert_eq!(v.len(), 2);
-
-        v.insert(1, 2);
-        assert_eq!(v.len(), 3);
-
-        assert_eq!(v.get(0), Some(&1));
-        assert_eq!(v.get(1), Some(&2));
-        assert_eq!(v.get(2), Some(&3));
-        assert_eq!(v.get(3), None);
-
-        let mut v = BTreeVec::<(), 4, { usize::MAX }>::new();
-        assert_eq!(v.len(), 0);
-
-        v.insert(0, ());
-        assert_eq!(v.len(), 1);
-
-        v.insert(0, ());
-        assert_eq!(v.len(), 2);
-
-        v.insert(1, ());
-        assert_eq!(v.len(), 3);
-
-        assert_eq!(v.get(0), Some(&()));
-        assert_eq!(v.get(1), Some(&()));
-        assert_eq!(v.get(2), Some(&()));
-        assert_eq!(v.get(3), None);
-    }
-
-    #[test]
-    fn test_insert_2() {
+    fn test_insert_front_back() {
         let mut b = BTreeVec::<_, 4, 5>::new();
         for x in 0..200 {
             b.push_back(x);
@@ -271,9 +198,12 @@ mod tests {
 
     #[test]
     fn test_random_insertions() {
-        let mut rng = rand::thread_rng();
+        use alloc::vec::Vec;
+        use rand::{Rng, SeedableRng};
 
-        let mut v = alloc::vec::Vec::new();
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+
+        let mut v = Vec::new();
         let mut b_3_3 = BTreeVec::<i32, 3, 3>::new();
         let mut b_5_1 = BTreeVec::<i32, 5, 1>::new();
 
@@ -282,14 +212,12 @@ mod tests {
             v.insert(index, x);
             b_3_3.insert(index, x);
             b_5_1.insert(index, x);
+            assert_eq!(v.len(), b_3_3.len());
+            assert_eq!(v.len(), b_5_1.len());
         }
 
-        for (a, b) in v.iter().zip(b_3_3.iter()) {
-            assert_eq!(a, b);
-        }
-        for (a, b) in v.iter().zip(b_5_1.iter()) {
-            assert_eq!(a, b);
-        }
+        assert_eq!(v, b_3_3.iter().copied().collect::<Vec<_>>());
+        assert_eq!(v, b_5_1.iter().copied().collect::<Vec<_>>());
     }
 
     // #[test]

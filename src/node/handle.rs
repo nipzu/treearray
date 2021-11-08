@@ -270,7 +270,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
 
 unsafe fn slice_insert_forget_last<T>(slice: &mut [T], index: usize, value: T) {
     debug_assert!(!slice.is_empty());
-    debug_assert!(index <= slice.len());
+    debug_assert!(index < slice.len());
     unsafe {
         let index_ptr = slice.as_mut_ptr().add(index);
         ptr::copy(index_ptr, index_ptr.add(1), slice.len() - index - 1);
