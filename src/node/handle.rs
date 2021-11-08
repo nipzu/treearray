@@ -67,7 +67,7 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
 
     pub unsafe fn insert_fitting(&mut self, index: usize, value: T) {
         debug_assert!(self.node.len() < C);
-        debug_assert!(index < self.node.len());
+        debug_assert!(index <= self.node.len());
         unsafe {
             let index_ptr = (*self.node.inner.values).as_mut_ptr().add(index);
             ptr::copy(index_ptr, index_ptr.add(1), self.values_mut().len() - index);
@@ -179,6 +179,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
     }
 
     pub unsafe fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
+        debug_assert!(!self.is_full());
         unsafe {
             slice_insert_forget_last(self.children_mut(), index, Some(node));
         }
@@ -216,7 +217,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
             let tail_start_len = index - split_index;
 
             self.children_mut()[split_index..index].swap_with_slice(&mut new_box[..tail_start_len]);
-            self.children_mut()[index..].swap_with_slice(&mut new_box[tail_start_len + 1..]);
+            self.children_mut()[index..].swap_with_slice(&mut new_box[tail_start_len + 1..=tail_len]);
             new_box[tail_start_len] = Some(node);
 
             self.node.length = NonZeroUsize::new(split_index).unwrap();
@@ -226,6 +227,8 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
 }
 
 unsafe fn slice_insert_forget_last<T>(slice: &mut [T], index: usize, value: T) {
+    debug_assert!(!slice.is_empty());
+    debug_assert!(index <= slice.len());
     unsafe {
         let index_ptr = slice.as_mut_ptr().add(index);
         ptr::copy(index_ptr, index_ptr.add(1), slice.len() - index - 1);

@@ -110,7 +110,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
                             return Some(handle.split_and_insert_node(insert_index, new_child));
                         }
 
-                        handle.insert_fitting(index, new_child);
+                        handle.insert_fitting(insert_index, new_child);
                     }
                 }
                 self.length = NonZeroUsize::new(self.len() + 1).unwrap();

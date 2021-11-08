@@ -5,9 +5,11 @@ extern crate alloc;
 
 mod node;
 mod panics;
+pub mod iter;
 
 use node::{Node, NodeVariant, NodeVariantMut};
 use panics::panic_out_of_bounds;
+use iter::Iter;
 
 pub struct BTreeVec<T, const B: usize, const C: usize> {
     // TODO: maybe a depth field?
@@ -151,6 +153,10 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             Some(Node::from_value(value))
         }
     }
+
+    pub fn iter(&self) -> Iter<T, B, C> {
+        Iter::new(self)
+    }
 }
 
 // TODO: this could maybe be derived in the future
@@ -243,5 +249,17 @@ mod tests {
         assert_eq!(v.get(1), Some(&()));
         assert_eq!(v.get(2), Some(&()));
         assert_eq!(v.get(3), None);
+    }
+
+    #[test]
+    fn test_insert_2() {
+        let v = (0..100).collect::<alloc::vec::Vec<u32>>();
+
+        let mut b = BTreeVec::<_, 4, 5>::new();
+        for x in 0..100 {
+            b.push_back(x);
+        }
+
+        assert!(v.iter().eq(b.iter()));
     }
 }
