@@ -121,7 +121,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
                     return Some(handle.split_and_insert_value(index, value));
                 }
 
-                handle.insert_fitting(index, value);
+                handle.insert_fitting_extending(index, value);
                 self.length = NonZeroUsize::new(self.len() + 1).unwrap();
             },
         }

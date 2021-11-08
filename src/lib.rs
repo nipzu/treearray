@@ -3,13 +3,13 @@
 
 extern crate alloc;
 
+pub mod iter;
 mod node;
 mod panics;
-pub mod iter;
 
+use iter::Iter;
 use node::{Node, NodeVariant, NodeVariantMut};
 use panics::panic_out_of_bounds;
-use iter::Iter;
 
 pub struct BTreeVec<T, const B: usize, const C: usize> {
     // TODO: maybe a depth field?
@@ -169,6 +169,8 @@ impl<T, const B: usize, const C: usize> Default for BTreeVec<T, B, C> {
 
 #[cfg(test)]
 mod tests {
+    use rand::Rng;
+
     use super::*;
 
     #[test]
@@ -253,13 +255,46 @@ mod tests {
 
     #[test]
     fn test_insert_2() {
-        let v = (0..100).collect::<alloc::vec::Vec<u32>>();
-
         let mut b = BTreeVec::<_, 4, 5>::new();
-        for x in 0..100 {
+        for x in 0..200 {
             b.push_back(x);
         }
 
-        assert!(v.iter().eq(b.iter()));
+        for x in (-200..0).rev() {
+            b.push_front(x)
+        }
+
+        for (a, b) in b.iter().zip(-200..) {
+            assert_eq!(*a, b);
+        }
     }
+
+    #[test]
+    fn test_random_insertions() {
+        let mut rng = rand::thread_rng();
+
+        let mut v = alloc::vec::Vec::new();
+        let mut b_3_3 = BTreeVec::<i32, 3, 3>::new();
+        let mut b_5_1 = BTreeVec::<i32, 5, 1>::new();
+
+        for x in 0..1000 {
+            let index = rng.gen_range(0..=v.len());
+            v.insert(index, x);
+            b_3_3.insert(index, x);
+            b_5_1.insert(index, x);
+        }
+
+        for (a, b) in v.iter().zip(b_3_3.iter()) {
+            assert_eq!(a, b);
+        }
+        for (a, b) in v.iter().zip(b_5_1.iter()) {
+            assert_eq!(a, b);
+        }
+    }
+
+    // #[test]
+    // #[should_panic(expected = "length overflow")]
+    // fn test_zst_length_overflow() {
+    //     let mut b = BTreeVec::<i32, 10, { usize::MAX / 3 }>::new();
+    // }
 }

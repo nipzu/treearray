@@ -65,7 +65,7 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
         self.node.is_full()
     }
 
-    pub unsafe fn insert_fitting(&mut self, index: usize, value: T) {
+    pub unsafe fn insert_fitting_extending(&mut self, index: usize, value: T) {
         debug_assert!(self.node.len() < C);
         debug_assert!(index <= self.node.len());
         unsafe {
@@ -175,7 +175,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
         let (insert_index, child_index) = self.find_insert_index(index);
         self.children_mut()[insert_index]
             .as_mut()
-            .and_then(|n| n.insert(child_index, value).map(|n| (n, insert_index)))
+            .and_then(|n| n.insert(child_index, value).map(|n| (n, insert_index + 1)))
     }
 
     pub unsafe fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
@@ -191,11 +191,18 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
         node: Node<T, B, C>,
     ) -> Node<T, B, C> {
         let mut new_box = Box::new([Self::NONE; B]);
+        let node_len = node.len();
 
         if index <= B / 2 {
             // insert to left
             let split_index = B / 2;
             let tail_len = B - split_index;
+
+            let new_self_len = self.children_mut()[..split_index]
+                .iter()
+                .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                .sum::<usize>();
+            let new_nodes_len = self.node.len() - node_len - new_self_len;
 
             self.children_mut()[split_index..].swap_with_slice(&mut new_box[..tail_len]);
 
@@ -207,8 +214,22 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                 );
             }
 
-            self.node.length = NonZeroUsize::new(split_index + 1).unwrap();
-            Node::from_children(tail_len, new_box)
+            self.node.length = NonZeroUsize::new(new_self_len + node_len).unwrap();
+            debug_assert_eq!(
+                new_self_len + node_len,
+                self.children()
+                    .iter()
+                    .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                    .sum()
+            );
+            debug_assert_eq!(
+                new_nodes_len + 1,
+                new_box
+                    .iter()
+                    .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                    .sum()
+            );
+            Node::from_children(new_nodes_len + 1, new_box)
         } else {
             // insert to right
             let split_index = B / 2 + 1;
@@ -216,12 +237,33 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
 
             let tail_start_len = index - split_index;
 
+            let new_self_len = self.children_mut()[..split_index]
+                .iter()
+                .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                .sum::<usize>();
+            let new_nodes_len = self.node.len() - node_len - new_self_len;
+
             self.children_mut()[split_index..index].swap_with_slice(&mut new_box[..tail_start_len]);
-            self.children_mut()[index..].swap_with_slice(&mut new_box[tail_start_len + 1..=tail_len]);
+            self.children_mut()[index..]
+                .swap_with_slice(&mut new_box[tail_start_len + 1..=tail_len]);
             new_box[tail_start_len] = Some(node);
 
-            self.node.length = NonZeroUsize::new(split_index).unwrap();
-            Node::from_children(tail_len + 1, new_box)
+            self.node.length = NonZeroUsize::new(new_self_len).unwrap();
+            debug_assert_eq!(
+                new_self_len,
+                self.children()
+                    .iter()
+                    .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                    .sum()
+            );
+            debug_assert_eq!(
+                new_nodes_len + node_len + 1,
+                new_box
+                    .iter()
+                    .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                    .sum()
+            );
+            Node::from_children(new_nodes_len + node_len + 1, new_box)
         }
     }
 }
