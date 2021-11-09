@@ -3,6 +3,8 @@
 
 extern crate alloc;
 
+use core::mem::size_of;
+
 pub mod iter;
 mod node;
 mod panics;
@@ -11,6 +13,10 @@ use iter::Iter;
 use node::{Node, NodeVariant, NodeVariantMut};
 use panics::panic_out_of_bounds;
 
+// CONST INVARIANTS: 
+// - `B >= 3` 
+// - `C % 2 == 1`, which implies `C >= 1`
+// - `C * size_of<T>() <= isize::MAX`
 pub struct BTreeVec<T, const B: usize, const C: usize> {
     // TODO: maybe a depth field?
     root_node: Option<Node<T, B, C>>,
@@ -23,10 +29,16 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         // Each internal node has to have at least two children
         // to be considered an internal node.
         assert!(B >= 3);
-        // If the root consist of 2 leaves of size `C/2`, 
+
+        // If the root consist of 2 leaves of size `C/2`,
         // then it is also considered to be a leaf.
         // Also takes care of the `C == 0` case.
         assert!(C % 2 == 1);
+
+        // `slice::from_raw_parts` requires that
+        // `len * size_of<T>() <= isize::MAX`
+        assert!(C.saturating_mul(size_of::<T>()) <= isize::MAX as usize);
+
         Self { root_node: None }
     }
 
@@ -108,8 +120,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[must_use]
     #[inline]
     pub fn last(&self) -> Option<&T> {
-        // If `self.len() == 0`, we wrap to `usize::MAX` which
-        // is definitely outside the range of an empty array.
+        // If `self.len() == 0`, the index wraps to `usize::MAX`
+        // which is definitely outside the range of an empty array.
         self.get(self.len().wrapping_sub(1))
     }
 
@@ -122,8 +134,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[must_use]
     #[inline]
     pub fn last_mut(&mut self) -> Option<&mut T> {
-        // If `self.len() == 0`, we wrap to `usize::MAX` which
-        // is definitely outside the range of an empty array.
+        // If `self.len() == 0`, the index wraps to `usize::MAX`
+        // which is definitely outside the range of an empty array.
         self.get_mut(self.len().wrapping_sub(1))
     }
 
@@ -158,13 +170,14 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         }
     }
 
-    pub fn iter(&self) -> Iter<T, B, C> {
+    #[must_use]
+    pub const fn iter(&self) -> Iter<T, B, C> {
         Iter::new(self)
     }
 }
 
 // TODO: this could maybe be derived in the future
-// if we can check the const bounds at compile time
+// if const bounds can be checked at compile time
 impl<T, const B: usize, const C: usize> Default for BTreeVec<T, B, C> {
     fn default() -> Self {
         Self::new()

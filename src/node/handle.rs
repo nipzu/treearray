@@ -10,72 +10,131 @@ pub struct LeafHandle<'a, T, const B: usize, const C: usize> {
     node: &'a Node<T, B, C>,
 }
 
-pub struct LeafHandleMut<'a, T, const B: usize, const C: usize> {
-    node: &'a mut Node<T, B, C>,
-}
-
-pub struct InternalHandle<'a, T, const B: usize, const C: usize> {
-    node: &'a Node<T, B, C>,
-}
-
-pub struct InternalHandleMut<'a, T, const B: usize, const C: usize> {
-    node: &'a mut Node<T, B, C>,
-}
-
 impl<'a, T, const B: usize, const C: usize> LeafHandle<'a, T, B, C> {
+    /// # Safety:
+    ///
+    /// `node` must be a leaf node i.e. `node.len() <= C`.
     pub const unsafe fn new(node: &'a Node<T, B, C>) -> Self {
         debug_assert!(node.len() <= C);
         Self { node }
     }
 
+    const fn len(&self) -> usize {
+        self.node.len()
+    }
+
     pub fn values(&self) -> &'a [T] {
-        debug_assert!(self.node.len() <= C);
+        debug_assert!(self.len() <= C);
+        // TODO: feature(maybe_uninit_slice) https://github.com/rust-lang/rust/issues/63569
+        // MaybeUninit::slice_assume_init_ref(&self.node.inner.values[..self.len()])
+
         unsafe {
-            let values_ptr = self.node.inner.values.as_ptr().cast();
-            slice::from_raw_parts(values_ptr, self.node.len())
+            // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
+            // `Self::new`, so the `values` field of the `self.node.inner` union can be read.
+            let values_ptr = self.node.inner.values.as_ptr();
+            // SAFETY: According to the invariants of `Node`, at least `self.len()`
+            // values are guaranteed to be initialized and valid for use. The lifetime is the
+            // same as `self.node`'s and the slice is thus not going to be written to during 
+            // the lifetime. `self.len() * size_of::<T>()` is no greater than `isize::MAX` 
+            // by the const invariants of `BTreeVec`. 
+            slice::from_raw_parts(values_ptr.cast(), self.len())
         }
     }
+}
+
+impl<'a, T, const B: usize, const C: usize> InternalHandle<'a, T, B, C> {
+    /// # Safety:
+    ///
+    /// `node` must be a child node i.e. `node.len() > C`.
+    pub const unsafe fn new(node: &'a Node<T, B, C>) -> Self {
+        debug_assert!(node.len() > C);
+        Self { node }
+    }
+
+    pub fn children(&self) -> &'a [Option<Node<T, B, C>>; B] {
+        debug_assert!(self.node.len() > C);
+        // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
+        // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
+        unsafe { &self.node.inner.children }
+    }
+}
+
+pub struct LeafHandleMut<'a, T, const B: usize, const C: usize> {
+    node: &'a mut Node<T, B, C>,
 }
 
 impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
     const UNINIT: MaybeUninit<T> = MaybeUninit::uninit();
 
+    /// # Safety:
+    ///
+    /// `node` must be a leaf node i.e. `node.len() <= C`.
     pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
         debug_assert!(node.len() <= C);
         Self { node }
     }
 
+    const fn len(&self) -> usize {
+        self.node.len()
+    }
+
     pub fn values_mut(&mut self) -> &mut [T] {
-        debug_assert!(self.node.len() <= C);
+        debug_assert!(self.len() <= C);
         unsafe {
-            let values_ptr = (*self.node.inner.values).as_mut_ptr().cast::<T>();
-            slice::from_raw_parts_mut(values_ptr, self.node.len())
+            // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
+            // `Self::new`, so the `values` field of the `self.node.inner` union can be read.
+            let values_ptr = (*self.node.inner.values).as_mut_ptr();
+            // SAFETY: According to the invariants of `Node`, at least `self.len()`
+            // values are guaranteed to be initialized and valid for use. The lifetime is the
+            // same as `self`'s and the returned reference has thus unique access.
+            // `self.len() * size_of::<T>()` is no greater than `isize::MAX` 
+            // by the const invariants of `BTreeVec`. 
+            slice::from_raw_parts_mut(values_ptr.cast(), self.len())
         }
     }
 
     pub fn into_values_mut(self) -> &'a mut [T] {
-        debug_assert!(self.node.len() <= C);
+        debug_assert!(self.len() <= C);
         unsafe {
-            let values_ptr = (*self.node.inner.values).as_mut_ptr().cast::<T>();
-            slice::from_raw_parts_mut(values_ptr, self.node.len())
+            // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
+            // `Self::new`, so the `values` field of the `self.node.inner` union can be read.
+            let values_ptr = (*self.node.inner.values).as_mut_ptr();
+            // SAFETY: According to the invariants of `Node`, at least `self.len()`
+            // values are guaranteed to be initialized and valid for use. The lifetime is the
+            // same as `self.node`'s and the returned reference has thus unique access.
+            // `self.len() * size_of::<T>()` is no greater than `isize::MAX` 
+            // by the const invariants of `BTreeVec`. 
+            slice::from_raw_parts_mut(values_ptr.cast(), self.len())
         }
     }
 
-    pub fn is_full(&self) -> bool {
+    fn is_full(&self) -> bool {
         self.node.is_full()
     }
 
-    pub unsafe fn insert_fitting_extending(&mut self, index: usize, value: T) {
-        debug_assert!(self.node.len() < C);
-        debug_assert!(index <= self.node.len());
+    pub fn insert(&mut self, index: usize, value: T) -> Option<Node<T, B, C>> {
+        if self.is_full() {
+            return Some(self.split_and_insert_value(index, value));
+        }
+
+        unsafe { self.insert_fitting_extending(index, value) };
+        None
+    }
+
+    unsafe fn insert_fitting_extending(&mut self, index: usize, value: T) {
+        debug_assert!(self.len() < C);
+        debug_assert!(index <= self.len());
         unsafe {
             let index_ptr = (*self.node.inner.values).as_mut_ptr().add(index);
             ptr::copy(index_ptr, index_ptr.add(1), self.values_mut().len() - index);
             ptr::write(index_ptr, MaybeUninit::new(value));
+            self.node.length = NonZeroUsize::new(self.len() + 1).unwrap();
         }
     }
 
-    pub unsafe fn split_and_insert_value(&mut self, index: usize, value: T) -> Node<T, B, C> {
+    fn split_and_insert_value(&mut self, index: usize, value: T) -> Node<T, B, C> {
+        assert!(index <= self.len());
+
         let mut new_box = Box::new([Self::UNINIT; C]);
 
         if index <= C / 2 {
@@ -120,42 +179,51 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
     }
 }
 
-impl<'a, T, const B: usize, const C: usize> InternalHandle<'a, T, B, C> {
-    pub const unsafe fn new(node: &'a Node<T, B, C>) -> Self {
-        debug_assert!(node.len() > C);
-        Self { node }
-    }
+pub struct InternalHandle<'a, T, const B: usize, const C: usize> {
+    node: &'a Node<T, B, C>,
+}
 
-    pub fn children(&self) -> &'a [Option<Node<T, B, C>>; B] {
-        debug_assert!(self.node.len() > C);
-        unsafe { &self.node.inner.children }
-    }
+pub struct InternalHandleMut<'a, T, const B: usize, const C: usize> {
+    node: &'a mut Node<T, B, C>,
 }
 
 impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
     const NONE: Option<Node<T, B, C>> = None;
 
+    /// # Safety:
+    ///
+    /// `node` must be a child node i.e. `node.len() > C`.
     pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
         debug_assert!(node.len() > C);
         Self { node }
     }
 
-    pub fn is_full(&self) -> bool {
+    fn is_full(&self) -> bool {
         self.node.is_full()
     }
 
-    pub fn children(&self) -> &[Option<Node<T, B, C>>; B] {
-        debug_assert!(self.node.len() > C);
+    const fn len(&self) -> usize {
+        self.node.len()
+    }
+
+    fn children(&self) -> &[Option<Node<T, B, C>>; B] {
+        debug_assert!(self.len() > C);
+        // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
+        // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
         unsafe { &self.node.inner.children }
     }
 
     pub fn children_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
-        debug_assert!(self.node.len() > C);
+        debug_assert!(self.len() > C);
+        // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
+        // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
         unsafe { &mut self.node.inner.children }
     }
 
     pub fn into_children_mut(self) -> &'a mut [Option<Node<T, B, C>>; B] {
-        debug_assert!(self.node.len() > C);
+        debug_assert!(self.len() > C);
+        // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
+        // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
         unsafe { &mut self.node.inner.children }
     }
 
@@ -171,25 +239,33 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
         unreachable!();
     }
 
-    pub fn insert(&mut self, index: usize, value: T) -> Option<(Node<T, B, C>, usize)> {
+    pub fn insert(&mut self, index: usize, value: T) -> Option<Node<T, B, C>> {
         let (insert_index, child_index) = self.find_insert_index(index);
-        self.children_mut()[insert_index]
+
+        if let Some(new_child) = self.children_mut()[insert_index]
             .as_mut()
-            .and_then(|n| n.insert(child_index, value).map(|n| (n, insert_index + 1)))
+            .and_then(|n| n.insert(child_index, value))
+        {
+            unsafe {
+                if self.is_full() {
+                    return Some(self.split_and_insert_node(insert_index + 1, new_child));
+                }
+
+                self.insert_fitting(insert_index + 1, new_child);
+            }
+        }
+        self.node.length = NonZeroUsize::new(self.len() + 1).unwrap();
+        None
     }
 
-    pub unsafe fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
+    unsafe fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
         debug_assert!(!self.is_full());
         unsafe {
             slice_insert_forget_last(self.children_mut(), index, Some(node));
         }
     }
 
-    pub unsafe fn split_and_insert_node(
-        &mut self,
-        index: usize,
-        node: Node<T, B, C>,
-    ) -> Node<T, B, C> {
+    unsafe fn split_and_insert_node(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
         let mut new_box = Box::new([Self::NONE; B]);
         let node_len = node.len();
 
@@ -200,9 +276,9 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
 
             let new_self_len = self.children_mut()[..split_index]
                 .iter()
-                .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                .map(|n| n.as_ref().map_or(0, Node::len))
                 .sum::<usize>();
-            let new_nodes_len = self.node.len() - node_len - new_self_len;
+            let new_nodes_len = self.len() - node_len - new_self_len;
 
             self.children_mut()[split_index..].swap_with_slice(&mut new_box[..tail_len]);
 
@@ -219,14 +295,14 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                 new_self_len + node_len,
                 self.children()
                     .iter()
-                    .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                    .map(|n| n.as_ref().map_or(0, Node::len))
                     .sum()
             );
             debug_assert_eq!(
                 new_nodes_len + 1,
                 new_box
                     .iter()
-                    .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                    .map(|n| n.as_ref().map_or(0, Node::len))
                     .sum()
             );
             Node::from_children(new_nodes_len + 1, new_box)
@@ -239,9 +315,9 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
 
             let new_self_len = self.children_mut()[..split_index]
                 .iter()
-                .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                .map(|n| n.as_ref().map_or(0, Node::len))
                 .sum::<usize>();
-            let new_nodes_len = self.node.len() - node_len - new_self_len;
+            let new_nodes_len = self.len() - node_len - new_self_len;
 
             self.children_mut()[split_index..index].swap_with_slice(&mut new_box[..tail_start_len]);
             self.children_mut()[index..]
@@ -253,14 +329,14 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                 new_self_len,
                 self.children()
                     .iter()
-                    .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                    .map(|n| n.as_ref().map_or(0, Node::len))
                     .sum()
             );
             debug_assert_eq!(
                 new_nodes_len + node_len + 1,
                 new_box
                     .iter()
-                    .map(|n| n.as_ref().map(Node::len).unwrap_or(0))
+                    .map(|n| n.as_ref().map_or(0, Node::len))
                     .sum()
             );
             Node::from_children(new_nodes_len + node_len + 1, new_box)

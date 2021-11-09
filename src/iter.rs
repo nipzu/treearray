@@ -6,6 +6,7 @@ pub struct Iter<'a, T, const B: usize, const C: usize> {
 }
 
 impl<'a, T, const B: usize, const C: usize> Iter<'a, T, B, C> {
+    #[must_use]
     pub const fn new(v: &'a BTreeVec<T, B, C>) -> Self {
         Self { index: 0, v }
     }

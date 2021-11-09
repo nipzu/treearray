@@ -11,7 +11,7 @@ mod handle;
 use handle::{InternalHandle, InternalHandleMut, LeafHandle, LeafHandleMut};
 
 pub struct Node<T, const B: usize, const C: usize> {
-    // Invariant: `length` is the number of values that this node eventually has as children
+    // INVARIANT: `length` is the number of values that this node eventually has as children
     //
     // If `self.length <= C`, this node is a leaf node with
     // exactly `size` initialized values held in `self.inner.values`.
@@ -61,6 +61,9 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     fn from_children(length: usize, children: Box<[Option<Self>; B]>) -> Self {
+        assert!(length > C);
+
+        // SAFETY: `length > C`, so the `Node` is considered an internal node as it should be.
         Self {
             length: NonZeroUsize::new(length).unwrap(),
             inner: NodeInner {
@@ -80,8 +83,15 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         Self::from_children(length, Box::new(inner_children))
     }
 
+    /// # Safety
+    ///
+    /// The first `length` elements of `values` must be initialized and safe to use.
+    /// Note that this implies the condition `length <= C`.
     unsafe fn from_values(length: usize, values: Box<[MaybeUninit<T>; C]>) -> Self {
-        debug_assert!(length <= C);
+        assert!(length <= C);
+
+        // SAFETY: `length <= C`, so we return a leaf node
+        // which has the same safety invariants as this function
         Self {
             length: NonZeroUsize::new(length).unwrap(),
             inner: NodeInner {
@@ -93,6 +103,10 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     pub fn from_value(value: T) -> Self {
         let mut boxed_values = Box::new([Self::UNINIT; C]);
         boxed_values[0].write(value);
+
+        // SAFETY: the first value has been written to, so it is initialized.
+        // Since `1 <= C` by the const invariants of `BTreeVec`, the `Node` is considered
+        // a leaf node and the first value is initialized, satisfying `length = 1`.
         Self {
             length: NonZeroUsize::new(1).unwrap(),
             inner: NodeInner {
@@ -103,55 +117,35 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
     pub fn insert(&mut self, index: usize, value: T) -> Option<Self> {
         match self.variant_mut() {
-            NodeVariantMut::Internal { mut handle } => {
-                if let Some((new_child, insert_index)) = handle.insert(index, value) {
-                    unsafe {
-                        if handle.is_full() {
-                            return Some(handle.split_and_insert_node(insert_index, new_child));
-                        }
-
-                        handle.insert_fitting(insert_index, new_child);
-                    }
-                }
-                self.length = NonZeroUsize::new(self.len() + 1).unwrap();
-            }
-
-            NodeVariantMut::Leaf { mut handle } => unsafe {
-                if handle.is_full() {
-                    return Some(handle.split_and_insert_value(index, value));
-                }
-
-                handle.insert_fitting_extending(index, value);
-                self.length = NonZeroUsize::new(self.len() + 1).unwrap();
-            },
+            NodeVariantMut::Internal { mut handle } => handle.insert(index, value),
+            NodeVariantMut::Leaf { mut handle } => handle.insert(index, value),
         }
-        None
     }
 
     pub const fn variant(&self) -> NodeVariant<T, B, C> {
-        unsafe {
-            if self.len() <= C {
-                NodeVariant::Leaf {
-                    handle: LeafHandle::new(self),
-                }
-            } else {
-                NodeVariant::Internal {
-                    handle: InternalHandle::new(self),
-                }
+        if self.len() <= C {
+            NodeVariant::Leaf {
+                // SAFETY: the safety invariant `self.len() <= C` is satisfied.
+                handle: unsafe { LeafHandle::new(self) },
+            }
+        } else {
+            NodeVariant::Internal {
+                // SAFETY: the safety invariant `self.len() > C` is satisfied.
+                handle: unsafe { InternalHandle::new(self) },
             }
         }
     }
 
     pub fn variant_mut(&mut self) -> NodeVariantMut<T, B, C> {
-        unsafe {
-            if self.len() <= C {
-                NodeVariantMut::Leaf {
-                    handle: LeafHandleMut::new(self),
-                }
-            } else {
-                NodeVariantMut::Internal {
-                    handle: InternalHandleMut::new(self),
-                }
+        if self.len() <= C {
+            NodeVariantMut::Leaf {
+                // SAFETY: the safety invariant `self.len() <= C` is satisfied.
+                handle: unsafe { LeafHandleMut::new(self) },
+            }
+        } else {
+            NodeVariantMut::Internal {
+                // SAFETY: the safety invariant `self.len() > C` is satisfied.
+                handle: unsafe { InternalHandleMut::new(self) },
             }
         }
     }
@@ -159,16 +153,28 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
 impl<T, const B: usize, const C: usize> Drop for Node<T, B, C> {
     fn drop(&mut self) {
-        unsafe {
-            match self.variant_mut() {
-                NodeVariantMut::Leaf { mut handle } => {
-                    ptr::drop_in_place(handle.values_mut());
-                    ManuallyDrop::drop(&mut self.inner.values);
-                }
-                NodeVariantMut::Internal { .. } => {
-                    ManuallyDrop::drop(&mut self.inner.children);
-                }
-            }
+        match self.variant_mut() {
+            NodeVariantMut::Leaf { mut handle } => unsafe {
+                // Drop the values of a leaf node and deallocate afterwards.
+
+                // SAFETY: `values_mut` returns a properly aligned slice that is valid for both
+                // reads and writes. The contents of the slice are properly initialized values
+                // of type `T``and such be valid for dropping as such.
+                // This is a drop method which will be called at most once, which means that
+                // the values will also get dropped at most once.
+                ptr::drop_in_place(handle.values_mut());
+
+                // SAFETY: This node is a leaf node, so`self.inner.values` can be accessed.
+                // This is a drop method which will be called at most once, which means that
+                // `self.inner.values` will also get dropped at most once.
+                ManuallyDrop::drop(&mut self.inner.values);
+            },
+            NodeVariantMut::Internal { .. } => unsafe {
+                // SAFETY: This node is a leaf node, so`self.inner.children` can be accessed.
+                // This is a drop method which will be called at most once, which means that
+                // `self.inner.children` will also get dropped at most once.
+                ManuallyDrop::drop(&mut self.inner.children);
+            },
         }
     }
 }
@@ -181,21 +187,18 @@ mod test {
     fn test_node_size() {
         use core::mem::size_of;
 
-        assert_eq!(size_of::<Node<i32, 10, 32>>(), 2 * size_of::<usize>());
+        assert_eq!(size_of::<Node<i32, 10, 37>>(), 2 * size_of::<usize>());
         assert_eq!(size_of::<Node<i128, 3, 3>>(), 2 * size_of::<usize>());
-        assert_eq!(size_of::<Node<i64, 0, 0>>(), 2 * size_of::<usize>());
+        assert_eq!(size_of::<Node<(), 3, 3>>(), 2 * size_of::<usize>());
 
         assert_eq!(
-            size_of::<Option<Node<i32, 10, 32>>>(),
+            size_of::<Option<Node<i32, 10, 37>>>(),
             2 * size_of::<usize>()
         );
         assert_eq!(
             size_of::<Option<Node<i128, 3, 3>>>(),
             2 * size_of::<usize>()
         );
-        assert_eq!(
-            size_of::<Option<Node<u128, 0, 0>>>(),
-            2 * size_of::<usize>()
-        );
+        assert_eq!(size_of::<Option<Node<(), 3, 3>>>(), 2 * size_of::<usize>());
     }
 }
