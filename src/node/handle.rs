@@ -34,9 +34,9 @@ impl<'a, T, const B: usize, const C: usize> LeafHandle<'a, T, B, C> {
             let values_ptr = self.node.inner.values.as_ptr();
             // SAFETY: According to the invariants of `Node`, at least `self.len()`
             // values are guaranteed to be initialized and valid for use. The lifetime is the
-            // same as `self.node`'s and the slice is thus not going to be written to during 
-            // the lifetime. `self.len() * size_of::<T>()` is no greater than `isize::MAX` 
-            // by the const invariants of `BTreeVec`. 
+            // same as `self.node`'s and the slice is thus not going to be written to during
+            // the lifetime. `self.len() * size_of::<T>()` is no greater than `isize::MAX`
+            // by the const invariants of `BTreeVec`.
             slice::from_raw_parts(values_ptr.cast(), self.len())
         }
     }
@@ -87,8 +87,8 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
             // SAFETY: According to the invariants of `Node`, at least `self.len()`
             // values are guaranteed to be initialized and valid for use. The lifetime is the
             // same as `self`'s and the returned reference has thus unique access.
-            // `self.len() * size_of::<T>()` is no greater than `isize::MAX` 
-            // by the const invariants of `BTreeVec`. 
+            // `self.len() * size_of::<T>()` is no greater than `isize::MAX`
+            // by the const invariants of `BTreeVec`.
             slice::from_raw_parts_mut(values_ptr.cast(), self.len())
         }
     }
@@ -102,8 +102,8 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
             // SAFETY: According to the invariants of `Node`, at least `self.len()`
             // values are guaranteed to be initialized and valid for use. The lifetime is the
             // same as `self.node`'s and the returned reference has thus unique access.
-            // `self.len() * size_of::<T>()` is no greater than `isize::MAX` 
-            // by the const invariants of `BTreeVec`. 
+            // `self.len() * size_of::<T>()` is no greater than `isize::MAX`
+            // by the const invariants of `BTreeVec`.
             slice::from_raw_parts_mut(values_ptr.cast(), self.len())
         }
     }

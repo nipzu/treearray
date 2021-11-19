@@ -3,6 +3,7 @@
 
 extern crate alloc;
 
+use core::fmt;
 use core::mem::size_of;
 
 pub mod iter;
@@ -13,8 +14,8 @@ use iter::Iter;
 use node::{Node, NodeVariant, NodeVariantMut};
 use panics::panic_out_of_bounds;
 
-// CONST INVARIANTS: 
-// - `B >= 3` 
+// CONST INVARIANTS:
+// - `B >= 3`
 // - `C % 2 == 1`, which implies `C >= 1`
 // - `C * size_of<T>() <= isize::MAX`
 pub struct BTreeVec<T, const B: usize, const C: usize> {
@@ -170,6 +171,16 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         }
     }
 
+    pub fn remove(&mut self, index: usize) -> T {
+        if index >= self.len() {
+            panic_out_of_bounds(index, self.len());
+        }
+        
+        let mut root = self.root_node.as_mut().unwrap();
+
+        todo!()
+    }
+
     #[must_use]
     pub const fn iter(&self) -> Iter<T, B, C> {
         Iter::new(self)
@@ -181,6 +192,13 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 impl<T, const B: usize, const C: usize> Default for BTreeVec<T, B, C> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// TODO: test this
+impl<T: fmt::Debug, const B: usize, const C: usize> fmt::Debug for BTreeVec<T, B, C> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_list().entries(self.iter()).finish()
     }
 }
 
@@ -225,6 +243,36 @@ mod tests {
             v.insert(index, x);
             b_3_3.insert(index, x);
             b_5_1.insert(index, x);
+            assert_eq!(v.len(), b_3_3.len());
+            assert_eq!(v.len(), b_5_1.len());
+        }
+
+        assert_eq!(v, b_3_3.iter().copied().collect::<Vec<_>>());
+        assert_eq!(v, b_5_1.iter().copied().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn test_random_removals() {
+        use alloc::vec::Vec;
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+
+        let mut v = Vec::new();
+        let mut b_3_3 = BTreeVec::<i32, 3, 3>::new();
+        let mut b_5_1 = BTreeVec::<i32, 5, 1>::new();
+
+        for x in 0..1000 {
+            v.push(x);
+            b_3_3.push_back(x);
+            b_5_1.push_back(x);
+        }
+
+        while !v.is_empty() {
+            let index = rng.gen_range(0..=v.len());
+            v.remove(index);
+            b_3_3.remove(index);
+            b_5_1.remove(index);
             assert_eq!(v.len(), b_3_3.len());
             assert_eq!(v.len(), b_5_1.len());
         }
