@@ -42,23 +42,6 @@ impl<'a, T, const B: usize, const C: usize> LeafHandle<'a, T, B, C> {
     }
 }
 
-impl<'a, T, const B: usize, const C: usize> InternalHandle<'a, T, B, C> {
-    /// # Safety:
-    ///
-    /// `node` must be a child node i.e. `node.len() > C`.
-    pub const unsafe fn new(node: &'a Node<T, B, C>) -> Self {
-        debug_assert!(node.len() > C);
-        Self { node }
-    }
-
-    pub fn children(&self) -> &'a [Option<Node<T, B, C>>; B] {
-        debug_assert!(self.node.len() > C);
-        // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
-        // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
-        unsafe { &self.node.inner.children }
-    }
-}
-
 pub struct LeafHandleMut<'a, T, const B: usize, const C: usize> {
     node: &'a mut Node<T, B, C>,
 }
@@ -177,10 +160,39 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
             }
         }
     }
+
+    pub unsafe fn remove_no_underflow(&mut self, index: usize) -> T {
+        debug_assert!(index < self.len());
+
+        unsafe {
+            let index_ptr = self.values_mut().as_mut_ptr().add(index);
+            let ret = index_ptr.read();
+            ptr::copy(index_ptr.add(1), index_ptr, self.len() - index - 1);
+            self.node.length = NonZeroUsize::new(self.len() - 1).unwrap(); // aint gonna work
+            ret
+        }
+    }
 }
 
 pub struct InternalHandle<'a, T, const B: usize, const C: usize> {
     node: &'a Node<T, B, C>,
+}
+
+impl<'a, T, const B: usize, const C: usize> InternalHandle<'a, T, B, C> {
+    /// # Safety:
+    ///
+    /// `node` must be a child node i.e. `node.len() > C`.
+    pub const unsafe fn new(node: &'a Node<T, B, C>) -> Self {
+        debug_assert!(C < node.len());
+        Self { node }
+    }
+
+    pub fn children(&self) -> &'a [Option<Node<T, B, C>>; B] {
+        debug_assert!(C < self.node.len());
+        // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
+        // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
+        unsafe { &self.node.inner.children }
+    }
 }
 
 pub struct InternalHandleMut<'a, T, const B: usize, const C: usize> {
@@ -194,7 +206,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
     pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
-        debug_assert!(node.len() > C);
+        debug_assert!(C < node.len());
         Self { node }
     }
 
@@ -207,21 +219,21 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
     }
 
     fn children(&self) -> &[Option<Node<T, B, C>>; B] {
-        debug_assert!(self.len() > C);
+        debug_assert!(C < self.len());
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
         unsafe { &self.node.inner.children }
     }
 
     pub fn children_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
-        debug_assert!(self.len() > C);
+        debug_assert!(C < self.len());
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
         unsafe { &mut self.node.inner.children }
     }
 
     pub fn into_children_mut(self) -> &'a mut [Option<Node<T, B, C>>; B] {
-        debug_assert!(self.len() > C);
+        debug_assert!(C < self.len());
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
         unsafe { &mut self.node.inner.children }
@@ -254,6 +266,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                 self.insert_fitting(insert_index + 1, new_child);
             }
         }
+        
         self.node.length = NonZeroUsize::new(self.len() + 1).unwrap();
         None
     }
@@ -312,6 +325,10 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
             debug_assert_eq!(new_nodes_len + node_len + 1, sum_lens(new_box.as_ref()));
             Node::from_children(new_nodes_len + node_len + 1, new_box)
         }
+    }
+
+    pub fn remove(&mut self, index: usize) -> T {
+        todo!()
     }
 }
 

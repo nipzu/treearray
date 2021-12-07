@@ -122,6 +122,13 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         }
     }
 
+    pub unsafe fn remove(&mut self, index: usize) -> T {
+        match self.variant_mut() {
+            NodeVariantMut::Internal { mut handle } => handle.remove(index),
+            NodeVariantMut::Leaf { mut handle } => unsafe { panic!() },
+        }
+    }
+
     pub const fn variant(&self) -> NodeVariant<T, B, C> {
         if self.len() <= C {
             NodeVariant::Leaf {

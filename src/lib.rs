@@ -14,6 +14,10 @@ use iter::Iter;
 use node::{Node, NodeVariant, NodeVariantMut};
 use panics::panic_out_of_bounds;
 
+pub fn foo(x: &mut BTreeVec<i32, 50, 101>, index: usize, value: i32) {
+    x.insert(index, value);
+} 
+
 // CONST INVARIANTS:
 // - `B >= 3`
 // - `C % 2 == 1`, which implies `C >= 1`
@@ -36,9 +40,13 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         // Also takes care of the `C == 0` case.
         assert!(C % 2 == 1);
 
-        // `slice::from_raw_parts` requires that
-        // `len * size_of<T>() <= isize::MAX`
-        assert!(C.saturating_mul(size_of::<T>()) <= isize::MAX as usize);
+        #[allow(clippy::checked_conversions)]
+        {
+            // `slice::from_raw_parts` requires that
+            // `len * size_of<T>() <= isize::MAX`
+            let arr_len = C.saturating_mul(size_of::<T>());
+            assert!(arr_len <= isize::MAX as usize);
+        }
 
         Self { root_node: None }
     }
@@ -213,7 +221,7 @@ mod tests {
 
     #[test]
     fn test_insert_front_back() {
-        let mut b = BTreeVec::<_, 4, 5>::new();
+        let mut b = BTreeVec::<i32, 4, 5>::new();
         for x in 0..200 {
             b.push_back(x);
         }
