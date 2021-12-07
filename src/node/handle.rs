@@ -274,10 +274,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
             let split_index = B / 2;
             let tail_len = B - split_index;
 
-            let new_self_len = self.children_mut()[..split_index]
-                .iter()
-                .map(|n| n.as_ref().map_or(0, Node::len))
-                .sum::<usize>();
+            let new_self_len = sum_lens(&self.children_mut()[..split_index]);
             let new_nodes_len = self.len() - node_len - new_self_len;
 
             self.children_mut()[split_index..].swap_with_slice(&mut new_box[..tail_len]);
@@ -291,20 +288,8 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
             }
 
             self.node.length = NonZeroUsize::new(new_self_len + node_len).unwrap();
-            debug_assert_eq!(
-                new_self_len + node_len,
-                self.children()
-                    .iter()
-                    .map(|n| n.as_ref().map_or(0, Node::len))
-                    .sum()
-            );
-            debug_assert_eq!(
-                new_nodes_len + 1,
-                new_box
-                    .iter()
-                    .map(|n| n.as_ref().map_or(0, Node::len))
-                    .sum()
-            );
+            debug_assert_eq!(new_self_len + node_len, sum_lens(self.children()));
+            debug_assert_eq!(new_nodes_len + 1, sum_lens(new_box.as_ref()));
             Node::from_children(new_nodes_len + 1, new_box)
         } else {
             // insert to right
@@ -313,10 +298,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
 
             let tail_start_len = index - split_index;
 
-            let new_self_len = self.children_mut()[..split_index]
-                .iter()
-                .map(|n| n.as_ref().map_or(0, Node::len))
-                .sum::<usize>();
+            let new_self_len = sum_lens(&self.children_mut()[..split_index]);
             let new_nodes_len = self.len() - node_len - new_self_len;
 
             self.children_mut()[split_index..index].swap_with_slice(&mut new_box[..tail_start_len]);
@@ -324,21 +306,10 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                 .swap_with_slice(&mut new_box[tail_start_len + 1..=tail_len]);
             new_box[tail_start_len] = Some(node);
 
+            assert!(new_self_len > C);
             self.node.length = NonZeroUsize::new(new_self_len).unwrap();
-            debug_assert_eq!(
-                new_self_len,
-                self.children()
-                    .iter()
-                    .map(|n| n.as_ref().map_or(0, Node::len))
-                    .sum()
-            );
-            debug_assert_eq!(
-                new_nodes_len + node_len + 1,
-                new_box
-                    .iter()
-                    .map(|n| n.as_ref().map_or(0, Node::len))
-                    .sum()
-            );
+            debug_assert_eq!(new_self_len, sum_lens(self.children()));
+            debug_assert_eq!(new_nodes_len + node_len + 1, sum_lens(new_box.as_ref()));
             Node::from_children(new_nodes_len + node_len + 1, new_box)
         }
     }
@@ -352,4 +323,11 @@ unsafe fn slice_insert_forget_last<T>(slice: &mut [T], index: usize, value: T) {
         ptr::copy(index_ptr, index_ptr.add(1), slice.len() - index - 1);
         ptr::write(index_ptr, value);
     }
+}
+
+fn sum_lens<T, const B: usize, const C: usize>(children: &[Option<Node<T, B, C>>]) -> usize {
+    children
+        .iter()
+        .map(|n| n.as_ref().map_or(0, Node::len))
+        .sum()
 }

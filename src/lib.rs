@@ -175,7 +175,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         if index >= self.len() {
             panic_out_of_bounds(index, self.len());
         }
-        
+
         let mut root = self.root_node.as_mut().unwrap();
 
         todo!()
