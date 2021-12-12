@@ -16,7 +16,7 @@ use panics::panic_out_of_bounds;
 
 pub fn foo(x: &mut BTreeVec<i32, 50, 101>, index: usize, value: i32) {
     x.insert(index, value);
-} 
+}
 
 // CONST INVARIANTS:
 // - `B >= 3`

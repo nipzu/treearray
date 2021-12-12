@@ -55,7 +55,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
     fn is_full(&self) -> bool {
         match self.variant() {
-            NodeVariant::Leaf { handle } => handle.values().len() == C,
+            NodeVariant::Leaf { handle } => handle.values().len() == C, // TODO >= for compiler hints?
             NodeVariant::Internal { handle } => matches!(handle.children().last(), Some(&Some(_))),
         }
     }
