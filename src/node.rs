@@ -6,7 +6,7 @@ use alloc::boxed::Box;
 
 use crate::panics::panic_length_overflow;
 
-mod handle;
+pub mod handle;
 
 use handle::{InternalHandle, InternalHandleMut, LeafHandle, LeafHandleMut};
 
@@ -15,6 +15,7 @@ pub struct Node<T, const B: usize, const C: usize> {
     //
     // If `self.length <= C`, this node is a leaf node with
     // exactly `size` initialized values held in `self.inner.values`.
+    // TODO: > C/2 when not root
     //
     // If `self.length > C`, this node is an internal node. Under normal
     // conditions, there should be some n such that the first n children
@@ -119,13 +120,6 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         match self.variant_mut() {
             NodeVariantMut::Internal { mut handle } => handle.insert(index, value),
             NodeVariantMut::Leaf { mut handle } => handle.insert(index, value),
-        }
-    }
-
-    pub unsafe fn remove(&mut self, index: usize) -> T {
-        match self.variant_mut() {
-            NodeVariantMut::Internal { mut handle } => handle.remove(index),
-            NodeVariantMut::Leaf { mut handle } => unsafe { panic!() },
         }
     }
 

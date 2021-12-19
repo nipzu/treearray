@@ -1,28 +1,33 @@
 #![no_std]
-#![warn(unsafe_op_in_unsafe_fn)]
+#![deny(unsafe_op_in_unsafe_fn)]
+// TODO #![deny(missing_docs)]
 
 extern crate alloc;
 
 use core::fmt;
 use core::mem::size_of;
+use core::num::NonZeroUsize;
 
 pub mod iter;
 mod node;
 mod panics;
+mod utils;
 
 use iter::Iter;
+use node::handle::RemoveResult;
 use node::{Node, NodeVariant, NodeVariantMut};
 use panics::panic_out_of_bounds;
+use utils::slice_shift_left;
 
-pub fn foo(x: &mut BTreeVec<i32, 50, 101>, index: usize, value: i32) {
-    x.insert(index, value);
+pub fn foo(x: &mut BTreeVec<i32, 50, 101>, index: usize) -> Option<&i32> {
+    x.get(index)
 }
 
 // CONST INVARIANTS:
 // - `B >= 3`
 // - `C % 2 == 1`, which implies `C >= 1`
 // - `C * size_of<T>() <= isize::MAX`
-pub struct BTreeVec<T, const B: usize, const C: usize> {
+pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
     // TODO: maybe a depth field?
     root_node: Option<Node<T, B, C>>,
 }
@@ -184,9 +189,30 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             panic_out_of_bounds(index, self.len());
         }
 
-        let mut root = self.root_node.as_mut().unwrap();
+        match self.root_node.as_mut().unwrap().variant_mut() {
+            NodeVariantMut::Internal { mut handle } => match handle.remove(index) {
+                RemoveResult::Ok(val) => val,
+                RemoveResult::WithVacancy(val, child_index) => {
+                    slice_shift_left(&mut handle.children_mut()[child_index..], None);
 
-        todo!()
+                    if handle.children()[0].as_ref().map(Node::len) == Some(handle.len()) {
+                        self.root_node = handle.into_children_mut()[0].take();
+                    }
+
+                    val
+                }
+            },
+            NodeVariantMut::Leaf { mut handle } => {
+                let ret = unsafe { handle.remove_no_underflow(index) };
+
+                match NonZeroUsize::new(handle.len() - 1) {
+                    Some(new_len) => unsafe { handle.set_length(new_len) },
+                    None => self.root_node = None,
+                }
+
+                ret
+            }
+        }
     }
 
     #[must_use]
@@ -277,7 +303,7 @@ mod tests {
         }
 
         while !v.is_empty() {
-            let index = rng.gen_range(0..=v.len());
+            let index = rng.gen_range(0..v.len());
             v.remove(index);
             b_3_3.remove(index);
             b_5_1.remove(index);
