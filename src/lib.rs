@@ -190,13 +190,18 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         }
 
         match self.root_node.as_mut().unwrap().variant_mut() {
-            NodeVariantMut::Internal { mut handle } => match handle.remove(index) {
-                RemoveResult::Ok(val) => val,
+            NodeVariantMut::Internal { mut handle } => match unsafe { handle.remove(index) } {
+                RemoveResult::Ok(val) => {
+                    unsafe { handle.set_len(handle.len() - 1) };
+                    val
+                }
                 RemoveResult::WithVacancy(val, child_index) => {
                     slice_shift_left(&mut handle.children_mut()[child_index..], None);
 
                     if handle.children()[0].as_ref().map(Node::len) == Some(handle.len()) {
                         self.root_node = handle.into_children_mut()[0].take();
+                    } else {
+                        unsafe { handle.set_len(handle.len() - 1) };
                     }
 
                     val

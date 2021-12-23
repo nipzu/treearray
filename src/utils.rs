@@ -19,3 +19,14 @@ pub fn slice_shift_left<T>(slice: &mut [T], new_end: T) -> T {
         first
     }
 }
+
+pub fn slice_shift_right<T>(slice: &mut [T], new_start: T) -> T {
+    assert!(!slice.is_empty());
+    unsafe {
+        let slice_ptr = slice.as_mut_ptr();
+        let last = ptr::read(slice_ptr.add(slice.len() - 1));
+        ptr::copy(slice_ptr, slice_ptr.add(1), slice.len() - 1);
+        ptr::write(slice_ptr, new_start);
+        last
+    }
+}
