@@ -190,33 +190,32 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         }
 
         match self.root_node.as_mut().unwrap().variant_mut() {
-            NodeVariantMut::Internal { mut handle } => match unsafe { handle.remove(index) } {
-                RemoveResult::Ok(val) => {
-                    unsafe { handle.set_len(handle.len() - 1) };
-                    val
-                }
-                RemoveResult::WithVacancy(val, child_index) => {
-                    slice_shift_left(&mut handle.children_mut()[child_index..], None);
-
-                    if handle.children()[0].as_ref().map(Node::len) == Some(handle.len()) {
-                        self.root_node = handle.into_children_mut()[0].take();
-                    } else {
-                        unsafe { handle.set_len(handle.len() - 1) };
+            NodeVariantMut::Internal { mut handle } => {
+                if handle.len() == C + 1 {
+                    let [fst, snd]: &mut [Option<Node<T, B, C>>; 2] =
+                        (&mut handle.children_mut()[..2]).try_into().unwrap();
+                } else {
+                    match unsafe { handle.remove(index) } {
+                        RemoveResult::Ok(val) => val,
+                        RemoveResult::WithVacancy(val, child_index) => {
+                            slice_shift_left(&mut handle.children_mut()[child_index..], None);
+                            val
+                        }
                     }
-
-                    val
                 }
             },
-            NodeVariantMut::Leaf { mut handle } => {
-                let ret = unsafe { handle.remove_no_underflow(index) };
-
-                match NonZeroUsize::new(handle.len() - 1) {
-                    Some(new_len) => unsafe { handle.set_length(new_len) },
-                    None => self.root_node = None,
+            NodeVariantMut::Leaf { mut handle } => match NonZeroUsize::new(handle.len() - 1) {
+                Some(new_len) => unsafe {
+                    handle.set_length(new_len);
+                    handle.remove_no_underflow(index)
+                },
+                None => {
+                    let ret = unsafe { handle.into_values_mut().as_ptr().read() };
+                    let old_root = self.root_node.take().unwrap();
+                    old_root.free();
+                    ret
                 }
-
-                ret
-            }
+            },
         }
     }
 

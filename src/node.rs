@@ -1,4 +1,4 @@
-use core::mem::{ManuallyDrop, MaybeUninit};
+use core::mem::{self, ManuallyDrop, MaybeUninit};
 use core::num::NonZeroUsize;
 use core::ptr;
 
@@ -52,6 +52,18 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     #[inline]
     pub const fn len(&self) -> usize {
         self.length.get()
+    }
+
+    pub fn free(mut self) {
+        match self.variant_mut() {
+            NodeVariantMut::Leaf { .. } => unsafe {
+                ManuallyDrop::drop(&mut self.inner.values);
+            },
+            NodeVariantMut::Internal { .. } => unsafe {
+                ManuallyDrop::drop(&mut self.inner.children);
+            },
+        }
+        mem::forget(self);
     }
 
     fn is_full(&self) -> bool {

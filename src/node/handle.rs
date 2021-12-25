@@ -372,7 +372,12 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
         {
             NodeVariantMut::Internal { mut handle } => {
                 match unsafe { handle.remove(child_index) } {
-                    RemoveResult::Ok(val) => RemoveResult::Ok(val),
+                    RemoveResult::Ok(val) => {
+                        unsafe {
+                            self.set_len(self.len() - 1);
+                        }
+                        RemoveResult::Ok(val)
+                    }
                     RemoveResult::WithVacancy(val, vacant_index) => {
                         slice_shift_left(&mut handle.children_mut()[vacant_index..], None);
 
@@ -417,6 +422,9 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
             NodeVariantMut::Leaf { mut handle } => {
                 if handle.len() - 1 > C / 2 {
                     let val = unsafe { handle.remove_no_underflow(child_index) };
+                    unsafe {
+                        handle.set_len(handle.len() - 1);
+                    }
                     return RemoveResult::Ok(val);
                 }
 
@@ -538,7 +546,7 @@ fn combine_internals<T, const B: usize, const C: usize>(
     if fst_underfull && snd_almost_underfull {
         fst.children_mut()[B / 2..].swap_with_slice(&mut snd.children_mut()[..=B / 2]);
         unsafe {
-            fst.set_len(fst.len() + snd.len() - 1);
+            fst.set_len(fst.len() + snd.len());
         }
         *opt_snd = None;
         debug_assert_eq!(fst.len(), sum_lens(fst.children()));
@@ -548,7 +556,7 @@ fn combine_internals<T, const B: usize, const C: usize>(
     if fst_almost_underfull && snd_underfull {
         fst.children_mut()[B / 2 + 1..].swap_with_slice(&mut snd.children_mut()[..B / 2]);
         unsafe {
-            fst.set_len(fst.len() + snd.len() - 1);
+            fst.set_len(fst.len() + snd.len());
         }
         *opt_snd = None;
         debug_assert_eq!(fst.len(), sum_lens(fst.children()));
@@ -559,7 +567,7 @@ fn combine_internals<T, const B: usize, const C: usize>(
         let x = slice_shift_left(snd.children_mut(), None).unwrap();
         unsafe {
             snd.set_len(snd.len() - x.len());
-            fst.set_len(fst.len() + x.len() - 1);
+            fst.set_len(fst.len() + x.len());
         }
         fst.children_mut()[B / 2] = Some(x);
         debug_assert_eq!(fst.len(), sum_lens(fst.children()));
@@ -575,7 +583,7 @@ fn combine_internals<T, const B: usize, const C: usize>(
 
                 unsafe {
                     fst.set_len(fst.len() - x.len());
-                    snd.set_len(snd.len() + x.len() - 1);
+                    snd.set_len(snd.len() + x.len());
                 }
 
                 slice_shift_right(snd.children_mut(), Some(x));
