@@ -245,6 +245,9 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
                         RemoveResult::Ok(val) => val,
                         RemoveResult::WithVacancy(val, child_index) => {
                             slice_shift_left(&mut handle.children_mut()[child_index..], None);
+                            if handle.children()[1].is_none() {
+                                self.root_node = handle.children_mut()[0].take();
+                            }
                             val
                         }
                     }
@@ -298,16 +301,16 @@ mod tests {
 
     #[test]
     fn test_insert_front_back() {
-        let mut b = BTreeVec::<i32, 4, 5>::new();
-        for x in 0..200 {
+        let mut b = BTreeVec::<i32, 6, 5>::new();
+        for x in 0..500 {
             b.push_back(x);
         }
 
-        for x in (-200..0).rev() {
+        for x in (-500..0).rev() {
             b.push_front(x)
         }
 
-        for (a, b) in b.iter().zip(-200..) {
+        for (a, b) in b.iter().zip(-500..) {
             assert_eq!(*a, b);
         }
     }
@@ -320,19 +323,19 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_3_3 = BTreeVec::<i32, 3, 3>::new();
+        let mut b_7_3 = BTreeVec::<i32, 7, 3>::new();
         let mut b_5_1 = BTreeVec::<i32, 5, 1>::new();
 
         for x in 0..1000 {
             let index = rng.gen_range(0..=v.len());
             v.insert(index, x);
-            b_3_3.insert(index, x);
+            b_7_3.insert(index, x);
             b_5_1.insert(index, x);
-            assert_eq!(v.len(), b_3_3.len());
+            assert_eq!(v.len(), b_7_3.len());
             assert_eq!(v.len(), b_5_1.len());
         }
 
-        assert_eq!(v, b_3_3.iter().copied().collect::<Vec<_>>());
+        assert_eq!(v, b_7_3.iter().copied().collect::<Vec<_>>());
         assert_eq!(v, b_5_1.iter().copied().collect::<Vec<_>>());
     }
 
@@ -355,11 +358,12 @@ mod tests {
 
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len());
-            v.remove(index);
+            let v_rem = v.remove(index);
             // b_3_3.remove(index);
-            b_5_1.remove(index);
+            let b_5_1_rem = b_5_1.remove(index);
             // assert_eq!(v.len(), b_3_3.len());
             assert_eq!(v.len(), b_5_1.len());
+            assert_eq!(v_rem, b_5_1_rem);
         }
 
         // assert_eq!(v, b_3_3.iter().copied().collect::<Vec<_>>());

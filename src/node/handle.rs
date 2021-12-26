@@ -137,7 +137,7 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
         assert!(index <= self.len());
         unsafe {
             let index_ptr = (*self.node.inner.values).as_mut_ptr().add(index);
-            ptr::copy(index_ptr, index_ptr.add(1), self.values_mut().len() - index);
+            ptr::copy(index_ptr, index_ptr.add(1), self.len() - index);
             ptr::write(index_ptr, MaybeUninit::new(value));
             self.set_len(self.len() + 1);
         }
@@ -154,8 +154,9 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
             let tail_len = C - split_index;
 
             unsafe {
-                let index_ptr = self.values_mut().as_mut_ptr().add(index);
-                let split_ptr = self.values_mut().as_mut_ptr().add(split_index);
+                let values_ptr = self.values_mut().as_mut_ptr();
+                let index_ptr = values_ptr.add(index);
+                let split_ptr = values_ptr.add(split_index);
                 let box_ptr = new_box.as_mut_ptr();
                 ptr::copy_nonoverlapping(split_ptr, box_ptr.cast::<T>(), tail_len);
                 ptr::copy(index_ptr, index_ptr.add(1), split_index - index);
@@ -387,23 +388,21 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                         let ret;
                         if handle.children()[B / 2].is_none() {
                             if self_index > 0 {
-                                let [ref mut fst, ref mut snd]: &mut [Option<Node<T, B, C>>; 2] = (&mut self
-                                    .children_mut()[self_index - 1..=self_index])
-                                    .try_into()
-                                    .unwrap();
+                                let [ref mut fst, ref mut snd]: &mut [Option<Node<T, B, C>>; 2] =
+                                    (&mut self.children_mut()[self_index - 1..=self_index])
+                                        .try_into()
+                                        .unwrap();
                                 ret = match unsafe { combine_internals(fst, snd) } {
                                     CombineResult::Ok => RemoveResult::Ok(val),
                                     CombineResult::Merged => {
                                         assert!(self.children()[self_index].is_none());
-                                        assert!(self.children()[self_index-1].is_some());
+                                        assert!(self.children()[self_index - 1].is_some());
                                         RemoveResult::WithVacancy(val, self_index)
                                     }
                                 };
                             } else {
-                                let [ref mut fst, ref mut snd]: &mut [Option<Node<T, B, C>>; 2] = (&mut self
-                                    .children_mut()[0..=1])
-                                    .try_into()
-                                    .unwrap();
+                                let [ref mut fst, ref mut snd]: &mut [Option<Node<T, B, C>>; 2] =
+                                    (&mut self.children_mut()[0..=1]).try_into().unwrap();
                                 ret = match unsafe { combine_internals(fst, snd) } {
                                     CombineResult::Ok => RemoveResult::Ok(val),
                                     CombineResult::Merged => {
@@ -482,25 +481,29 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                         }
                     }
                 } else {
-                    let [cur, next]: &mut [Option<Node<T, B, C>>; 2] = (&mut self.children_mut()
-                        [self_index..=self_index + 1])
-                        .try_into()
-                        .unwrap();
+                    let [cur, next]: &mut [Option<Node<T, B, C>>; 2] =
+                        (&mut self.children_mut()[0..=1]).try_into().unwrap();
 
                     if next.as_ref().unwrap().len() == C / 2 + 1 {
                         let dst = cur.as_mut().unwrap();
-                        let dst_ptr = unsafe { (*dst.inner.values).as_mut_ptr().add(C / 2 + 1) };
+                        let dst_ptr = unsafe { (*dst.inner.values).as_mut_ptr() };
                         let mut src = next.take().unwrap();
                         let src_ptr = unsafe { src.inner.values.as_ptr() };
 
-                        let val = unsafe { ptr::read(src_ptr.add(child_index)).assume_init() };
+                        let val = unsafe { ptr::read(dst_ptr.add(child_index)).assume_init() };
 
-                        unsafe { ptr::copy_nonoverlapping(src_ptr, dst_ptr, child_index) };
+                        unsafe {
+                            ptr::copy(
+                                dst_ptr.add(child_index + 1),
+                                dst_ptr.add(child_index),
+                                dst.len() - child_index - 1,
+                            )
+                        };
                         unsafe {
                             ptr::copy_nonoverlapping(
-                                src_ptr.add(child_index + 1),
-                                dst_ptr.add(child_index),
-                                C / 2 - child_index,
+                                src_ptr,
+                                dst_ptr.add(dst.len() - 1),
+                                src.len(),
                             );
                         }
 
@@ -508,7 +511,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                         mem::forget(src);
 
                         dst.length = NonZeroUsize::new(C).unwrap();
-                        ret = RemoveResult::WithVacancy(val, self_index + 1);
+                        ret = RemoveResult::WithVacancy(val, 1);
                     } else {
                         unsafe {
                             let mut next = LeafHandleMut::new(next.as_mut().unwrap());
