@@ -4,7 +4,7 @@ use core::{mem, ptr, slice};
 
 use alloc::boxed::Box;
 
-use super::{Node, NodeVariantMut};
+use super::{Node, VariantMut};
 
 use crate::utils::{slice_insert_forget_last, slice_shift_left, slice_shift_right};
 
@@ -372,7 +372,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
             .unwrap()
             .variant_mut()
         {
-            NodeVariantMut::Internal { mut handle } => {
+            VariantMut::Internal { mut handle } => {
                 match unsafe { handle.remove(child_index) } {
                     RemoveResult::Ok(val) => {
                         unsafe {
@@ -425,7 +425,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
                     }
                 }
             }
-            NodeVariantMut::Leaf { mut handle } => {
+            VariantMut::Leaf { mut handle } => {
                 if handle.len() - 1 > C / 2 {
                     let val = unsafe { handle.remove_no_underflow(child_index) };
                     unsafe {

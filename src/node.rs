@@ -36,7 +36,7 @@ pub enum Variant<'a, T, const B: usize, const C: usize> {
     Leaf { handle: Leaf<'a, T, B, C> },
 }
 
-pub enum NodeVariantMut<'a, T, const B: usize, const C: usize> {
+pub enum VariantMut<'a, T, const B: usize, const C: usize> {
     Internal {
         handle: InternalMut<'a, T, B, C>,
     },
@@ -56,10 +56,10 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
     pub fn free(mut self) {
         match self.variant_mut() {
-            NodeVariantMut::Leaf { .. } => unsafe {
+            VariantMut::Leaf { .. } => unsafe {
                 ManuallyDrop::drop(&mut self.ptr.values);
             },
-            NodeVariantMut::Internal { .. } => unsafe {
+            VariantMut::Internal { .. } => unsafe {
                 ManuallyDrop::drop(&mut self.ptr.children);
             },
         }
@@ -130,8 +130,8 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
     pub fn insert(&mut self, index: usize, value: T) -> Option<Self> {
         match self.variant_mut() {
-            NodeVariantMut::Internal { mut handle } => handle.insert(index, value),
-            NodeVariantMut::Leaf { mut handle } => handle.insert(index, value),
+            VariantMut::Internal { mut handle } => handle.insert(index, value),
+            VariantMut::Leaf { mut handle } => handle.insert(index, value),
         }
     }
 
@@ -149,14 +149,14 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         }
     }
 
-    pub fn variant_mut(&mut self) -> NodeVariantMut<T, B, C> {
+    pub fn variant_mut(&mut self) -> VariantMut<T, B, C> {
         if self.len() <= C {
-            NodeVariantMut::Leaf {
+            VariantMut::Leaf {
                 // SAFETY: the safety invariant `self.len() <= C` is satisfied.
                 handle: unsafe { LeafMut::new(self) },
             }
         } else {
-            NodeVariantMut::Internal {
+            VariantMut::Internal {
                 // SAFETY: the safety invariant `self.len() > C` is satisfied.
                 handle: unsafe { InternalMut::new(self) },
             }
@@ -167,7 +167,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 impl<T, const B: usize, const C: usize> Drop for Node<T, B, C> {
     fn drop(&mut self) {
         match self.variant_mut() {
-            NodeVariantMut::Leaf { mut handle } => unsafe {
+            VariantMut::Leaf { mut handle } => unsafe {
                 // Drop the values of a leaf node and deallocate afterwards.
 
                 // SAFETY: `values_mut` returns a properly aligned slice that is valid for both
@@ -182,7 +182,7 @@ impl<T, const B: usize, const C: usize> Drop for Node<T, B, C> {
                 // `self.ptr.values` will also get dropped at most once.
                 ManuallyDrop::drop(&mut self.ptr.values);
             },
-            NodeVariantMut::Internal { .. } => unsafe {
+            VariantMut::Internal { .. } => unsafe {
                 // SAFETY: This node is a leaf node, so `self.ptr.children` can be accessed.
                 // This is a drop method which will be called at most once, which means that
                 // `self.ptr.children` will also get dropped at most once.

@@ -16,7 +16,7 @@ mod utils;
 
 use iter::Iter;
 use node::handle::{LeafMut, RemoveResult};
-use node::{Node, Variant, NodeVariantMut};
+use node::{Node, Variant, VariantMut};
 use panics::panic_out_of_bounds;
 use utils::slice_shift_left;
 
@@ -109,7 +109,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         'd: loop {
             match cur_node.variant_mut() {
-                NodeVariantMut::Internal { handle } => {
+                VariantMut::Internal { handle } => {
                     for child in handle.into_children_mut().iter_mut().flatten() {
                         if index < child.len() {
                             cur_node = child;
@@ -119,7 +119,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
                     }
                     unreachable!();
                 }
-                NodeVariantMut::Leaf { handle } => {
+                VariantMut::Leaf { handle } => {
                     return handle.into_values_mut().get_mut(index);
                 }
             }
@@ -191,7 +191,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         }
 
         match self.root_node.as_mut().unwrap().variant_mut() {
-            NodeVariantMut::Internal { mut handle } => {
+            VariantMut::Internal { mut handle } => {
                 if handle.len() == C + 1 {
                     let [fst, snd]: &mut [Option<Node<T, B, C>>; 2] =
                         (&mut handle.children_mut()[..2]).try_into().unwrap();
@@ -253,7 +253,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
                     }
                 }
             }
-            NodeVariantMut::Leaf { mut handle } => match NonZeroUsize::new(handle.len() - 1) {
+            VariantMut::Leaf { mut handle } => match NonZeroUsize::new(handle.len() - 1) {
                 Some(new_len) => unsafe {
                     let ret = handle.remove_no_underflow(index);
                     handle.set_length(new_len);
