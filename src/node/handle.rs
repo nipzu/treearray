@@ -8,11 +8,11 @@ use super::{Node, NodeVariantMut};
 
 use crate::utils::{slice_insert_forget_last, slice_shift_left, slice_shift_right};
 
-pub struct LeafHandle<'a, T, const B: usize, const C: usize> {
+pub struct Leaf<'a, T, const B: usize, const C: usize> {
     node: &'a Node<T, B, C>,
 }
 
-impl<'a, T, const B: usize, const C: usize> LeafHandle<'a, T, B, C> {
+impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a leaf node i.e. `node.len() <= C`.
@@ -28,12 +28,12 @@ impl<'a, T, const B: usize, const C: usize> LeafHandle<'a, T, B, C> {
     pub fn values(&self) -> &'a [T] {
         debug_assert!(self.len() <= C);
         // TODO: feature(maybe_uninit_slice) https://github.com/rust-lang/rust/issues/63569
-        // MaybeUninit::slice_assume_init_ref(&self.node.inner.values[..self.len()])
+        // MaybeUninit::slice_assume_init_ref(&self.node.ptr.values[..self.len()])
 
         unsafe {
             // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
-            // `Self::new`, so the `values` field of the `self.node.inner` union can be read.
-            let values_ptr = self.node.inner.values.as_ptr();
+            // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
+            let values_ptr = self.node.ptr.values.as_ptr();
             // SAFETY: According to the invariants of `Node`, at least `self.len()`
             // values are guaranteed to be initialized and valid for use. The lifetime is the
             // same as `self.node`'s and the slice is thus not going to be written to during
@@ -44,11 +44,11 @@ impl<'a, T, const B: usize, const C: usize> LeafHandle<'a, T, B, C> {
     }
 }
 
-pub struct LeafHandleMut<'a, T, const B: usize, const C: usize> {
+pub struct LeafMut<'a, T, const B: usize, const C: usize> {
     node: &'a mut Node<T, B, C>,
 }
 
-impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
+impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     const UNINIT: MaybeUninit<T> = MaybeUninit::uninit();
 
     /// # Safety:
@@ -74,16 +74,16 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
     unsafe fn pop_back(&mut self) -> T {
         unsafe {
             self.set_len(self.len() - 1);
-            self.node.inner.values[self.len()].as_ptr().read()
+            self.node.ptr.values[self.len()].as_ptr().read()
         }
     }
 
     unsafe fn pop_front(&mut self) -> T {
         unsafe {
             self.set_len(self.len() - 1);
-            let ret = self.node.inner.values[0].as_ptr().read();
+            let ret = self.node.ptr.values[0].as_ptr().read();
             let new_len = self.len();
-            let value_ptr = (*self.node.inner.values).as_mut_ptr();
+            let value_ptr = (*self.node.ptr.values).as_mut_ptr();
             ptr::copy(value_ptr.add(1), value_ptr, new_len);
             ret
         }
@@ -93,8 +93,8 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
         debug_assert!(self.len() <= C);
         unsafe {
             // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
-            // `Self::new`, so the `values` field of the `self.node.inner` union can be read.
-            let values_ptr = (*self.node.inner.values).as_mut_ptr();
+            // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
+            let values_ptr = (*self.node.ptr.values).as_mut_ptr();
             // SAFETY: According to the invariants of `Node`, at least `self.len()`
             // values are guaranteed to be initialized and valid for use. The lifetime is the
             // same as `self`'s and the returned reference has thus unique access.
@@ -108,8 +108,8 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
         debug_assert!(self.len() <= C);
         unsafe {
             // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
-            // `Self::new`, so the `values` field of the `self.node.inner` union can be read.
-            let values_ptr = (*self.node.inner.values).as_mut_ptr();
+            // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
+            let values_ptr = (*self.node.ptr.values).as_mut_ptr();
             // SAFETY: According to the invariants of `Node`, at least `self.len()`
             // values are guaranteed to be initialized and valid for use. The lifetime is the
             // same as `self.node`'s and the returned reference has thus unique access.
@@ -136,7 +136,7 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
         assert!(self.len() < C);
         assert!(index <= self.len());
         unsafe {
-            let index_ptr = (*self.node.inner.values).as_mut_ptr().add(index);
+            let index_ptr = (*self.node.ptr.values).as_mut_ptr().add(index);
             ptr::copy(index_ptr, index_ptr.add(1), self.len() - index);
             ptr::write(index_ptr, MaybeUninit::new(value));
             self.set_len(self.len() + 1);
@@ -202,11 +202,11 @@ impl<'a, T, const B: usize, const C: usize> LeafHandleMut<'a, T, B, C> {
     }
 }
 
-pub struct InternalHandle<'a, T, const B: usize, const C: usize> {
+pub struct Internal<'a, T, const B: usize, const C: usize> {
     node: &'a Node<T, B, C>,
 }
 
-impl<'a, T, const B: usize, const C: usize> InternalHandle<'a, T, B, C> {
+impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
@@ -218,16 +218,16 @@ impl<'a, T, const B: usize, const C: usize> InternalHandle<'a, T, B, C> {
     pub fn children(&self) -> &'a [Option<Node<T, B, C>>; B] {
         debug_assert!(self.node.len() > C);
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
-        // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
-        unsafe { &self.node.inner.children }
+        // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
+        unsafe { &self.node.ptr.children }
     }
 }
 
-pub struct InternalHandleMut<'a, T, const B: usize, const C: usize> {
+pub struct InternalMut<'a, T, const B: usize, const C: usize> {
     node: &'a mut Node<T, B, C>,
 }
 
-impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
+impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     const NONE: Option<Node<T, B, C>> = None;
 
     /// # Safety:
@@ -254,22 +254,22 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
     pub fn children(&self) -> &[Option<Node<T, B, C>>; B] {
         debug_assert!(self.len() > C);
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
-        // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
-        unsafe { &self.node.inner.children }
+        // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
+        unsafe { &self.node.ptr.children }
     }
 
     pub fn children_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
         debug_assert!(self.len() > C);
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
-        // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
-        unsafe { &mut self.node.inner.children }
+        // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
+        unsafe { &mut self.node.ptr.children }
     }
 
     pub fn into_children_mut(self) -> &'a mut [Option<Node<T, B, C>>; B] {
         debug_assert!(self.len() > C);
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
-        // `Self::new`, so the `children` field of the `self.node.inner` union can be read.
-        unsafe { &mut self.node.inner.children }
+        // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
+        unsafe { &mut self.node.ptr.children }
     }
 
     fn find_insert_index(&mut self, mut index: usize) -> (usize, usize) {
@@ -445,9 +445,9 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
 
                     if prev.as_ref().unwrap().len() == C / 2 + 1 {
                         let dst = prev.as_mut().unwrap();
-                        let dst_ptr = unsafe { (*dst.inner.values).as_mut_ptr().add(C / 2 + 1) };
+                        let dst_ptr = unsafe { (*dst.ptr.values).as_mut_ptr().add(C / 2 + 1) };
                         let mut src = cur.take().unwrap();
-                        let src_ptr = unsafe { src.inner.values.as_ptr() };
+                        let src_ptr = unsafe { src.ptr.values.as_ptr() };
 
                         let val = unsafe { ptr::read(src_ptr.add(child_index)).assume_init() };
 
@@ -462,21 +462,21 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                             );
                         }
 
-                        unsafe { ManuallyDrop::drop(&mut src.inner.values) };
+                        unsafe { ManuallyDrop::drop(&mut src.ptr.values) };
                         mem::forget(src);
 
                         dst.length = NonZeroUsize::new(C).unwrap();
                         ret = RemoveResult::WithVacancy(val, self_index);
                     } else {
                         unsafe {
-                            let mut prev = LeafHandleMut::new(prev.as_mut().unwrap());
+                            let mut prev = LeafMut::new(prev.as_mut().unwrap());
                             let cur = cur.as_mut().unwrap();
 
                             let x = prev.pop_back();
-                            let val = cur.inner.values[child_index].as_ptr().read();
-                            let cur_ptr = (*cur.inner.values).as_mut_ptr();
+                            let val = cur.ptr.values[child_index].as_ptr().read();
+                            let cur_ptr = (*cur.ptr.values).as_mut_ptr();
                             ptr::copy(cur_ptr, cur_ptr.add(1), child_index);
-                            (*cur.inner.values)[0].write(x);
+                            (*cur.ptr.values)[0].write(x);
                             ret = RemoveResult::Ok(val);
                         }
                     }
@@ -486,9 +486,9 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
 
                     if next.as_ref().unwrap().len() == C / 2 + 1 {
                         let dst = cur.as_mut().unwrap();
-                        let dst_ptr = unsafe { (*dst.inner.values).as_mut_ptr() };
+                        let dst_ptr = unsafe { (*dst.ptr.values).as_mut_ptr() };
                         let mut src = next.take().unwrap();
-                        let src_ptr = unsafe { src.inner.values.as_ptr() };
+                        let src_ptr = unsafe { src.ptr.values.as_ptr() };
 
                         let val = unsafe { ptr::read(dst_ptr.add(child_index)).assume_init() };
 
@@ -497,35 +497,32 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                                 dst_ptr.add(child_index + 1),
                                 dst_ptr.add(child_index),
                                 dst.len() - child_index - 1,
-                            )
-                        };
-                        unsafe {
+                            );
                             ptr::copy_nonoverlapping(
                                 src_ptr,
                                 dst_ptr.add(dst.len() - 1),
                                 src.len(),
                             );
+                            ManuallyDrop::drop(&mut src.ptr.values);
                         }
-
-                        unsafe { ManuallyDrop::drop(&mut src.inner.values) };
                         mem::forget(src);
 
                         dst.length = NonZeroUsize::new(C).unwrap();
                         ret = RemoveResult::WithVacancy(val, 1);
                     } else {
                         unsafe {
-                            let mut next = LeafHandleMut::new(next.as_mut().unwrap());
+                            let mut next = LeafMut::new(next.as_mut().unwrap());
                             let cur = cur.as_mut().unwrap();
 
                             let x = next.pop_front();
-                            let val = cur.inner.values[child_index].as_ptr().read();
-                            let cur_ptr = (*cur.inner.values).as_mut_ptr();
+                            let val = cur.ptr.values[child_index].as_ptr().read();
+                            let cur_ptr = (*cur.ptr.values).as_mut_ptr();
                             ptr::copy(
                                 cur_ptr.add(child_index),
                                 cur_ptr.add(child_index + 1),
                                 C / 2 - child_index,
                             );
-                            (*cur.inner.values)[C / 2].write(x);
+                            (*cur.ptr.values)[C / 2].write(x);
                             ret = RemoveResult::Ok(val);
                         }
                     }
@@ -556,8 +553,8 @@ unsafe fn combine_internals<T, const B: usize, const C: usize>(
     opt_fst: &mut Option<Node<T, B, C>>,
     opt_snd: &mut Option<Node<T, B, C>>,
 ) -> CombineResult {
-    let mut fst = unsafe { InternalHandleMut::new(opt_fst.as_mut().unwrap()) };
-    let mut snd = unsafe { InternalHandleMut::new(opt_snd.as_mut().unwrap()) };
+    let mut fst = unsafe { InternalMut::new(opt_fst.as_mut().unwrap()) };
+    let mut snd = unsafe { InternalMut::new(opt_snd.as_mut().unwrap()) };
     let fst_underfull = fst.children()[B / 2].is_none();
     let snd_underfull = snd.children()[B / 2].is_none();
     let fst_almost_underfull = fst.children()[B / 2 + 1].is_none();

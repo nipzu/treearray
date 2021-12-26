@@ -8,13 +8,13 @@ use alloc::boxed::Box;
 
 pub mod handle;
 
-use handle::{InternalHandle, InternalHandleMut, LeafHandle, LeafHandleMut};
+use handle::{Internal, InternalMut, Leaf, LeafMut};
 
 pub struct Node<T, const B: usize, const C: usize> {
     // INVARIANT: `length` is the number of values that this node eventually has as children
     //
     // If `self.length <= C`, this node is a leaf node with
-    // exactly `size` initialized values held in `self.inner.values`.
+    // exactly `size` initialized values held in `self.ptr.values`.
     // TODO: > C/2 when not root
     //
     // If `self.length > C`, this node is an internal node. Under normal
@@ -23,25 +23,25 @@ pub struct Node<T, const B: usize, const C: usize> {
     // Normal logic can assume that this assumption is upheld.
     // However, breaking this assumption must not cause Undefined Behavior.
     length: NonZeroUsize,
-    inner: NodeInner<T, B, C>,
+    ptr: NodePtr<T, B, C>,
 }
 
-union NodeInner<T, const B: usize, const C: usize> {
+union NodePtr<T, const B: usize, const C: usize> {
     children: ManuallyDrop<Box<[Option<Node<T, B, C>>; B]>>,
     values: ManuallyDrop<Box<[MaybeUninit<T>; C]>>,
 }
 
-pub enum NodeVariant<'a, T, const B: usize, const C: usize> {
-    Internal { handle: InternalHandle<'a, T, B, C> },
-    Leaf { handle: LeafHandle<'a, T, B, C> },
+pub enum Variant<'a, T, const B: usize, const C: usize> {
+    Internal { handle: Internal<'a, T, B, C> },
+    Leaf { handle: Leaf<'a, T, B, C> },
 }
 
 pub enum NodeVariantMut<'a, T, const B: usize, const C: usize> {
     Internal {
-        handle: InternalHandleMut<'a, T, B, C>,
+        handle: InternalMut<'a, T, B, C>,
     },
     Leaf {
-        handle: LeafHandleMut<'a, T, B, C>,
+        handle: LeafMut<'a, T, B, C>,
     },
 }
 
@@ -57,10 +57,10 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     pub fn free(mut self) {
         match self.variant_mut() {
             NodeVariantMut::Leaf { .. } => unsafe {
-                ManuallyDrop::drop(&mut self.inner.values);
+                ManuallyDrop::drop(&mut self.ptr.values);
             },
             NodeVariantMut::Internal { .. } => unsafe {
-                ManuallyDrop::drop(&mut self.inner.children);
+                ManuallyDrop::drop(&mut self.ptr.children);
             },
         }
         mem::forget(self);
@@ -68,8 +68,8 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
     fn is_full(&self) -> bool {
         match self.variant() {
-            NodeVariant::Leaf { handle } => handle.values().len() == C, // TODO >= for compiler hints?
-            NodeVariant::Internal { handle } => matches!(handle.children().last(), Some(&Some(_))),
+            Variant::Leaf { handle } => handle.values().len() == C, // TODO >= for compiler hints?
+            Variant::Internal { handle } => matches!(handle.children().last(), Some(&Some(_))),
         }
     }
 
@@ -79,7 +79,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         // SAFETY: `length > C`, so the `Node` is considered an internal node as it should be.
         Self {
             length: NonZeroUsize::new(length).unwrap(),
-            inner: NodeInner {
+            ptr: NodePtr {
                 children: ManuallyDrop::new(children),
             },
         }
@@ -107,7 +107,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         // which has the same safety invariants as this function
         Self {
             length: NonZeroUsize::new(length).unwrap(),
-            inner: NodeInner {
+            ptr: NodePtr {
                 values: ManuallyDrop::new(values),
             },
         }
@@ -122,7 +122,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         // a leaf node and the first value is initialized, satisfying `length = 1`.
         Self {
             length: NonZeroUsize::new(1).unwrap(),
-            inner: NodeInner {
+            ptr: NodePtr {
                 values: ManuallyDrop::new(boxed_values),
             },
         }
@@ -135,16 +135,16 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         }
     }
 
-    pub const fn variant(&self) -> NodeVariant<T, B, C> {
+    pub const fn variant(&self) -> Variant<T, B, C> {
         if self.len() <= C {
-            NodeVariant::Leaf {
+            Variant::Leaf {
                 // SAFETY: the safety invariant `self.len() <= C` is satisfied.
-                handle: unsafe { LeafHandle::new(self) },
+                handle: unsafe { Leaf::new(self) },
             }
         } else {
-            NodeVariant::Internal {
+            Variant::Internal {
                 // SAFETY: the safety invariant `self.len() > C` is satisfied.
-                handle: unsafe { InternalHandle::new(self) },
+                handle: unsafe { Internal::new(self) },
             }
         }
     }
@@ -153,12 +153,12 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         if self.len() <= C {
             NodeVariantMut::Leaf {
                 // SAFETY: the safety invariant `self.len() <= C` is satisfied.
-                handle: unsafe { LeafHandleMut::new(self) },
+                handle: unsafe { LeafMut::new(self) },
             }
         } else {
             NodeVariantMut::Internal {
                 // SAFETY: the safety invariant `self.len() > C` is satisfied.
-                handle: unsafe { InternalHandleMut::new(self) },
+                handle: unsafe { InternalMut::new(self) },
             }
         }
     }
@@ -177,16 +177,16 @@ impl<T, const B: usize, const C: usize> Drop for Node<T, B, C> {
                 // the values will also get dropped at most once.
                 ptr::drop_in_place(handle.values_mut());
 
-                // SAFETY: This node is a leaf node, so`self.inner.values` can be accessed.
+                // SAFETY: This node is a leaf node, so `self.ptr.values` can be accessed.
                 // This is a drop method which will be called at most once, which means that
-                // `self.inner.values` will also get dropped at most once.
-                ManuallyDrop::drop(&mut self.inner.values);
+                // `self.ptr.values` will also get dropped at most once.
+                ManuallyDrop::drop(&mut self.ptr.values);
             },
             NodeVariantMut::Internal { .. } => unsafe {
-                // SAFETY: This node is a leaf node, so`self.inner.children` can be accessed.
+                // SAFETY: This node is a leaf node, so `self.ptr.children` can be accessed.
                 // This is a drop method which will be called at most once, which means that
-                // `self.inner.children` will also get dropped at most once.
-                ManuallyDrop::drop(&mut self.inner.children);
+                // `self.ptr.children` will also get dropped at most once.
+                ManuallyDrop::drop(&mut self.ptr.children);
             },
         }
     }

@@ -15,8 +15,8 @@ mod panics;
 mod utils;
 
 use iter::Iter;
-use node::handle::{LeafHandleMut, RemoveResult};
-use node::{Node, NodeVariant, NodeVariantMut};
+use node::handle::{LeafMut, RemoveResult};
+use node::{Node, Variant, NodeVariantMut};
 use panics::panic_out_of_bounds;
 use utils::slice_shift_left;
 
@@ -82,7 +82,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         'd: loop {
             match cur_node.variant() {
-                NodeVariant::Internal { handle } => {
+                Variant::Internal { handle } => {
                     for child in handle.children().iter().flatten() {
                         if index < child.len() {
                             cur_node = child;
@@ -92,7 +92,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
                     }
                     unreachable!();
                 }
-                NodeVariant::Leaf { handle } => {
+                Variant::Leaf { handle } => {
                     return handle.values().get(index);
                 }
             }
@@ -197,8 +197,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
                         (&mut handle.children_mut()[..2]).try_into().unwrap();
                     let (mut fst, mut snd) = unsafe {
                         (
-                            LeafHandleMut::new(fst.as_mut().unwrap()),
-                            LeafHandleMut::new(snd.as_mut().unwrap()),
+                            LeafMut::new(fst.as_mut().unwrap()),
+                            LeafMut::new(snd.as_mut().unwrap()),
                         )
                     };
 
