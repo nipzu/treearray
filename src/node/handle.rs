@@ -364,6 +364,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
 
     pub unsafe fn remove(&mut self, index: usize) -> RemoveResult<T> {
         let (self_index, child_index) = self.find_index(index);
+        debug_assert_eq!(self.len(), sum_lens(self.children()));
 
         match self.children_mut()[self_index]
             .as_mut()
@@ -376,46 +377,52 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                         unsafe {
                             self.set_len(self.len() - 1);
                         }
+                        debug_assert_eq!(self.len(), sum_lens(self.children()));
                         RemoveResult::Ok(val)
                     }
                     RemoveResult::WithVacancy(val, vacant_index) => {
+                        assert!(handle.children()[vacant_index].is_none());
                         slice_shift_left(&mut handle.children_mut()[vacant_index..], None);
 
+                        let ret;
                         if handle.children()[B / 2].is_none() {
                             if self_index > 0 {
-                                let [fst, snd]: &mut [Option<Node<T, B, C>>; 2] = (&mut self
+                                let [ref mut fst, ref mut snd]: &mut [Option<Node<T, B, C>>; 2] = (&mut self
                                     .children_mut()[self_index - 1..=self_index])
                                     .try_into()
                                     .unwrap();
-                                let mut fst =
-                                    fst.as_mut().map(|x| unsafe { InternalHandleMut::new(x) });
-                                let mut snd =
-                                    snd.as_mut().map(|x| unsafe { InternalHandleMut::new(x) });
-                                return match combine_internals(&mut fst, &mut snd) {
+                                ret = match unsafe { combine_internals(fst, snd) } {
                                     CombineResult::Ok => RemoveResult::Ok(val),
                                     CombineResult::Merged => {
+                                        assert!(self.children()[self_index].is_none());
+                                        assert!(self.children()[self_index-1].is_some());
                                         RemoveResult::WithVacancy(val, self_index)
                                     }
                                 };
+                            } else {
+                                let [ref mut fst, ref mut snd]: &mut [Option<Node<T, B, C>>; 2] = (&mut self
+                                    .children_mut()[0..=1])
+                                    .try_into()
+                                    .unwrap();
+                                ret = match unsafe { combine_internals(fst, snd) } {
+                                    CombineResult::Ok => RemoveResult::Ok(val),
+                                    CombineResult::Merged => {
+                                        assert!(self.children()[0].is_some());
+                                        assert!(self.children()[1].is_none());
+                                        RemoveResult::WithVacancy(val, 1)
+                                    }
+                                };
                             }
+                        } else {
+                            ret = RemoveResult::Ok(val);
+                        };
 
-                            let [fst, snd]: &mut [Option<Node<T, B, C>>; 2] = (&mut self
-                                .children_mut()[self_index..=self_index + 1])
-                                .try_into()
-                                .unwrap();
-                            let mut fst =
-                                fst.as_mut().map(|x| unsafe { InternalHandleMut::new(x) });
-                            let mut snd =
-                                snd.as_mut().map(|x| unsafe { InternalHandleMut::new(x) });
-                            return match combine_internals(&mut fst, &mut snd) {
-                                CombineResult::Ok => RemoveResult::Ok(val),
-                                CombineResult::Merged => {
-                                    RemoveResult::WithVacancy(val, self_index + 1)
-                                }
-                            };
+                        unsafe {
+                            self.set_len(self.len() - 1);
                         }
 
-                        RemoveResult::Ok(val)
+                        debug_assert_eq!(self.len(), sum_lens(self.children()));
+                        ret
                     }
                 }
             }
@@ -424,10 +431,13 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                     let val = unsafe { handle.remove_no_underflow(child_index) };
                     unsafe {
                         handle.set_len(handle.len() - 1);
+                        self.set_len(self.len() - 1);
                     }
+                    debug_assert_eq!(self.len(), sum_lens(self.children()));
                     return RemoveResult::Ok(val);
                 }
 
+                let ret;
                 if self_index > 0 {
                     let [prev, cur]: &mut [Option<Node<T, B, C>>; 2] = (&mut self.children_mut()
                         [self_index - 1..=self_index])
@@ -457,7 +467,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                         mem::forget(src);
 
                         dst.length = NonZeroUsize::new(C).unwrap();
-                        RemoveResult::WithVacancy(val, self_index)
+                        ret = RemoveResult::WithVacancy(val, self_index);
                     } else {
                         unsafe {
                             let mut prev = LeafHandleMut::new(prev.as_mut().unwrap());
@@ -468,7 +478,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                             let cur_ptr = (*cur.inner.values).as_mut_ptr();
                             ptr::copy(cur_ptr, cur_ptr.add(1), child_index);
                             (*cur.inner.values)[0].write(x);
-                            RemoveResult::Ok(val)
+                            ret = RemoveResult::Ok(val);
                         }
                     }
                 } else {
@@ -498,7 +508,7 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                         mem::forget(src);
 
                         dst.length = NonZeroUsize::new(C).unwrap();
-                        RemoveResult::WithVacancy(val, self_index)
+                        ret = RemoveResult::WithVacancy(val, self_index + 1);
                     } else {
                         unsafe {
                             let mut next = LeafHandleMut::new(next.as_mut().unwrap());
@@ -513,10 +523,17 @@ impl<'a, T, const B: usize, const C: usize> InternalHandleMut<'a, T, B, C> {
                                 C / 2 - child_index,
                             );
                             (*cur.inner.values)[C / 2].write(x);
-                            RemoveResult::Ok(val)
+                            ret = RemoveResult::Ok(val);
                         }
                     }
+                };
+
+                unsafe {
+                    // FIXME: when B < 5
+                    self.set_len(self.len() - 1);
                 }
+                debug_assert_eq!(self.len(), sum_lens(self.children()));
+                ret
             }
         }
     }
@@ -532,12 +549,12 @@ enum CombineResult {
     Merged,
 }
 
-fn combine_internals<T, const B: usize, const C: usize>(
-    opt_fst: &mut Option<InternalHandleMut<T, B, C>>,
-    opt_snd: &mut Option<InternalHandleMut<T, B, C>>,
+unsafe fn combine_internals<T, const B: usize, const C: usize>(
+    opt_fst: &mut Option<Node<T, B, C>>,
+    opt_snd: &mut Option<Node<T, B, C>>,
 ) -> CombineResult {
-    let fst = opt_fst.as_mut().unwrap();
-    let snd = opt_snd.as_mut().unwrap();
+    let mut fst = unsafe { InternalHandleMut::new(opt_fst.as_mut().unwrap()) };
+    let mut snd = unsafe { InternalHandleMut::new(opt_snd.as_mut().unwrap()) };
     let fst_underfull = fst.children()[B / 2].is_none();
     let snd_underfull = snd.children()[B / 2].is_none();
     let fst_almost_underfull = fst.children()[B / 2 + 1].is_none();

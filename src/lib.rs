@@ -7,6 +7,7 @@ extern crate alloc;
 use core::fmt;
 use core::mem::size_of;
 use core::num::NonZeroUsize;
+use core::ptr;
 
 pub mod iter;
 mod node;
@@ -14,7 +15,7 @@ mod panics;
 mod utils;
 
 use iter::Iter;
-use node::handle::RemoveResult;
+use node::handle::{LeafHandleMut, RemoveResult};
 use node::{Node, NodeVariant, NodeVariantMut};
 use panics::panic_out_of_bounds;
 use utils::slice_shift_left;
@@ -38,7 +39,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     pub const fn new() -> Self {
         // Each internal node has to have at least two children
         // to be considered an internal node.
-        assert!(B >= 3);
+        assert!(B >= 5); // FIXME: that thing in remove
 
         // If the root consist of 2 leaves of size `C/2`,
         // then it is also considered to be a leaf.
@@ -194,6 +195,51 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
                 if handle.len() == C + 1 {
                     let [fst, snd]: &mut [Option<Node<T, B, C>>; 2] =
                         (&mut handle.children_mut()[..2]).try_into().unwrap();
+                    let (mut fst, mut snd) = unsafe {
+                        (
+                            LeafHandleMut::new(fst.as_mut().unwrap()),
+                            LeafHandleMut::new(snd.as_mut().unwrap()),
+                        )
+                    };
+
+                    let fst_ptr = fst.values_mut().as_mut_ptr();
+                    let snd_ptr = snd.values_mut().as_mut_ptr();
+
+                    let ret;
+                    if index < fst.len() {
+                        unsafe {
+                            ret = fst_ptr.add(index).read();
+                            ptr::copy(
+                                fst_ptr.add(index + 1),
+                                fst_ptr.add(index),
+                                fst.len() - index - 1,
+                            );
+                            ptr::copy_nonoverlapping(
+                                snd_ptr,
+                                fst_ptr.add(fst.len() - 1),
+                                snd.len(),
+                            );
+                        }
+                    } else {
+                        unsafe {
+                            ret = snd_ptr.add(index - fst.len()).read();
+                            ptr::copy_nonoverlapping(
+                                snd_ptr,
+                                fst_ptr.add(fst.len()),
+                                index - fst.len(),
+                            );
+                            ptr::copy_nonoverlapping(
+                                snd_ptr.add(index - fst.len()),
+                                fst_ptr.add(index),
+                                snd.len() - index + fst.len() - 1,
+                            );
+                        }
+                    }
+
+                    unsafe { fst.set_len(C) };
+                    self.root_node = handle.into_children_mut()[0].take();
+
+                    ret
                 } else {
                     match unsafe { handle.remove(index) } {
                         RemoveResult::Ok(val) => val,
@@ -203,11 +249,12 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
                         }
                     }
                 }
-            },
+            }
             NodeVariantMut::Leaf { mut handle } => match NonZeroUsize::new(handle.len() - 1) {
                 Some(new_len) => unsafe {
+                    let ret = handle.remove_no_underflow(index);
                     handle.set_length(new_len);
-                    handle.remove_no_underflow(index)
+                    ret
                 },
                 None => {
                     let ret = unsafe { handle.into_values_mut().as_ptr().read() };
@@ -297,25 +344,25 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_3_3 = BTreeVec::<i32, 3, 3>::new();
+        // let mut b_3_3 = BTreeVec::<i32, 3, 3>::new();
         let mut b_5_1 = BTreeVec::<i32, 5, 1>::new();
 
         for x in 0..1000 {
             v.push(x);
-            b_3_3.push_back(x);
+            // b_3_3.push_back(x);
             b_5_1.push_back(x);
         }
 
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len());
             v.remove(index);
-            b_3_3.remove(index);
+            // b_3_3.remove(index);
             b_5_1.remove(index);
-            assert_eq!(v.len(), b_3_3.len());
+            // assert_eq!(v.len(), b_3_3.len());
             assert_eq!(v.len(), b_5_1.len());
         }
 
-        assert_eq!(v, b_3_3.iter().copied().collect::<Vec<_>>());
+        // assert_eq!(v, b_3_3.iter().copied().collect::<Vec<_>>());
         assert_eq!(v, b_5_1.iter().copied().collect::<Vec<_>>());
     }
 
