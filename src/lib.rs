@@ -20,8 +20,8 @@ use node::{Node, Variant, VariantMut};
 use panics::panic_out_of_bounds;
 use utils::slice_shift_left;
 
-pub fn foo(x: &mut BTreeVec<i32, 50, 101>, index: usize) -> Option<&i32> {
-    x.get(index)
+pub fn foo(x: &mut BTreeVec<[i32; 1000], 50, 101>, index: usize) {
+    x.remove(index);
 }
 
 // CONST INVARIANTS:
