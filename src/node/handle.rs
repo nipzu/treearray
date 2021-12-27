@@ -329,46 +329,57 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     unsafe fn split_and_insert_node(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
+        unsafe {
+            if index <= B / 2 {
+                self.split_and_insert_left(index, node)
+            } else {
+                self.split_and_insert_right(index, node)
+            }
+        }
+    }
+
+    unsafe fn split_and_insert_left(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
         let mut new_box = Box::new([Self::NONE; B]);
         let node_len = node.len();
+        let split_index = B / 2;
+        let tail_len = B - split_index;
 
-        if index <= B / 2 {
-            // insert to left
-            let split_index = B / 2;
-            let tail_len = B - split_index;
+        let new_self_len = sum_lens(&self.children_mut()[..split_index]);
+        let new_nodes_len = self.len() - node_len - new_self_len;
 
-            let new_self_len = sum_lens(&self.children_mut()[..split_index]);
-            let new_nodes_len = self.len() - node_len - new_self_len;
+        self.children_mut()[split_index..].swap_with_slice(&mut new_box[..tail_len]);
 
-            self.children_mut()[split_index..].swap_with_slice(&mut new_box[..tail_len]);
+        slice_insert_forget_last(&mut self.children_mut()[..=split_index], index, Some(node));
 
-            slice_insert_forget_last(&mut self.children_mut()[..=split_index], index, Some(node));
+        debug_assert_eq!(new_self_len + node_len, sum_lens(self.children()));
+        debug_assert_eq!(new_nodes_len + 1, sum_lens(new_box.as_ref()));
+        unsafe { self.set_len(new_self_len + node_len) };
+        Node::from_children(new_nodes_len + 1, new_box)
+    }
 
-            unsafe { self.set_len(new_self_len + node_len) };
-            debug_assert_eq!(new_self_len + node_len, sum_lens(self.children()));
-            debug_assert_eq!(new_nodes_len + 1, sum_lens(new_box.as_ref()));
-            Node::from_children(new_nodes_len + 1, new_box)
-        } else {
-            // insert to right
-            let split_index = B / 2 + 1;
-            let tail_len = B - split_index;
+    unsafe fn split_and_insert_right(
+        &mut self,
+        index: usize,
+        node: Node<T, B, C>,
+    ) -> Node<T, B, C> {
+        let mut new_box = Box::new([Self::NONE; B]);
+        let node_len = node.len();
+        let split_index = B / 2 + 1;
+        let tail_len = B - split_index;
 
-            let tail_start_len = index - split_index;
+        let tail_start_len = index - split_index;
 
-            let new_self_len = sum_lens(&self.children_mut()[..split_index]);
-            let new_nodes_len = self.len() - node_len - new_self_len;
+        let new_self_len = sum_lens(&self.children_mut()[..split_index]);
+        let new_nodes_len = self.len() - node_len - new_self_len;
 
-            self.children_mut()[split_index..index].swap_with_slice(&mut new_box[..tail_start_len]);
-            self.children_mut()[index..]
-                .swap_with_slice(&mut new_box[tail_start_len + 1..=tail_len]);
-            new_box[tail_start_len] = Some(node);
+        self.children_mut()[split_index..index].swap_with_slice(&mut new_box[..tail_start_len]);
+        self.children_mut()[index..].swap_with_slice(&mut new_box[tail_start_len + 1..=tail_len]);
+        new_box[tail_start_len] = Some(node);
 
-            assert!(new_self_len > C);
-            unsafe { self.set_len(new_self_len) };
-            debug_assert_eq!(new_self_len, sum_lens(self.children()));
-            debug_assert_eq!(new_nodes_len + node_len + 1, sum_lens(new_box.as_ref()));
-            Node::from_children(new_nodes_len + node_len + 1, new_box)
-        }
+        debug_assert_eq!(new_self_len, sum_lens(self.children()));
+        debug_assert_eq!(new_nodes_len + node_len + 1, sum_lens(new_box.as_ref()));
+        unsafe { self.set_len(new_self_len) };
+        Node::from_children(new_nodes_len + node_len + 1, new_box)
     }
 
     pub unsafe fn remove(&mut self, index: usize) -> RemoveResult<T> {
