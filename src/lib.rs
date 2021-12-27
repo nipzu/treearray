@@ -25,7 +25,7 @@ pub fn foo(x: &mut BTreeVec<i32, 50, 101>, index: usize) -> Option<&i32> {
 }
 
 // CONST INVARIANTS:
-// - `B >= 3`
+// - `B >= 5`
 // - `C % 2 == 1`, which implies `C >= 1`
 // - `C * size_of<T>() <= isize::MAX`
 pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
@@ -34,11 +34,16 @@ pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
 }
 
 impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
+    /// # Panics
+    /// Panics if any of
+    /// - `B < 5`,
+    /// - `C` is even,
+    /// - `C * size_of<T>() > isize::MAX`.
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
-        // Each internal node has to have at least two children
-        // to be considered an internal node.
+        // Each (underfull) internal node has to have at least
+        // two children to be considered an internal node.
         assert!(B >= 5); // FIXME: that thing in remove
 
         // If the root consist of 2 leaves of size `C/2`,
@@ -169,6 +174,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         self.root_node = None;
     }
 
+    /// # Panics
+    /// Panics if `index > self.len()`.
     pub fn insert(&mut self, index: usize, value: T) {
         if index > self.len() {
             panic_out_of_bounds(index, self.len());
@@ -185,6 +192,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         }
     }
 
+    /// # Panics
+    /// Panics if `index >= self.len()`.
     pub fn remove(&mut self, index: usize) -> T {
         if index >= self.len() {
             panic_out_of_bounds(index, self.len());
@@ -253,19 +262,20 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
                     }
                 }
             }
-            VariantMut::Leaf { mut handle } => match NonZeroUsize::new(handle.len() - 1) {
-                Some(new_len) => unsafe {
-                    let ret = handle.remove_no_underflow(index);
-                    handle.set_length(new_len);
-                    ret
-                },
-                None => {
+            VariantMut::Leaf { mut handle } => {
+                if let Some(new_len) = NonZeroUsize::new(handle.len() - 1) {
+                    unsafe {
+                        let ret = handle.remove_no_underflow(index);
+                        handle.set_length(new_len);
+                        ret
+                    }
+                } else {
                     let ret = unsafe { handle.into_values_mut().as_ptr().read() };
                     let old_root = self.root_node.take().unwrap();
                     old_root.free();
                     ret
                 }
-            },
+            }
         }
     }
 

@@ -1,3 +1,5 @@
+//! Iterator `struct`s for `BTreeVec`.
+
 use crate::BTreeVec;
 
 pub struct Iter<'a, T, const B: usize, const C: usize> {

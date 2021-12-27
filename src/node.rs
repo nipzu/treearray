@@ -37,12 +37,8 @@ pub enum Variant<'a, T, const B: usize, const C: usize> {
 }
 
 pub enum VariantMut<'a, T, const B: usize, const C: usize> {
-    Internal {
-        handle: InternalMut<'a, T, B, C>,
-    },
-    Leaf {
-        handle: LeafMut<'a, T, B, C>,
-    },
+    Internal { handle: InternalMut<'a, T, B, C> },
+    Leaf { handle: LeafMut<'a, T, B, C> },
 }
 
 impl<T, const B: usize, const C: usize> Node<T, B, C> {
@@ -68,7 +64,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
     fn is_full(&self) -> bool {
         match self.variant() {
-            Variant::Leaf { handle } => handle.values().len() == C, // TODO >= for compiler hints?
+            Variant::Leaf { handle } => handle.values().len() == C,
             Variant::Internal { handle } => matches!(handle.children().last(), Some(&Some(_))),
         }
     }
