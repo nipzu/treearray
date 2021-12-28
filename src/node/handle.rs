@@ -27,9 +27,6 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
 
     pub fn values(&self) -> &'a [T] {
         debug_assert!(self.len() <= C);
-        // TODO: feature(maybe_uninit_slice) https://github.com/rust-lang/rust/issues/63569
-        // MaybeUninit::slice_assume_init_ref(&self.node.ptr.values[..self.len()])
-
         unsafe {
             // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
             // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
