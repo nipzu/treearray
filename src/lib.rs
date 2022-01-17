@@ -9,20 +9,19 @@ use core::mem::size_of;
 use core::num::NonZeroUsize;
 use core::ptr;
 
+mod cursor;
 pub mod iter;
 mod node;
 mod panics;
 mod utils;
+
+pub use cursor::Cursor;
 
 use iter::Iter;
 use node::handle::{LeafMut, RemoveResult};
 use node::{Node, Variant, VariantMut};
 use panics::panic_out_of_bounds;
 use utils::slice_shift_left;
-
-pub fn foo(x: &mut BTreeVec<[i32; 1000], 50, 101>, index: usize) {
-    x.remove(index);
-}
 
 // CONST INVARIANTS:
 // - `B >= 5`

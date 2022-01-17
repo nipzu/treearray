@@ -21,8 +21,12 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
         Self { node }
     }
 
-    const fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.node.len()
+    }
+
+    pub const fn node(&self) -> &'a Node<T, B, C> {
+        self.node
     }
 
     pub fn values(&self) -> &'a [T] {
@@ -218,6 +222,10 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     pub const unsafe fn new(node: &'a Node<T, B, C>) -> Self {
         debug_assert!(node.len() > C);
         Self { node }
+    }
+
+    pub const fn node(&self) -> &'a Node<T, B, C> {
+        self.node
     }
 
     pub fn children(&self) -> &'a [Option<Node<T, B, C>>; B] {
@@ -463,7 +471,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
                                 dst_ptr.add(child_index),
                                 C / 2 - child_index,
                             );
-                            ManuallyDrop::drop(&mut src.ptr.values); 
+                            ManuallyDrop::drop(&mut src.ptr.values);
                             mem::forget(src);
                         }
 

@@ -1,4 +1,4 @@
-use core::ptr;
+use core::{mem::size_of, ptr};
 
 pub fn slice_insert_forget_last<T>(slice: &mut [T], index: usize, value: T) {
     assert!(index < slice.len());
@@ -29,4 +29,10 @@ pub fn slice_shift_right<T>(slice: &mut [T], new_start: T) -> T {
         ptr::write(slice_ptr, new_start);
         last
     }
+}
+
+pub fn slice_index_of_ref<T>(slice: &[T], elem: &T) -> usize {
+    let slice_addr = slice.as_ptr() as usize;
+    let elem_addr = elem as *const T as usize;
+    (elem_addr - slice_addr) / size_of::<T>()
 }
