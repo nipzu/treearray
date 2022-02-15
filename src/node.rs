@@ -10,6 +10,108 @@ pub mod handle;
 
 use handle::{Internal, InternalMut, Leaf, LeafMut};
 
+pub struct DynNode<'a, T, const B: usize, const C: usize> {
+    height: usize,
+    node: &'a Node<T, B, C>,
+}
+
+impl<'a, T, const B: usize, const C: usize> DynNode<'a, T, B, C> {
+    pub const unsafe fn new(height: usize, node: &'a Node<T, B, C>) -> Self {
+        Self { height, node }
+    }
+
+    pub const fn len(&self) -> usize {
+        self.node.len()
+    }
+
+    pub const fn node(&self) -> &'a Node<T, B, C> {
+        self.node
+    }
+
+    pub fn variant(&self) -> Variant<'a, T, B, C> {
+        if self.height == 0 {
+            Variant::Leaf {
+                // TODO:
+                // SAFETY:
+                handle: unsafe { Leaf::new(self.node) },
+            }
+        } else {
+            Variant::Internal {
+                // TODO:
+                // SAFETY:
+                handle: unsafe { Internal::new(self.height, self.node) },
+            }
+        }
+    }
+}
+
+pub struct DynNodeMut<'a, T, const B: usize, const C: usize> {
+    height: usize,
+    node: &'a mut Node<T, B, C>,
+}
+
+impl<'a, T, const B: usize, const C: usize> DynNodeMut<'a, T, B, C> {
+    pub unsafe fn new(height: usize, node: &'a mut Node<T, B, C>) -> Self {
+        Self { height, node }
+    }
+
+    pub const fn len(&self) -> usize {
+        self.node.len()
+    }
+
+    pub fn node_ptr_mut(&mut self) -> *mut Node<T, B, C> {
+        self.node as *mut _
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn variant(&self) -> Variant<T, B, C> {
+        if self.height == 0 {
+            Variant::Leaf {
+                // TODO:
+                // SAFETY:
+                handle: unsafe { Leaf::new(self.node) },
+            }
+        } else {
+            Variant::Internal {
+                // TODO:
+                // SAFETY:
+                handle: unsafe { Internal::new(self.height, self.node) },
+            }
+        }
+    }
+
+    pub fn variant_mut(&mut self) -> VariantMut<T, B, C> {
+        if self.height == 0 {
+            VariantMut::Leaf {
+                // SAFETY: the safety invariant `self.len() <= C` is satisfied.
+                handle: unsafe { LeafMut::new(self.node) },
+            }
+        } else {
+            VariantMut::Internal {
+                // SAFETY: the safety invariant `self.len() > C` is satisfied.
+                handle: unsafe { InternalMut::new(self.height, self.node) },
+            }
+        }
+    }
+
+    pub fn into_variant_mut(self) -> VariantMut<'a, T, B, C> {
+        if self.height == 0 {
+            VariantMut::Leaf {
+                // SAFETY: the safety invariant `self.len() <= C` is satisfied.
+                handle: unsafe { LeafMut::new(self.node) },
+            }
+        } else {
+            VariantMut::Internal {
+                // SAFETY: the safety invariant `self.len() > C` is satisfied.
+                handle: unsafe { InternalMut::new(self.height, self.node) },
+            }
+        }
+    }
+}
+
 pub struct Node<T, const B: usize, const C: usize> {
     // INVARIANT: `length` is the number of values that this node eventually has as children
     //
@@ -50,23 +152,21 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         self.length.get()
     }
 
-    pub fn free(mut self) {
-        match self.variant_mut() {
-            VariantMut::Leaf { .. } => unsafe {
-                ManuallyDrop::drop(&mut self.ptr.values);
-            },
-            VariantMut::Internal { .. } => unsafe {
-                ManuallyDrop::drop(&mut self.ptr.children);
-            },
-        }
-        mem::forget(self);
+    pub fn set_length(&mut self, length: usize) {
+        self.length = NonZeroUsize::new(length).unwrap()
     }
 
-    fn is_full(&self) -> bool {
-        match self.variant() {
-            Variant::Leaf { handle } => handle.values().len() == C,
-            Variant::Internal { handle } => matches!(handle.children().last(), Some(&Some(_))),
-        }
+    pub fn free(mut self, height: usize) {
+        // match self.variant_mut() {
+        //     VariantMut::Leaf { .. } => unsafe {
+        //         ManuallyDrop::drop(&mut self.ptr.values);
+        //     },
+        //     VariantMut::Internal { .. } => unsafe {
+        //         ManuallyDrop::drop(&mut self.ptr.children);
+        //     },
+        // }
+        // mem::forget(self);
+        todo!()
     }
 
     fn from_children(length: usize, children: Box<[Option<Self>; B]>) -> Self {
@@ -124,68 +224,12 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         }
     }
 
-    pub fn insert(&mut self, index: usize, value: T) -> Option<Self> {
-        match self.variant_mut() {
-            VariantMut::Internal { mut handle } => handle.insert(index, value),
-            VariantMut::Leaf { mut handle } => handle.insert(index, value),
-        }
-    }
-
-    pub const fn variant(&self) -> Variant<T, B, C> {
-        if self.len() <= C {
-            Variant::Leaf {
-                // SAFETY: the safety invariant `self.len() <= C` is satisfied.
-                handle: unsafe { Leaf::new(self) },
-            }
-        } else {
-            Variant::Internal {
-                // SAFETY: the safety invariant `self.len() > C` is satisfied.
-                handle: unsafe { Internal::new(self) },
-            }
-        }
-    }
-
-    pub fn variant_mut(&mut self) -> VariantMut<T, B, C> {
-        if self.len() <= C {
-            VariantMut::Leaf {
-                // SAFETY: the safety invariant `self.len() <= C` is satisfied.
-                handle: unsafe { LeafMut::new(self) },
-            }
-        } else {
-            VariantMut::Internal {
-                // SAFETY: the safety invariant `self.len() > C` is satisfied.
-                handle: unsafe { InternalMut::new(self) },
-            }
-        }
-    }
-}
-
-impl<T, const B: usize, const C: usize> Drop for Node<T, B, C> {
-    fn drop(&mut self) {
-        match self.variant_mut() {
-            VariantMut::Leaf { mut handle } => unsafe {
-                // Drop the values of a leaf node and deallocate afterwards.
-
-                // SAFETY: `values_mut` returns a properly aligned slice that is valid for both
-                // reads and writes. The contents of the slice are properly initialized values
-                // of type `T``and such be valid for dropping as such.
-                // This is a drop method which will be called at most once, which means that
-                // the values will also get dropped at most once.
-                ptr::drop_in_place(handle.values_mut());
-
-                // SAFETY: This node is a leaf node, so `self.ptr.values` can be accessed.
-                // This is a drop method which will be called at most once, which means that
-                // `self.ptr.values` will also get dropped at most once.
-                ManuallyDrop::drop(&mut self.ptr.values);
-            },
-            VariantMut::Internal { .. } => unsafe {
-                // SAFETY: This node is a leaf node, so `self.ptr.children` can be accessed.
-                // This is a drop method which will be called at most once, which means that
-                // `self.ptr.children` will also get dropped at most once.
-                ManuallyDrop::drop(&mut self.ptr.children);
-            },
-        }
-    }
+    // pub fn insert(&mut self, index: usize, value: T) -> Option<Self> {
+    //     match self.variant_mut() {
+    //         VariantMut::Internal { mut handle } => handle.insert(index, value),
+    //         VariantMut::Leaf { mut handle } => handle.insert(index, value),
+    //     }
+    // }
 }
 
 #[cfg(test)]
