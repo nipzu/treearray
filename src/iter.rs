@@ -1,5 +1,7 @@
 //! Iterator `struct`s for `BTreeVec`.
 
+// TODO: impl FusedIterator
+
 use crate::BTreeVec;
 
 pub struct Iter<'a, T, const B: usize, const C: usize> {

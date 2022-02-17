@@ -4,9 +4,9 @@ use core::{mem, ptr, slice};
 
 use alloc::boxed::Box;
 
-use super::{DynNode, DynNodeMut, Node, VariantMut};
+use super::{DynNode, DynNodeMut, Node};
 
-use crate::utils::{slice_insert_forget_last, slice_shift_left, slice_shift_right};
+use crate::utils::slice_insert_forget_last;
 
 pub struct Leaf<'a, T, const B: usize, const C: usize> {
     node: &'a Node<T, B, C>,
@@ -23,10 +23,6 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
 
     pub const fn len(&self) -> usize {
         self.node.len()
-    }
-
-    pub const fn node(&self) -> &'a Node<T, B, C> {
-        self.node
     }
 
     pub fn values(&self) -> &'a [T] {
@@ -64,26 +60,18 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         self.node.len()
     }
 
-    pub fn node_mut(&mut self) -> &mut Node<T, B, C> {
-        self.node
-    }
-
-    pub unsafe fn set_length(&mut self, new_length: NonZeroUsize) {
-        self.node.length = new_length;
-    }
-
     pub unsafe fn set_len(&mut self, new_len: usize) {
         self.node.length = NonZeroUsize::new(new_len).unwrap();
     }
 
-    unsafe fn pop_back(&mut self) -> T {
+    pub unsafe fn pop_back(&mut self) -> T {
         unsafe {
             self.set_len(self.len() - 1);
             self.node.ptr.values[self.len()].as_ptr().read()
         }
     }
 
-    unsafe fn pop_front(&mut self) -> T {
+    pub unsafe fn pop_front(&mut self) -> T {
         unsafe {
             self.set_len(self.len() - 1);
             let ret = self.node.ptr.values[0].as_ptr().read();
@@ -141,6 +129,15 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     fn is_full(&self) -> bool {
         self.values().len() == C
+    }
+
+    // TODO: does not take ownership of self.node
+    pub fn free(self) {
+        unsafe {
+            ManuallyDrop::drop(&mut self.node.ptr.values);
+            // TODO: this might be useless
+            mem::forget(self);
+        }
     }
 
     pub fn insert(&mut self, index: usize, value: T) -> Option<Node<T, B, C>> {
@@ -247,10 +244,6 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
         }
     }
 
-    pub const fn node(&self) -> &'a Node<T, B, C> {
-        self.node
-    }
-
     // pub fn children(&self) -> &'a [Option<Node<T, B, C>>; B] {
     //     debug_assert!(self.node.len() > C);
     //     // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
@@ -266,8 +259,7 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
         let child_height = self.height.get() - 1;
         children
             .iter()
-            .flatten()
-            .map(move |n| unsafe { DynNode::new(child_height, n) })
+            .map_while(move |m| m.as_ref().map(|n| unsafe { DynNode::new(child_height, n) }))
     }
 }
 
@@ -299,7 +291,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub unsafe fn set_len(&mut self, new_len: usize) {
-        debug_assert!(new_len > C);
+        // debug_assert!(new_len > C);
         self.node.length = NonZeroUsize::new(new_len).unwrap();
     }
 
@@ -310,18 +302,18 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe { &self.node.ptr.children }
     }
 
-    pub fn children_mut<'b>(&'b mut self) -> impl Iterator<Item = DynNodeMut<'b, T, B, C>> + 'b {
+    pub fn children_mut(&mut self) -> impl Iterator<Item = DynNodeMut<T, B, C>> + '_ {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
         let children = unsafe { &mut **self.node.ptr.children };
         let child_height = self.height.get() - 1;
-        children
-            .iter_mut()
-            .flatten()
-            .map(move |n| unsafe { DynNodeMut::new(child_height, n) })
+        children.iter_mut().map_while(move |m| {
+            m.as_mut()
+                .map(|n| unsafe { DynNodeMut::new(child_height, n) })
+        })
     }
 
-    fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>] {
+    pub fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>] {
         unsafe { &mut **self.node.ptr.children }
     }
 
@@ -330,55 +322,11 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
         let children = unsafe { &mut **self.node.ptr.children };
         let child_height = self.height.get() - 1;
-        children
-            .into_iter()
-            .flatten()
-            .map(move |n| unsafe { DynNodeMut::new(child_height, n) })
+        children.iter_mut().map_while(move |m| {
+            m.as_mut()
+                .map(|n| unsafe { DynNodeMut::new(child_height, n) })
+        })
     }
-
-    fn find_insert_index(&mut self, mut index: usize) -> (usize, usize) {
-        for (i, maybe_child) in self.children().iter().enumerate() {
-            if let Some(child) = maybe_child {
-                if index <= child.len() {
-                    return (i, index);
-                }
-                index -= child.len();
-            }
-        }
-        unreachable!();
-    }
-
-    fn find_index(&mut self, mut index: usize) -> (usize, usize) {
-        for (i, maybe_child) in self.children().iter().enumerate() {
-            if let Some(child) = maybe_child {
-                if index < child.len() {
-                    return (i, index);
-                }
-                index -= child.len();
-            }
-        }
-        unreachable!();
-    }
-
-    // pub fn insert(&mut self, index: usize, value: T) -> Option<Node<T, B, C>> {
-    //     let (self_index, child_index) = self.find_insert_index(index);
-
-    //     if let Some(new_child) = self
-    //         .children_mut()
-    //         .nth(self_index)
-    //         .as_mut()
-    //         .and_then(|n| n.insert(child_index, value))
-    //     {
-    //         if self.is_full() {
-    //             unsafe {
-    //                 return Some(self.split_and_insert_node(self_index + 1, new_child));
-    //             }
-    //         }
-    //         self.insert_fitting(self_index + 1, new_child);
-    //     }
-    //     unsafe { self.set_len(self.len() + 1) };
-    //     None
-    // }
 
     pub unsafe fn insert_node(
         &mut self,
@@ -459,246 +407,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe { self.set_len(new_self_len) };
         Node::from_children(new_nodes_len + node_len + 1, new_box)
     }
-
-    // pub unsafe fn remove(&mut self, index: usize) -> RemoveResult<T> {
-    //     let (mut self_index, child_index) = self.find_index(index);
-    //     debug_assert_eq!(self.len(), sum_lens(self.children()));
-
-    //     match self
-    //         .children_mut()
-    //         .nth(self_index)
-    //         .as_mut()
-    //         .unwrap()
-    //         .variant_mut()
-    //     {
-    //         VariantMut::Internal { mut handle } => match unsafe { handle.remove(child_index) } {
-    //             RemoveResult::Ok(val) => {
-    //                 unsafe {
-    //                     self.set_len(self.len() - 1);
-    //                 }
-    //                 debug_assert_eq!(self.len(), sum_lens(self.children()));
-    //                 RemoveResult::Ok(val)
-    //             }
-    //             RemoveResult::WithVacancy(val, vacant_index) => {
-    //                 debug_assert!(handle.children()[vacant_index].is_none());
-    //                 slice_shift_left(&mut handle.children_mut()[vacant_index..], None);
-
-    //                 let ret = if handle.children()[B / 2].is_none() {
-    //                     if self_index == 0 {
-    //                         self_index += 1;
-    //                     }
-
-    //                     let [ref mut fst, ref mut snd]: &mut [Option<Node<T, B, C>>; 2] =
-    //                         (&mut self.children_mut()[self_index - 1..=self_index])
-    //                             .try_into()
-    //                             .unwrap();
-
-    //                     match unsafe { combine_internals(fst, snd) } {
-    //                         CombineResult::Ok => RemoveResult::Ok(val),
-    //                         CombineResult::Merged => {
-    //                             debug_assert!(self.children()[self_index].is_none());
-    //                             debug_assert!(self.children()[self_index - 1].is_some());
-    //                             RemoveResult::WithVacancy(val, self_index)
-    //                         }
-    //                     }
-    //                 } else {
-    //                     RemoveResult::Ok(val)
-    //                 };
-
-    //                 unsafe {
-    //                     self.set_len(self.len() - 1);
-    //                 }
-
-    //                 debug_assert_eq!(self.len(), sum_lens(self.children()));
-    //                 ret
-    //             }
-    //         },
-    //         VariantMut::Leaf { mut handle } => {
-    //             if handle.len() - 1 > C / 2 {
-    //                 let val = unsafe { handle.remove_no_underflow(child_index) };
-    //                 unsafe {
-    //                     handle.set_len(handle.len() - 1);
-    //                     self.set_len(self.len() - 1);
-    //                 }
-    //                 debug_assert_eq!(self.len(), sum_lens(self.children()));
-    //                 return RemoveResult::Ok(val);
-    //             }
-
-    //             let ret;
-    //             if self_index > 0 {
-    //                 let [prev, cur]: &mut [Option<Node<T, B, C>>; 2] = (&mut self.children_mut()
-    //                     [self_index - 1..=self_index])
-    //                     .try_into()
-    //                     .unwrap();
-
-    //                 if prev.as_ref().unwrap().len() == C / 2 + 1 {
-    //                     let dst = prev.as_mut().unwrap();
-    //                     let mut src = cur.take().unwrap();
-    //                     let dst_ptr = unsafe { (*dst.ptr.values).as_mut_ptr().add(C / 2 + 1) };
-    //                     let src_ptr = unsafe { src.ptr.values.as_ptr() };
-
-    //                     let val = unsafe { ptr::read(src_ptr.add(child_index)).assume_init() };
-
-    //                     unsafe {
-    //                         ptr::copy_nonoverlapping(src_ptr, dst_ptr, child_index);
-    //                         ptr::copy_nonoverlapping(
-    //                             src_ptr.add(child_index + 1),
-    //                             dst_ptr.add(child_index),
-    //                             C / 2 - child_index,
-    //                         );
-    //                         ManuallyDrop::drop(&mut src.ptr.values);
-    //                         mem::forget(src);
-    //                     }
-
-    //                     dst.length = NonZeroUsize::new(C).unwrap();
-    //                     ret = RemoveResult::WithVacancy(val, self_index);
-    //                 } else {
-    //                     unsafe {
-    //                         let mut prev = LeafMut::new(prev.as_mut().unwrap());
-    //                         let cur = cur.as_mut().unwrap();
-
-    //                         let x = prev.pop_back();
-    //                         let val = cur.ptr.values[child_index].as_ptr().read();
-    //                         let cur_ptr = (*cur.ptr.values).as_mut_ptr();
-    //                         ptr::copy(cur_ptr, cur_ptr.add(1), child_index);
-    //                         (*cur.ptr.values)[0].write(x);
-    //                         ret = RemoveResult::Ok(val);
-    //                     }
-    //                 }
-    //             } else {
-    //                 let [cur, next]: &mut [Option<Node<T, B, C>>; 2] =
-    //                     (&mut self.children_mut()[0..=1]).try_into().unwrap();
-
-    //                 if next.as_ref().unwrap().len() == C / 2 + 1 {
-    //                     let dst = cur.as_mut().unwrap();
-    //                     let mut src = next.take().unwrap();
-    //                     let dst_ptr = unsafe { (*dst.ptr.values).as_mut_ptr() };
-    //                     let src_ptr = unsafe { src.ptr.values.as_ptr() };
-
-    //                     let val = unsafe { ptr::read(dst_ptr.add(child_index)).assume_init() };
-
-    //                     unsafe {
-    //                         ptr::copy(
-    //                             dst_ptr.add(child_index + 1),
-    //                             dst_ptr.add(child_index),
-    //                             dst.len() - child_index - 1,
-    //                         );
-    //                         ptr::copy_nonoverlapping(
-    //                             src_ptr,
-    //                             dst_ptr.add(dst.len() - 1),
-    //                             src.len(),
-    //                         );
-    //                         ManuallyDrop::drop(&mut src.ptr.values);
-    //                     }
-    //                     mem::forget(src);
-
-    //                     dst.length = NonZeroUsize::new(C).unwrap();
-    //                     ret = RemoveResult::WithVacancy(val, 1);
-    //                 } else {
-    //                     unsafe {
-    //                         let mut next = LeafMut::new(next.as_mut().unwrap());
-    //                         let cur = cur.as_mut().unwrap();
-
-    //                         let x = next.pop_front();
-    //                         let val = cur.ptr.values[child_index].as_ptr().read();
-    //                         let cur_ptr = (*cur.ptr.values).as_mut_ptr();
-    //                         ptr::copy(
-    //                             cur_ptr.add(child_index),
-    //                             cur_ptr.add(child_index + 1),
-    //                             C / 2 - child_index,
-    //                         );
-    //                         (*cur.ptr.values)[C / 2].write(x);
-    //                         ret = RemoveResult::Ok(val);
-    //                     }
-    //                 }
-    //             };
-
-    //             unsafe {
-    //                 // FIXME: when B < 5
-    //                 self.set_len(self.len() - 1);
-    //             }
-    //             debug_assert_eq!(self.len(), sum_lens(self.children()));
-    //             ret
-    //         }
-    //     }
-    // }
 }
-
-pub enum RemoveResult<T> {
-    Ok(T),
-    WithVacancy(T, usize),
-}
-
-enum CombineResult {
-    Ok,
-    Merged,
-}
-
-// unsafe fn combine_internals<T, const B: usize, const C: usize>(
-//     opt_fst: &mut Option<Node<T, B, C>>,
-//     opt_snd: &mut Option<Node<T, B, C>>,
-// ) -> CombineResult {
-//     let mut fst = unsafe { InternalMut::new(opt_fst.as_mut().unwrap()) };
-//     let mut snd = unsafe { InternalMut::new(opt_snd.as_mut().unwrap()) };
-//     let fst_underfull = fst.children()[B / 2].is_none();
-//     let snd_underfull = snd.children()[B / 2].is_none();
-//     let fst_almost_underfull = fst.children()[B / 2 + 1].is_none();
-//     let snd_almost_underfull = snd.children()[B / 2 + 1].is_none();
-
-//     if fst_underfull && snd_almost_underfull {
-//         fst.children_mut()[B / 2..].swap_with_slice(&mut snd.children_mut()[..=B / 2]);
-//         unsafe {
-//             fst.set_len(fst.len() + snd.len());
-//         }
-//         *opt_snd = None;
-//         debug_assert_eq!(fst.len(), sum_lens(fst.children()));
-//         return CombineResult::Merged;
-//     }
-
-//     if fst_almost_underfull && snd_underfull {
-//         fst.children_mut()[B / 2 + 1..].swap_with_slice(&mut snd.children_mut()[..B / 2]);
-//         unsafe {
-//             fst.set_len(fst.len() + snd.len());
-//         }
-//         *opt_snd = None;
-//         debug_assert_eq!(fst.len(), sum_lens(fst.children()));
-//         return CombineResult::Merged;
-//     }
-
-//     if fst_underfull {
-//         let x = slice_shift_left(snd.children_mut(), None).unwrap();
-//         unsafe {
-//             snd.set_len(snd.len() - x.len());
-//             fst.set_len(fst.len() + x.len());
-//         }
-//         fst.children_mut()[B / 2] = Some(x);
-//         debug_assert_eq!(fst.len(), sum_lens(fst.children()));
-//         debug_assert_eq!(snd.len(), sum_lens(snd.children()));
-//         return CombineResult::Ok;
-//     }
-
-//     if snd_underfull {
-//         let mut i = B - 1;
-//         loop {
-//             if fst.children_mut()[i].is_some() {
-//                 let x = fst.children_mut()[i].take().unwrap();
-
-//                 unsafe {
-//                     fst.set_len(fst.len() - x.len());
-//                     snd.set_len(snd.len() + x.len());
-//                 }
-
-//                 slice_shift_right(snd.children_mut(), Some(x));
-//                 debug_assert_eq!(fst.len(), sum_lens(fst.children()));
-//                 debug_assert_eq!(snd.len(), sum_lens(snd.children()));
-//                 return CombineResult::Ok;
-//             }
-//             i -= 1;
-//         }
-//     }
-
-//     CombineResult::Ok
-// }
 
 fn sum_lens<T, const B: usize, const C: usize>(children: &[Option<Node<T, B, C>>]) -> usize {
     children

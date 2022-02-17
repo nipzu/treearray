@@ -1,0 +1,8 @@
+error[E0515]: cannot return value referencing local variable `local`
+  --> tests/variance/test_cursor_invariant.rs:16:5
+   |
+9  |         let local_str: &str = &local;
+   |                               ------ `local` is borrowed here
+...
+16 |     bvec.get(0).unwrap()
+   |     ^^^^^^^^^^^^^^^^^^^^ returns a value referencing data owned by the current function

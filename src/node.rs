@@ -1,6 +1,5 @@
-use core::mem::{self, ManuallyDrop, MaybeUninit};
+use core::mem::{ManuallyDrop, MaybeUninit};
 use core::num::NonZeroUsize;
-use core::ptr;
 
 use alloc::boxed::Box;
 
@@ -24,10 +23,6 @@ impl<'a, T, const B: usize, const C: usize> DynNode<'a, T, B, C> {
         self.node.len()
     }
 
-    pub const fn node(&self) -> &'a Node<T, B, C> {
-        self.node
-    }
-
     pub fn variant(&self) -> Variant<'a, T, B, C> {
         if self.height == 0 {
             Variant::Leaf {
@@ -47,7 +42,7 @@ impl<'a, T, const B: usize, const C: usize> DynNode<'a, T, B, C> {
 
 pub struct DynNodeMut<'a, T, const B: usize, const C: usize> {
     height: usize,
-    node: &'a mut Node<T, B, C>,
+    pub(crate) node: &'a mut Node<T, B, C>,
 }
 
 impl<'a, T, const B: usize, const C: usize> DynNodeMut<'a, T, B, C> {
@@ -60,41 +55,11 @@ impl<'a, T, const B: usize, const C: usize> DynNodeMut<'a, T, B, C> {
     }
 
     pub fn node_ptr_mut(&mut self) -> *mut Node<T, B, C> {
-        self.node as *mut _
+        self.node
     }
 
     pub fn height(&self) -> usize {
         self.height
-    }
-
-    pub fn variant(&self) -> Variant<T, B, C> {
-        if self.height == 0 {
-            Variant::Leaf {
-                // TODO:
-                // SAFETY:
-                handle: unsafe { Leaf::new(self.node) },
-            }
-        } else {
-            Variant::Internal {
-                // TODO:
-                // SAFETY:
-                handle: unsafe { Internal::new(self.height, self.node) },
-            }
-        }
-    }
-
-    pub fn variant_mut(&mut self) -> VariantMut<T, B, C> {
-        if self.height == 0 {
-            VariantMut::Leaf {
-                // SAFETY: the safety invariant `self.len() <= C` is satisfied.
-                handle: unsafe { LeafMut::new(self.node) },
-            }
-        } else {
-            VariantMut::Internal {
-                // SAFETY: the safety invariant `self.len() > C` is satisfied.
-                handle: unsafe { InternalMut::new(self.height, self.node) },
-            }
-        }
     }
 
     pub fn into_variant_mut(self) -> VariantMut<'a, T, B, C> {
@@ -124,13 +89,13 @@ pub struct Node<T, const B: usize, const C: usize> {
     // are `Some`, and the sum of their `len()`s is equal to `self.len()`.
     // Normal logic can assume that this assumption is upheld.
     // However, breaking this assumption must not cause Undefined Behavior.
-    length: NonZeroUsize,
-    ptr: NodePtr<T, B, C>,
+    pub(crate) length: NonZeroUsize,
+    pub(crate) ptr: NodePtr<T, B, C>,
 }
 
-union NodePtr<T, const B: usize, const C: usize> {
-    children: ManuallyDrop<Box<[Option<Node<T, B, C>>; B]>>,
-    values: ManuallyDrop<Box<[MaybeUninit<T>; C]>>,
+pub(crate) union NodePtr<T, const B: usize, const C: usize> {
+    pub(crate) children: ManuallyDrop<Box<[Option<Node<T, B, C>>; B]>>,
+    pub(crate) values: ManuallyDrop<Box<[MaybeUninit<T>; C]>>,
 }
 
 pub enum Variant<'a, T, const B: usize, const C: usize> {
@@ -154,19 +119,6 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
     pub fn set_length(&mut self, length: usize) {
         self.length = NonZeroUsize::new(length).unwrap()
-    }
-
-    pub fn free(mut self, height: usize) {
-        // match self.variant_mut() {
-        //     VariantMut::Leaf { .. } => unsafe {
-        //         ManuallyDrop::drop(&mut self.ptr.values);
-        //     },
-        //     VariantMut::Internal { .. } => unsafe {
-        //         ManuallyDrop::drop(&mut self.ptr.children);
-        //     },
-        // }
-        // mem::forget(self);
-        todo!()
     }
 
     fn from_children(length: usize, children: Box<[Option<Self>; B]>) -> Self {
@@ -223,13 +175,6 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
             },
         }
     }
-
-    // pub fn insert(&mut self, index: usize, value: T) -> Option<Self> {
-    //     match self.variant_mut() {
-    //         VariantMut::Internal { mut handle } => handle.insert(index, value),
-    //         VariantMut::Leaf { mut handle } => handle.insert(index, value),
-    //     }
-    // }
 }
 
 #[cfg(test)]
