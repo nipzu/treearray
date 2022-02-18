@@ -5,7 +5,7 @@
 extern crate alloc;
 
 use core::fmt;
-use core::mem::{size_of, MaybeUninit};
+use core::mem::size_of;
 use core::ptr::NonNull;
 
 mod cursor;
@@ -33,7 +33,7 @@ struct Root<T, const B: usize, const C: usize> {
 }
 
 impl<T, const B: usize, const C: usize> Root<T, B, C> {
-    fn as_dyn(&self) -> DynNode<T, B, C> {
+    const fn as_dyn(&self) -> DynNode<T, B, C> {
         unsafe { DynNode::new(self.height, &self.node) }
     }
 
@@ -186,7 +186,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     /// # Panics
     /// Panics if `index > self.len()`.
     pub fn insert(&mut self, index: usize, value: T) {
-        self.cursor_at_mut(index).insert(value)
+        self.cursor_at_mut(index).insert(value);
     }
 
     /// # Panics
@@ -206,55 +206,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     // }
 
     #[must_use]
-    pub fn cursor_at_mut(&mut self, mut index: usize) -> CursorMut<T, B, C> {
-        if index > self.len() {
-            panic!();
-        }
-
-        let mut path: [MaybeUninit<*mut Node<T, B, C>>; usize::BITS as usize] =
-            unsafe { MaybeUninit::uninit().assume_init() };
-
-        if self.root.is_none() {
-            return unsafe { CursorMut::new(path, 0, NonNull::new_unchecked(&mut self.root), 0) };
-        }
-
-        let is_past_the_end = index == self.len();
-
-        if is_past_the_end {
-            index -= 1;
-        }
-
-        let mut i = self.root.as_ref().unwrap().height;
-        let mut root = unsafe { NonNull::new_unchecked(&mut self.root) };
-        let mut cur_node = unsafe { root.as_mut().as_mut().unwrap().as_dyn_mut() };
-
-        debug_assert_eq!(cur_node.height(), i);
-        path[i].write(cur_node.node_ptr_mut());
-
-        let j = index;
-
-        'd: while let VariantMut::Internal { handle } = cur_node.into_variant_mut() {
-            for child in handle.into_children_mut() {
-                if index < child.len() {
-                    cur_node = child;
-                    i -= 1;
-                    debug_assert_eq!(cur_node.height(), i);
-                    path[i].write(cur_node.node_ptr_mut());
-                    continue 'd;
-                }
-                index -= child.len();
-            }
-            unreachable!();
-        }
-
-        unsafe {
-            CursorMut::new(
-                path,
-                j + is_past_the_end as usize,
-                root,
-                index + is_past_the_end as usize,
-            )
-        }
+    pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T, B, C> {
+        CursorMut::new_at(NonNull::new(&mut self.root).unwrap(), index)
     }
 }
 

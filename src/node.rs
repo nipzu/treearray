@@ -58,7 +58,7 @@ impl<'a, T, const B: usize, const C: usize> DynNodeMut<'a, T, B, C> {
         self.node
     }
 
-    pub fn height(&self) -> usize {
+    pub const fn height(&self) -> usize {
         self.height
     }
 
@@ -93,7 +93,7 @@ pub struct Node<T, const B: usize, const C: usize> {
     pub(crate) ptr: NodePtr<T, B, C>,
 }
 
-pub(crate) union NodePtr<T, const B: usize, const C: usize> {
+pub union NodePtr<T, const B: usize, const C: usize> {
     pub(crate) children: ManuallyDrop<Box<[Option<Node<T, B, C>>; B]>>,
     pub(crate) values: ManuallyDrop<Box<[MaybeUninit<T>; C]>>,
 }
@@ -118,7 +118,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     pub fn set_length(&mut self, length: usize) {
-        self.length = NonZeroUsize::new(length).unwrap()
+        self.length = NonZeroUsize::new(length).unwrap();
     }
 
     fn from_children(length: usize, children: Box<[Option<Self>; B]>) -> Self {

@@ -1,4 +1,5 @@
 use crate::node::handle::{InternalMut, LeafMut};
+use crate::node::VariantMut;
 use crate::utils::{slice_index_of_ref, slice_shift_left, slice_shift_right};
 use crate::{node::Node, Root};
 use core::mem::{self, ManuallyDrop};
@@ -25,44 +26,44 @@ use core::{marker::PhantomData, mem::MaybeUninit};
 //         }
 //     }
 
-    //     pub fn move_forward(&mut self, mut offset: usize) {
-    //         // TODO: what to do when going out of bounds
+//     pub fn move_forward(&mut self, mut offset: usize) {
+//         // TODO: what to do when going out of bounds
 
-    //         if let Some(leaf) = self.leaf.as_mut() {
-    //             if self.leaf_index + offset < leaf.len() {
-    //                 self.leaf_index += offset;
-    //                 return;
-    //             }
+//         if let Some(leaf) = self.leaf.as_mut() {
+//             if self.leaf_index + offset < leaf.len() {
+//                 self.leaf_index += offset;
+//                 return;
+//             }
 
-    //             let mut prev_node = leaf.node();
-    //             offset -= leaf.len() - self.leaf_index;
+//             let mut prev_node = leaf.node();
+//             offset -= leaf.len() - self.leaf_index;
 
-    //             'height: for node in self.path.iter_mut() {
-    //                 let node = unsafe { node.assume_init_mut() };
-    //                 if let Some(node) = node {
-    //                     // FIXME: this transmute is not justified
-    //                     let mut index = slice_index_of_ref(node.children(), unsafe {
-    //                         core::mem::transmute(prev_node)
-    //                     });
-    //                     index += 1;
+//             'height: for node in self.path.iter_mut() {
+//                 let node = unsafe { node.assume_init_mut() };
+//                 if let Some(node) = node {
+//                     // FIXME: this transmute is not justified
+//                     let mut index = slice_index_of_ref(node.children(), unsafe {
+//                         core::mem::transmute(prev_node)
+//                     });
+//                     index += 1;
 
-    //                     for child in node.children()[index..].iter() {
-    //                         if let Some(child) = child {
-    //                             if offset < child.len() {
-    //                                 todo!();
-    //                             }
-    //                             offset -= child.len();
-    //                         } else {
-    //                             prev_node = node.node();
-    //                             continue 'height;
-    //                         }
-    //                     }
-    //                 } else {
-    //                     panic!()
-    //                 }
-    //             }
-    //         }
-    //     }
+//                     for child in node.children()[index..].iter() {
+//                         if let Some(child) = child {
+//                             if offset < child.len() {
+//                                 todo!();
+//                             }
+//                             offset -= child.len();
+//                         } else {
+//                             prev_node = node.node();
+//                             continue 'height;
+//                         }
+//                     }
+//                 } else {
+//                     panic!()
+//                 }
+//             }
+//         }
+//     }
 // }
 
 // TODO: auto traits: Send, Sync, Unpin, UnwindSafe?
@@ -79,17 +80,58 @@ pub struct CursorMut<'a, T, const B: usize, const C: usize> {
 }
 
 impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
-    pub(crate) unsafe fn new(
-        path: [MaybeUninit<*mut Node<T, B, C>>; usize::BITS as usize],
-        index: usize,
-        root: NonNull<Option<Root<T, B, C>>>,
-        leaf_index: usize,
-    ) -> Self {
+    pub(crate) fn new_at(mut root: NonNull<Option<Root<T, B, C>>>, mut index: usize) -> Self {
+        let len = unsafe { root.as_ref().as_ref().map_or(0, |n| n.node.len()) };
+        if index > len {
+            panic!();
+        }
+
+        let mut path: [MaybeUninit<*mut Node<T, B, C>>; usize::BITS as usize] =
+            unsafe { MaybeUninit::uninit().assume_init() };
+
+        if unsafe { root.as_ref().is_none() } {
+            return Self {
+                path,
+                index: 0,
+                root,
+                leaf_index: 0,
+                _marker: PhantomData,
+            };
+        }
+
+        let is_past_the_end = index == len;
+
+        if is_past_the_end {
+            index -= 1;
+        }
+
+        let mut i = unsafe { root.as_ref().as_ref().unwrap().height };
+        let mut cur_node = unsafe { root.as_mut().as_mut().unwrap().as_dyn_mut() };
+
+        debug_assert_eq!(cur_node.height(), i);
+        path[i].write(cur_node.node_ptr_mut());
+
+        let j = index;
+
+        'd: while let VariantMut::Internal { handle } = cur_node.into_variant_mut() {
+            for child in handle.into_children_mut() {
+                if index < child.len() {
+                    cur_node = child;
+                    i -= 1;
+                    debug_assert_eq!(cur_node.height(), i);
+                    path[i].write(cur_node.node_ptr_mut());
+                    continue 'd;
+                }
+                index -= child.len();
+            }
+            unreachable!();
+        }
+
         Self {
             path,
-            index,
-            leaf_index,
+            index: j + usize::from(is_past_the_end),
             root,
+            leaf_index: index + usize::from(is_past_the_end),
             _marker: PhantomData,
         }
     }
@@ -167,13 +209,12 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 if leaf.len() > 1 {
                     ret = leaf.remove_no_underflow(self.leaf_index);
                     leaf.set_len(leaf.len() - 1);
-                    return ret;
                 } else {
                     ret = leaf.values_mut().as_mut_ptr().read();
                     leaf.free();
                     *self.root.as_mut() = None;
-                    return ret;
                 }
+                return ret;
             }
         }
 
@@ -275,7 +316,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                             ret = cur.ptr.values[child_index].as_ptr().read();
                             let cur_ptr = (*cur.ptr.values).as_mut_ptr();
                             ptr::copy(
-                                cur_ptr.add(child_index+1),
+                                cur_ptr.add(child_index + 1),
                                 cur_ptr.add(child_index),
                                 C / 2 - child_index,
                             );
@@ -356,7 +397,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         }
 
         unsafe {
-            let root_height = self.height(); 
+            let root_height = self.height();
             let mut root = InternalMut::new(
                 self.height(),
                 &mut self.root.as_mut().as_mut().unwrap().node,
@@ -368,7 +409,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 *self.root.as_mut() = Some(Root {
                     height: root_height - 1,
                     node: old_root.node.ptr.children.as_ptr().read().unwrap(),
-                })
+                });
             }
         }
 
