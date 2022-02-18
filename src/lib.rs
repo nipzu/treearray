@@ -16,7 +16,7 @@ mod utils;
 
 pub use cursor::CursorMut;
 
-use iter::Iter;
+use iter::{Drain, Iter};
 use node::{DynNode, DynNodeMut, Node, Variant, VariantMut};
 
 // CONST INVARIANTS:
@@ -200,6 +200,10 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         Iter::new(self)
     }
 
+    pub fn drain(&mut self) -> Drain<T, B, C> {
+        Drain::new(self)
+    }
+
     // #[must_use]
     // pub fn cursor_at(&self, mut index: usize) -> Cursor<T, B, C> {
     //     todo!()
@@ -213,7 +217,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
 impl<T, const B: usize, const C: usize> Drop for BTreeVec<T, B, C> {
     fn drop(&mut self) {
-        // TODO: currently this just leaks memory
+        // self.drain();
     }
 }
 
@@ -351,8 +355,8 @@ mod tests {
 
     #[test]
     #[cfg_attr(miri, ignore)]
-    fn test_cursor_invariant() {
+    fn test_cursormut_invariant() {
         let t = trybuild::TestCases::new();
-        t.compile_fail("tests/variance/test_cursor_invariant.rs");
+        t.compile_fail("tests/variance/test_cursormut_invariant.rs");
     }
 }
