@@ -1,4 +1,4 @@
-use core::mem::{ManuallyDrop, MaybeUninit};
+use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
 use core::{mem, ptr, slice};
 
@@ -67,16 +67,16 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     pub unsafe fn pop_back(&mut self) -> T {
         unsafe {
             self.set_len(self.len() - 1);
-            self.node.ptr.values[self.len()].as_ptr().read()
+            self.node.ptr.values.as_ref()[self.len()].as_ptr().read()
         }
     }
 
     pub unsafe fn pop_front(&mut self) -> T {
         unsafe {
             self.set_len(self.len() - 1);
-            let ret = self.node.ptr.values[0].as_ptr().read();
+            let ret = self.node.ptr.values.as_mut()[0].as_ptr().read();
             let new_len = self.len();
-            let value_ptr = (*self.node.ptr.values).as_mut_ptr();
+            let value_ptr = self.node.ptr.values.as_mut().as_mut_ptr();
             ptr::copy(value_ptr.add(1), value_ptr, new_len);
             ret
         }
@@ -87,7 +87,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         unsafe {
             // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
             // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
-            let values_ptr = (*self.node.ptr.values).as_ptr();
+            let values_ptr = self.node.ptr.values.as_ref().as_ptr();
             // SAFETY: According to the invariants of `Node`, at least `self.len()`
             // values are guaranteed to be initialized and valid for use. The lifetime is the
             // same as `self`'s and the returned reference has thus unique access.
@@ -102,7 +102,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         unsafe {
             // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
             // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
-            let values_ptr = (*self.node.ptr.values).as_mut_ptr();
+            let values_ptr = self.node.ptr.values.as_mut().as_mut_ptr();
             // SAFETY: According to the invariants of `Node`, at least `self.len()`
             // values are guaranteed to be initialized and valid for use. The lifetime is the
             // same as `self`'s and the returned reference has thus unique access.
@@ -117,7 +117,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         unsafe {
             // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
             // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
-            let values_ptr = (*self.node.ptr.values).as_mut_ptr();
+            let values_ptr = self.node.ptr.values.as_mut().as_mut_ptr();
             // SAFETY: According to the invariants of `Node`, at least `self.len()`
             // values are guaranteed to be initialized and valid for use. The lifetime is the
             // same as `self.node`'s and the returned reference has thus unique access.
@@ -134,7 +134,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     // TODO: does not take ownership of self.node
     pub fn free(self) {
         unsafe {
-            ManuallyDrop::drop(&mut self.node.ptr.values);
+            drop(Box::from_raw(self.node.ptr.values.as_ptr()));
             // TODO: this might be useless
             mem::forget(self);
         }
@@ -153,7 +153,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         assert!(self.len() < C);
         assert!(index <= self.len());
         unsafe {
-            let index_ptr = (*self.node.ptr.values).as_mut_ptr().add(index);
+            let index_ptr = self.node.ptr.values.as_mut().as_mut_ptr().add(index);
             ptr::copy(index_ptr, index_ptr.add(1), self.len() - index);
             ptr::write(index_ptr, MaybeUninit::new(value));
             self.set_len(self.len() + 1);
@@ -256,7 +256,7 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
         debug_assert!(self.node.len() > C);
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        let children = unsafe { &**self.node.ptr.children };
+        let children = unsafe { self.node.ptr.children.as_ref() };
         let child_height = self.height.get() - 1;
         children
             .iter()
@@ -300,13 +300,13 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         // debug_assert!(self.len() > C);
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe { &self.node.ptr.children }
+        unsafe { self.node.ptr.children.as_ref() }
     }
 
     pub fn children_mut(&mut self) -> impl Iterator<Item = DynNodeMut<T, B, C>> + '_ {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        let children = unsafe { &mut **self.node.ptr.children };
+        let children = unsafe { self.node.ptr.children.as_mut() };
         let child_height = self.height.get() - 1;
         children.iter_mut().map_while(move |m| {
             m.as_mut()
@@ -315,13 +315,13 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>] {
-        unsafe { &mut **self.node.ptr.children }
+        unsafe { self.node.ptr.children.as_mut() }
     }
 
     pub fn into_children_mut(self) -> impl Iterator<Item = DynNodeMut<'a, T, B, C>> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        let children = unsafe { &mut **self.node.ptr.children };
+        let children = unsafe { self.node.ptr.children.as_mut() };
         let child_height = self.height.get() - 1;
         children.iter_mut().map_while(move |m| {
             m.as_mut()

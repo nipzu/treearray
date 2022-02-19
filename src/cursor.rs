@@ -1,8 +1,10 @@
+use alloc::boxed::Box;
+
 use crate::node::handle::{InternalMut, LeafMut};
 use crate::node::VariantMut;
 use crate::utils::{slice_index_of_ptr, slice_shift_left, slice_shift_right};
 use crate::{node::Node, Root};
-use core::mem::{self, ManuallyDrop};
+use core::mem;
 use core::num::NonZeroUsize;
 use core::ptr::{self, NonNull};
 use core::{marker::PhantomData, mem::MaybeUninit};
@@ -287,9 +289,9 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
                 *self.root.as_mut() = Some(Root {
                     height: root_height - 1,
-                    node: (&mut *old_root.node.ptr.children)[0].take().unwrap(),
+                    node: old_root.node.ptr.children.as_mut()[0].take().unwrap(),
                 });
-                ManuallyDrop::drop(&mut old_root.node.ptr.children);
+                drop(Box::from_raw(old_root.node.ptr.children.as_ptr()));
             }
         }
 
@@ -322,8 +324,8 @@ unsafe fn combine_leaves<T, const B: usize, const C: usize>(
         if prev.as_ref().unwrap().len() == C / 2 + 1 {
             let dst = prev.as_mut().unwrap();
             let mut src = cur.take().unwrap();
-            let dst_ptr = unsafe { (*dst.ptr.values).as_mut_ptr().add(C / 2 + 1) };
-            let src_ptr = unsafe { src.ptr.values.as_ptr() };
+            let dst_ptr = unsafe { dst.ptr.values.as_mut().as_mut_ptr().add(C / 2 + 1) };
+            let src_ptr = unsafe { src.ptr.values.as_mut().as_ptr() };
 
             ret = unsafe { ptr::read(src_ptr.add(child_index)).assume_init() };
 
@@ -334,7 +336,7 @@ unsafe fn combine_leaves<T, const B: usize, const C: usize>(
                     dst_ptr.add(child_index),
                     C / 2 - child_index,
                 );
-                ManuallyDrop::drop(&mut src.ptr.values);
+                drop(Box::from_raw(src.ptr.values.as_ptr()));
                 mem::forget(src);
             }
 
@@ -346,10 +348,10 @@ unsafe fn combine_leaves<T, const B: usize, const C: usize>(
                 let cur = cur.as_mut().unwrap();
 
                 let x = prev.pop_back();
-                ret = cur.ptr.values[child_index].as_ptr().read();
-                let cur_ptr = (*cur.ptr.values).as_mut_ptr();
+                ret = cur.ptr.values.as_mut()[child_index].as_ptr().read();
+                let cur_ptr = cur.ptr.values.as_mut().as_mut_ptr();
                 ptr::copy(cur_ptr, cur_ptr.add(1), child_index);
-                (*cur.ptr.values)[0].write(x);
+                cur.ptr.values.as_mut()[0].write(x);
             }
         }
     } else {
@@ -361,8 +363,8 @@ unsafe fn combine_leaves<T, const B: usize, const C: usize>(
         if next.as_ref().unwrap().len() == C / 2 + 1 {
             let dst = cur.as_mut().unwrap();
             let mut src = next.take().unwrap();
-            let dst_ptr = unsafe { (*dst.ptr.values).as_mut_ptr() };
-            let src_ptr = unsafe { src.ptr.values.as_ptr() };
+            let dst_ptr = unsafe { dst.ptr.values.as_mut().as_mut_ptr() };
+            let src_ptr = unsafe { src.ptr.values.as_mut().as_ptr() };
 
             ret = unsafe { ptr::read(dst_ptr.add(child_index)).assume_init() };
 
@@ -373,7 +375,7 @@ unsafe fn combine_leaves<T, const B: usize, const C: usize>(
                     dst.len() - child_index - 1,
                 );
                 ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(dst.len() - 1), src.len());
-                ManuallyDrop::drop(&mut src.ptr.values);
+                drop(Box::from_raw(src.ptr.values.as_ptr()));
             }
             mem::forget(src);
 
@@ -385,14 +387,14 @@ unsafe fn combine_leaves<T, const B: usize, const C: usize>(
                 let cur = cur.as_mut().unwrap();
 
                 let x = next.pop_front();
-                ret = cur.ptr.values[child_index].as_ptr().read();
-                let cur_ptr = (*cur.ptr.values).as_mut_ptr();
+                ret = cur.ptr.values.as_mut()[child_index].as_ptr().read();
+                let cur_ptr = cur.ptr.values.as_mut().as_mut_ptr();
                 ptr::copy(
                     cur_ptr.add(child_index + 1),
                     cur_ptr.add(child_index),
                     C / 2 - child_index,
                 );
-                (*cur.ptr.values)[C / 2].write(x);
+                cur.ptr.values.as_mut()[C / 2].write(x);
             }
         }
     }
@@ -418,7 +420,7 @@ unsafe fn combine_internals<T, const B: usize, const C: usize>(
         fst.children_slice_mut()[B / 2..].swap_with_slice(&mut snd.children_slice_mut()[..=B / 2]);
         fst.set_len(fst.len() + snd.len());
         unsafe {
-            ManuallyDrop::drop(&mut opt_snd.take().unwrap().ptr.children);
+            drop(Box::from_raw(opt_snd.take().unwrap().ptr.children.as_ptr()));
         }
         // debug_assert_eq!(fst.len(), sum_lens(fst.children()));
         return CombineResult::Merged;
@@ -429,7 +431,7 @@ unsafe fn combine_internals<T, const B: usize, const C: usize>(
             .swap_with_slice(&mut snd.children_slice_mut()[..B / 2]);
         fst.set_len(fst.len() + snd.len());
         unsafe {
-            ManuallyDrop::drop(&mut opt_snd.take().unwrap().ptr.children);
+            drop(Box::from_raw(opt_snd.take().unwrap().ptr.children.as_ptr()));
         }
         // debug_assert_eq!(fst.len(), sum_lens(fst.children()));
         return CombineResult::Merged;

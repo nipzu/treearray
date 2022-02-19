@@ -1,5 +1,6 @@
-use core::mem::{ManuallyDrop, MaybeUninit};
+use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
+use core::ptr::NonNull;
 
 use alloc::boxed::Box;
 
@@ -94,8 +95,8 @@ pub struct Node<T, const B: usize, const C: usize> {
 }
 
 pub union NodePtr<T, const B: usize, const C: usize> {
-    pub(crate) children: ManuallyDrop<Box<[Option<Node<T, B, C>>; B]>>,
-    pub(crate) values: ManuallyDrop<Box<[MaybeUninit<T>; C]>>,
+    pub(crate) children: NonNull<[Option<Node<T, B, C>>; B]>,
+    pub(crate) values: NonNull<[MaybeUninit<T>; C]>,
 }
 
 pub enum Variant<'a, T, const B: usize, const C: usize> {
@@ -128,7 +129,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         Self {
             length: NonZeroUsize::new(length).unwrap(),
             ptr: NodePtr {
-                children: ManuallyDrop::new(children),
+                children: unsafe { NonNull::new_unchecked(Box::into_raw(children)) },
             },
         }
     }
@@ -156,7 +157,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         Self {
             length: NonZeroUsize::new(length).unwrap(),
             ptr: NodePtr {
-                values: ManuallyDrop::new(values),
+                values: unsafe { NonNull::new_unchecked(Box::into_raw(values)) },
             },
         }
     }
@@ -171,7 +172,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         Self {
             length: NonZeroUsize::new(1).unwrap(),
             ptr: NodePtr {
-                values: ManuallyDrop::new(boxed_values),
+                values: unsafe { NonNull::new_unchecked(Box::into_raw(boxed_values)) },
             },
         }
     }
