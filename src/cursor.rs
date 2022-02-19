@@ -199,7 +199,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         }
     }
 
-    // TODO: leaks memory
     pub fn remove(&mut self) -> T {
         if unsafe { self.root.as_ref().is_none() } {
             panic!();
@@ -221,17 +220,16 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         }
 
         // root is internal
-
         let mut parent = unsafe { InternalMut::new(1, &mut *self.path[1].assume_init()) };
         let child_index = self.leaf_index;
         let self_index = slice_index_of_ptr(parent.children(), unsafe {
             &*self.path[0].assume_init().cast()
         });
-        let mut handle = unsafe { LeafMut::new(&mut *self.path[0].assume_init()) };
 
         unsafe {
-            ret = if handle.len() - 1 > C / 2 {
-                handle.remove_no_underflow(child_index)
+            let mut leaf = LeafMut::new(&mut *self.path[0].assume_init());
+            ret = if leaf.len() - 1 > C / 2 {
+                leaf.remove_no_underflow(child_index)
             } else {
                 combine_leaves(&mut parent, child_index, self_index)
             };

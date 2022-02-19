@@ -359,4 +359,15 @@ mod tests {
         let t = trybuild::TestCases::new();
         t.compile_fail("tests/variance/test_cursormut_invariant.rs");
     }
+
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn test_bvec_covariant() {
+        fn foo<'a>(_x: crate::BTreeVec<&'a i32>, _y: &'a i32) {}
+
+        let x = crate::BTreeVec::<&'static i32>::new();
+        let v = 123;
+        let r = &v;
+        foo(x, r);
+    }
 }
