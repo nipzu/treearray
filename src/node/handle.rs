@@ -42,7 +42,7 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
 }
 
 pub struct LeafMut<'a, T, const B: usize, const C: usize> {
-    node: &'a mut Node<T, B, C>,
+    pub node: &'a mut Node<T, B, C>,
 }
 
 impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
@@ -222,6 +222,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
             let index_ptr = self.values_mut().as_mut_ptr().add(index);
             let ret = index_ptr.read();
             ptr::copy(index_ptr.add(1), index_ptr, self.len() - index - 1);
+            self.set_len(self.len() - 1);
             ret
         }
     }
@@ -290,7 +291,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         self.node.len()
     }
 
-    pub unsafe fn set_len(&mut self, new_len: usize) {
+    pub fn set_len(&mut self, new_len: usize) {
         // debug_assert!(new_len > C);
         self.node.length = NonZeroUsize::new(new_len).unwrap();
     }
@@ -339,7 +340,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
             }
         }
         self.insert_fitting(index + 1, new_child);
-        unsafe { self.set_len(self.len() + 1) };
+        self.set_len(self.len() + 1);
         None
     }
 
@@ -377,7 +378,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
         debug_assert_eq!(new_self_len + node_len, sum_lens(self.children()));
         debug_assert_eq!(new_nodes_len + 1, sum_lens(new_box.as_ref()));
-        unsafe { self.set_len(new_self_len + node_len) };
+        self.set_len(new_self_len + node_len);
         Node::from_children(new_nodes_len + 1, new_box)
     }
 
@@ -404,7 +405,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
         debug_assert_eq!(new_self_len, sum_lens(self.children()));
         debug_assert_eq!(new_nodes_len + node_len + 1, sum_lens(new_box.as_ref()));
-        unsafe { self.set_len(new_self_len) };
+        self.set_len(new_self_len);
         Node::from_children(new_nodes_len + node_len + 1, new_box)
     }
 }

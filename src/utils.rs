@@ -31,8 +31,8 @@ pub fn slice_shift_right<T>(slice: &mut [T], new_start: T) -> T {
     }
 }
 
-pub fn slice_index_of_ref<T>(slice: &[T], elem: &T) -> usize {
+pub fn slice_index_of_ptr<T>(slice: &[T], elem: *const T) -> usize {
     let slice_addr = slice.as_ptr() as usize;
-    let elem_addr = elem as *const T as usize;
+    let elem_addr = elem as usize;
     (elem_addr - slice_addr) / size_of::<T>()
 }
