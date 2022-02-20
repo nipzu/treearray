@@ -1,5 +1,5 @@
 error[E0515]: cannot return value referencing local variable `local`
-  --> tests/variance/test_cursormut_invariant.rs:16:5
+  --> tests/compile_fail/test_cursormut_invariant.rs:16:5
    |
 9  |         let local_str: &str = &local;
    |                               ------ `local` is borrowed here

@@ -4,7 +4,7 @@
 
 extern crate alloc;
 
-use core::fmt;
+use core::{fmt, marker::PhantomData};
 use core::mem::size_of;
 use core::ptr::NonNull;
 
@@ -25,6 +25,8 @@ use node::{DynNode, DynNodeMut, Node, Variant, VariantMut};
 // - `C * size_of<T>() <= isize::MAX`
 pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
     root: Option<Root<T, B, C>>,
+    // TODO: is this even needed?
+    _marker: PhantomData<T>,
 }
 
 struct Root<T, const B: usize, const C: usize> {
@@ -68,7 +70,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             assert!(arr_len <= isize::MAX as usize);
         }
 
-        Self { root: None }
+        Self { root: None, _marker: PhantomData }
     }
 
     #[must_use]
@@ -357,11 +359,10 @@ mod tests {
     #[cfg_attr(miri, ignore)]
     fn test_cursormut_invariant() {
         let t = trybuild::TestCases::new();
-        t.compile_fail("tests/variance/test_cursormut_invariant.rs");
+        t.compile_fail("tests/compile_fail/test_cursormut_invariant.rs");
     }
 
     #[test]
-    #[cfg_attr(miri, ignore)]
     fn test_bvec_covariant() {
         fn foo<'a>(_x: crate::BTreeVec<&'a i32>, _y: &'a i32) {}
 
@@ -369,5 +370,12 @@ mod tests {
         let v = 123;
         let r = &v;
         foo(x, r);
+    }
+    
+    #[test]
+    #[cfg_attr(miri, ignore)]
+    fn test_bvec_drop_check() {
+        let t = trybuild::TestCases::new();
+        t.compile_fail("tests/compile_fail/test_bvec_drop_check.rs");
     }
 }

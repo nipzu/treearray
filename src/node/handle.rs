@@ -1,6 +1,6 @@
 use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
-use core::{mem, ptr, slice};
+use core::{ptr, slice};
 
 use alloc::boxed::Box;
 
@@ -129,15 +129,6 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     fn is_full(&self) -> bool {
         self.values().len() == C
-    }
-
-    // TODO: does not take ownership of self.node
-    pub fn free(self) {
-        unsafe {
-            drop(Box::from_raw(self.node.ptr.values.as_ptr()));
-            // TODO: this might be useless
-            mem::forget(self);
-        }
     }
 
     pub fn insert(&mut self, index: usize, value: T) -> Option<Node<T, B, C>> {

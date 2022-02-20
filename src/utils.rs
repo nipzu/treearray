@@ -1,4 +1,11 @@
-use core::{mem::size_of, ptr};
+use core::{
+    mem::size_of,
+    ptr,
+};
+
+use alloc::boxed::Box;
+
+use crate::node::Node;
 
 pub fn slice_insert_forget_last<T>(slice: &mut [T], index: usize, value: T) {
     assert!(index < slice.len());
@@ -35,4 +42,16 @@ pub fn slice_index_of_ptr<T>(slice: &[T], elem: *const T) -> usize {
     let slice_addr = slice.as_ptr() as usize;
     let elem_addr = elem as usize;
     (elem_addr - slice_addr) / size_of::<T>()
+}
+
+pub unsafe fn free_internal<T, const B: usize, const C: usize>(node: Node<T, B, C>) {
+    unsafe {
+        Box::from_raw(node.ptr.children.as_ptr());
+    }
+}
+
+pub unsafe fn free_leaf<T, const B: usize, const C: usize>(node: Node<T, B, C>) {
+    unsafe {
+        Box::from_raw(node.ptr.values.as_ptr());
+    }
 }

@@ -1,0 +1,11 @@
+error[E0597]: `s` does not live long enough
+ --> tests/compile_fail/test_bvec_drop_check.rs:5:21
+  |
+5 |         x.push_back(s.as_str());
+  |                     ^^^^^^^^^^ borrowed value does not live long enough
+6 |     }
+  |     - `s` dropped here while still borrowed
+7 | }
+  | - borrow might be used here, when `x` is dropped and runs the `Drop` code for type `BTreeVec`
+  |
+  = note: values in a scope are dropped in the opposite order they are defined
