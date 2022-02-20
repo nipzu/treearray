@@ -4,9 +4,8 @@
 
 extern crate alloc;
 
-use core::{fmt, marker::PhantomData};
-use core::mem::size_of;
 use core::ptr::NonNull;
+use core::{fmt, marker::PhantomData};
 
 mod cursor;
 pub mod iter;
@@ -22,7 +21,6 @@ use node::{DynNode, DynNodeMut, Node, Variant, VariantMut};
 // CONST INVARIANTS:
 // - `B >= 5`
 // - `C % 2 == 1`, which implies `C >= 1`
-// - `C * size_of<T>() <= isize::MAX`
 pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
     root: Option<Root<T, B, C>>,
     // TODO: is this even needed?
@@ -49,7 +47,6 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     /// Panics if any of
     /// - `B < 5`,
     /// - `C` is even,
-    /// - `C * size_of<T>() > isize::MAX`.
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
@@ -62,15 +59,10 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         // Also takes care of the `C == 0` case.
         assert!(C % 2 == 1);
 
-        #[allow(clippy::checked_conversions)]
-        {
-            // `slice::from_raw_parts` requires that
-            // `len * size_of<T>() <= isize::MAX`
-            let arr_len = C.saturating_mul(size_of::<T>());
-            assert!(arr_len <= isize::MAX as usize);
+        Self {
+            root: None,
+            _marker: PhantomData,
         }
-
-        Self { root: None, _marker: PhantomData }
     }
 
     #[must_use]
@@ -213,7 +205,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
     #[must_use]
     pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T, B, C> {
-        CursorMut::new_at(NonNull::new(&mut self.root).unwrap(), index)
+        CursorMut::new_at(NonNull::from(&mut self.root), index)
     }
 }
 
@@ -371,7 +363,7 @@ mod tests {
         let r = &v;
         foo(x, r);
     }
-    
+
     #[test]
     #[cfg_attr(miri, ignore)]
     fn test_bvec_drop_check() {

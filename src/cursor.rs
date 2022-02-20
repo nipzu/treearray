@@ -1,6 +1,8 @@
 use crate::node::handle::{InternalMut, LeafMut};
 use crate::node::VariantMut;
-use crate::utils::{slice_index_of_ptr, slice_shift_left, slice_shift_right, free_internal, free_leaf};
+use crate::utils::{
+    free_internal, free_leaf, slice_index_of_ptr, slice_shift_left, slice_shift_right,
+};
 use crate::{node::Node, Root};
 use core::num::NonZeroUsize;
 use core::ptr::{self, NonNull};

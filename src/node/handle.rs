@@ -1,12 +1,12 @@
 use core::mem::MaybeUninit;
 use core::num::NonZeroUsize;
-use core::{ptr, slice};
+use core::ptr;
 
 use alloc::boxed::Box;
 
 use super::{DynNode, DynNodeMut, Node};
 
-use crate::utils::slice_insert_forget_last;
+use crate::utils::{slice_assume_init_mut, slice_assume_init_ref, slice_insert_forget_last};
 
 pub struct Leaf<'a, T, const B: usize, const C: usize> {
     node: &'a Node<T, B, C>,
@@ -27,17 +27,7 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
 
     pub fn values(&self) -> &'a [T] {
         debug_assert!(self.len() <= C);
-        unsafe {
-            // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
-            // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
-            let values_ptr = self.node.ptr.values.as_ptr();
-            // SAFETY: According to the invariants of `Node`, at least `self.len()`
-            // values are guaranteed to be initialized and valid for use. The lifetime is the
-            // same as `self.node`'s and the slice is thus not going to be written to during
-            // the lifetime. `self.len() * size_of::<T>()` is no greater than `isize::MAX`
-            // by the const invariants of `BTreeVec`.
-            slice::from_raw_parts(values_ptr.cast(), self.len())
-        }
+        unsafe { slice_assume_init_ref(&self.node.ptr.values.as_ref()[..self.len()]) }
     }
 }
 
@@ -84,47 +74,17 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     pub fn values(&self) -> &[T] {
         debug_assert!(self.len() <= C);
-        unsafe {
-            // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
-            // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
-            let values_ptr = self.node.ptr.values.as_ref().as_ptr();
-            // SAFETY: According to the invariants of `Node`, at least `self.len()`
-            // values are guaranteed to be initialized and valid for use. The lifetime is the
-            // same as `self`'s and the returned reference has thus unique access.
-            // `self.len() * size_of::<T>()` is no greater than `isize::MAX`
-            // by the const invariants of `BTreeVec`.
-            slice::from_raw_parts(values_ptr.cast(), self.len())
-        }
+        unsafe { slice_assume_init_ref(&self.node.ptr.values.as_ref()[..self.len()]) }
     }
 
     pub fn values_mut(&mut self) -> &mut [T] {
         debug_assert!(self.len() <= C);
-        unsafe {
-            // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
-            // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
-            let values_ptr = self.node.ptr.values.as_mut().as_mut_ptr();
-            // SAFETY: According to the invariants of `Node`, at least `self.len()`
-            // values are guaranteed to be initialized and valid for use. The lifetime is the
-            // same as `self`'s and the returned reference has thus unique access.
-            // `self.len() * size_of::<T>()` is no greater than `isize::MAX`
-            // by the const invariants of `BTreeVec`.
-            slice::from_raw_parts_mut(values_ptr.cast(), self.len())
-        }
+        unsafe { slice_assume_init_mut(&mut self.node.ptr.values.as_mut()[..self.len()]) }
     }
 
     pub fn into_values_mut(self) -> &'a mut [T] {
         debug_assert!(self.len() <= C);
-        unsafe {
-            // SAFETY: `self.node` is guaranteed to be a leaf node by the safety invariants of
-            // `Self::new`, so the `values` field of the `self.node.ptr` union can be read.
-            let values_ptr = self.node.ptr.values.as_mut().as_mut_ptr();
-            // SAFETY: According to the invariants of `Node`, at least `self.len()`
-            // values are guaranteed to be initialized and valid for use. The lifetime is the
-            // same as `self.node`'s and the returned reference has thus unique access.
-            // `self.len() * size_of::<T>()` is no greater than `isize::MAX`
-            // by the const invariants of `BTreeVec`.
-            slice::from_raw_parts_mut(values_ptr.cast(), self.len())
-        }
+        unsafe { slice_assume_init_mut(&mut self.node.ptr.values.as_mut()[..self.len()]) }
     }
 
     fn is_full(&self) -> bool {
