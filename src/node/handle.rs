@@ -1,4 +1,4 @@
-use core::mem::MaybeUninit;
+use core::mem::{self, MaybeUninit};
 use core::num::NonZeroUsize;
 use core::ptr;
 
@@ -245,6 +245,12 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     pub fn set_len(&mut self, new_len: usize) {
         // debug_assert!(new_len > C);
         self.node.length = NonZeroUsize::new(new_len).unwrap();
+    }
+
+    pub fn index_of_child_ptr(&self, elem_ptr: *const Option<Node<T, B, C>>) -> usize {
+        let slice_addr = unsafe { self.node.ptr.children.as_ptr() as usize };
+        let elem_addr = elem_ptr as usize;
+        (elem_addr - slice_addr) / mem::size_of::<Option<Node<T, B, C>>>()
     }
 
     pub fn children(&self) -> &[Option<Node<T, B, C>>; B] {

@@ -1,7 +1,4 @@
-use core::{
-    mem::{size_of, MaybeUninit},
-    ptr,
-};
+use core::{mem::MaybeUninit, ptr};
 
 use alloc::boxed::Box;
 
@@ -36,12 +33,6 @@ pub fn slice_shift_right<T>(slice: &mut [T], new_start: T) -> T {
         ptr::write(slice_ptr, new_start);
         last
     }
-}
-
-pub fn slice_index_of_ptr<T>(slice: &[T], elem: *const T) -> usize {
-    let slice_addr = slice.as_ptr() as usize;
-    let elem_addr = elem as usize;
-    (elem_addr - slice_addr) / size_of::<T>()
 }
 
 pub unsafe fn free_internal<T, const B: usize, const C: usize>(node: Node<T, B, C>) {
