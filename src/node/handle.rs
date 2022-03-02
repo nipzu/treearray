@@ -1,6 +1,7 @@
 use core::mem::{self, MaybeUninit};
 use core::num::NonZeroUsize;
-use core::ptr;
+use core::ops::RangeBounds;
+use core::{ptr, slice};
 
 use alloc::boxed::Box;
 
@@ -43,6 +44,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     /// `node` must be a leaf node i.e. `node.len() <= C`.
     pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
         debug_assert!(node.len() <= C);
+        debug_assert!(node.len() != 0);
         Self { node }
     }
 
@@ -189,10 +191,16 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
     pub unsafe fn new(height: usize, node: &'a Node<T, B, C>) -> Self {
-        debug_assert!(node.len() > C);
         Self {
             height: NonZeroUsize::new(height).unwrap(),
             node,
+        }
+    }
+
+    pub fn is_singleton(&self) -> bool {
+        unsafe {
+            let children = self.node.ptr.children.as_ptr();
+            (*children).iter().take_while(|n| n.is_some()).count() == 1
         }
     }
 
@@ -227,7 +235,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
     pub unsafe fn new(height: usize, node: &'a mut Node<T, B, C>) -> Self {
-        // debug_assert!(node.len() > C);
         Self {
             height: NonZeroUsize::new(height).unwrap(),
             node,
@@ -243,7 +250,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn set_len(&mut self, new_len: usize) {
-        // debug_assert!(new_len > C);
         self.node.length = NonZeroUsize::new(new_len).unwrap();
     }
 
@@ -254,25 +260,46 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn children(&self) -> &[Option<Node<T, B, C>>; B] {
-        // debug_assert!(self.len() > C);
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
         unsafe { self.node.ptr.children.as_ref() }
     }
 
-    pub fn children_mut(&mut self) -> impl Iterator<Item = DynNodeMut<T, B, C>> + '_ {
-        // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
-        // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        let children = unsafe { self.node.ptr.children.as_mut() };
-        let child_height = self.height.get() - 1;
-        children.iter_mut().map_while(move |m| {
-            m.as_mut()
-                .map(|n| unsafe { DynNodeMut::new(child_height, n) })
-        })
+    pub fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
+        unsafe { self.node.ptr.children.as_mut() }
     }
 
-    pub fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>] {
-        unsafe { self.node.ptr.children.as_mut() }
+    pub unsafe fn children_slice_range_mut(
+        &mut self,
+        range: impl RangeBounds<usize>,
+    ) -> &mut [Option<Node<T, B, C>>] {
+        let start = match range.start_bound() {
+            core::ops::Bound::Included(i) => *i,
+            core::ops::Bound::Excluded(i) => i + 1,
+            core::ops::Bound::Unbounded => 0,
+        };
+
+        let end = match range.end_bound() {
+            core::ops::Bound::Included(i) => i + 1,
+            core::ops::Bound::Excluded(i) => *i,
+            core::ops::Bound::Unbounded => B,
+        };
+
+        unsafe {
+            slice::from_raw_parts_mut(
+                self.node
+                    .ptr
+                    .children
+                    .as_ptr()
+                    .cast::<Option<Node<T, B, C>>>()
+                    .add(start),
+                end - start,
+            )
+        }
+    }
+
+    pub fn get_child_mut(&mut self, index: usize) -> &mut Option<Node<T, B, C>> {
+        unsafe { &mut (*self.node.ptr.children.as_ptr())[index] }
     }
 
     pub fn into_children_mut(self) -> impl Iterator<Item = DynNodeMut<'a, T, B, C>> {

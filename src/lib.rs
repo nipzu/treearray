@@ -211,7 +211,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
 impl<T, const B: usize, const C: usize> Drop for BTreeVec<T, B, C> {
     fn drop(&mut self) {
-        // self.drain();
+        self.drain();
     }
 }
 
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn test_insert_front_back() {
-        let mut b = BTreeVec::<i32, 6, 5>::new();
+        let mut b = BTreeVec::<i32, 7, 5>::new();
         for x in 0..500 {
             b.push_back(x);
         }
@@ -251,6 +251,22 @@ mod tests {
         }
 
         for (a, b) in b.iter().zip(-500..) {
+            assert_eq!(*a, b);
+        }
+    }
+
+    #[test]
+    fn test_insert_front_back2() {
+        let mut b = BTreeVec::<i32, 5, 5>::new();
+        for x in 0..20 {
+            b.push_back(x);
+        }
+
+        for x in (-20..0).rev() {
+            b.push_front(x)
+        }
+
+        for (a, b) in b.iter().zip(-20..) {
             assert_eq!(*a, b);
         }
     }
@@ -319,26 +335,26 @@ mod tests {
 
         let mut v = Vec::new();
         // let mut b_3_3 = BTreeVec::<i32, 3, 3>::new();
-        let mut b_5_1 = BTreeVec::<i32, 5, 5>::new();
+        let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
 
         for x in 0..1000 {
             v.push(x);
             // b_3_3.push_back(x);
-            b_5_1.push_back(x);
+            b_5_5.push_back(x);
         }
 
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len());
             let v_rem = v.remove(index);
             // b_3_3.remove(index);
-            let b_5_1_rem = b_5_1.remove(index);
+            let b_5_1_rem = b_5_5.remove(index);
             // assert_eq!(v.len(), b_3_3.len());
-            assert_eq!(v.len(), b_5_1.len());
+            assert_eq!(v.len(), b_5_5.len());
             assert_eq!(v_rem, b_5_1_rem);
         }
 
         // assert_eq!(v, b_3_3.iter().copied().collect::<Vec<_>>());
-        assert_eq!(v, b_5_1.iter().copied().collect::<Vec<_>>());
+        assert_eq!(v, b_5_5.iter().copied().collect::<Vec<_>>());
     }
 
     // #[test]
