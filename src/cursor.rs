@@ -203,7 +203,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
         let ret;
         unsafe {
-            if self.root.as_ref().as_ref().unwrap().height == 0 {
+            if self.height() == 0 {
                 debug_assert_eq!(self.leaf_index, self.index);
                 let mut leaf = LeafMut::new(&mut self.root.as_mut().as_mut().unwrap().node);
                 if self.leaf_index >= leaf.len() {
@@ -249,25 +249,28 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             for height in 1..self.height() {
                 let mut parent =
                     InternalMut::new(height + 1, &mut *self.path[height + 1].assume_init());
+                // TODO: make another loop after non-underfull?
                 let cur_ptr = self.path[height].assume_init();
-                let mut parent_index = parent.index_of_child_ptr(cur_ptr.cast());
                 let cur_node = InternalMut::new(height, &mut *cur_ptr);
 
                 parent.set_len(parent.len() - 1);
 
                 if cur_node.children()[B / 2].is_none() {
+                    let mut parent_index = parent.index_of_child_ptr(cur_ptr.cast());
                     let (fst, snd);
 
-                    if parent_index == 0 {
+                    let res = if parent_index == 0 {
                         fst = &mut *cur_ptr.cast();
                         snd = parent.get_child_mut(1);
                         parent_index += 1;
+                        combine_internals_fst_underfull(fst, snd, height)
                     } else {
                         fst = parent.get_child_mut(parent_index - 1);
                         snd = &mut *cur_ptr.cast();
-                    }
+                        combine_internals_snd_underfull(fst, snd, height)
+                    };
 
-                    if let CombineResult::Merged = combine_internals(fst, snd, height) {
+                    if let CombineResult::Merged = res {
                         slice_shift_left(parent.children_slice_range_mut(parent_index..), None);
                         self.path[height]
                             .write(parent.get_child_mut(parent_index - 1).as_mut().unwrap());
@@ -397,19 +400,16 @@ unsafe fn combine_leaves<T, const B: usize, const C: usize>(
     ret
 }
 
-unsafe fn combine_internals<T, const B: usize, const C: usize>(
+unsafe fn combine_internals_fst_underfull<T, const B: usize, const C: usize>(
     opt_fst: &mut Option<Node<T, B, C>>,
     opt_snd: &mut Option<Node<T, B, C>>,
     height: usize,
 ) -> CombineResult {
     let mut fst = unsafe { InternalMut::new(height, opt_fst.as_mut().unwrap()) };
     let mut snd = unsafe { InternalMut::new(height, opt_snd.as_mut().unwrap()) };
-    let fst_underfull = fst.children()[B / 2].is_none();
-    let snd_underfull = snd.children()[B / 2].is_none();
-    let fst_almost_underfull = fst.children()[B / 2 + 1].is_none();
     let snd_almost_underfull = snd.children()[B / 2 + 1].is_none();
 
-    if fst_underfull && snd_almost_underfull {
+    if snd_almost_underfull {
         unsafe {
             fst.children_slice_range_mut(B / 2..)
                 .swap_with_slice(snd.children_slice_range_mut(..=B / 2));
@@ -417,11 +417,28 @@ unsafe fn combine_internals<T, const B: usize, const C: usize>(
             debug_assert!(snd.children().iter().all(Option::is_none));
             free_internal(opt_snd.take().unwrap());
         }
-        // debug_assert_eq!(fst.len(), sum_lens(fst.children()));
-        return CombineResult::Merged;
-    }
+        CombineResult::Merged
+    } else {
+        let x = slice_shift_left(snd.children_slice_mut(), None).unwrap();
 
-    if fst_almost_underfull && snd_underfull {
+        snd.set_len(snd.len() - x.len());
+        fst.set_len(fst.len() + x.len());
+
+        *fst.get_child_mut(B / 2) = Some(x);
+        CombineResult::Ok
+    }
+}
+
+unsafe fn combine_internals_snd_underfull<T, const B: usize, const C: usize>(
+    opt_fst: &mut Option<Node<T, B, C>>,
+    opt_snd: &mut Option<Node<T, B, C>>,
+    height: usize,
+) -> CombineResult {
+    let mut fst = unsafe { InternalMut::new(height, opt_fst.as_mut().unwrap()) };
+    let mut snd = unsafe { InternalMut::new(height, opt_snd.as_mut().unwrap()) };
+    let fst_almost_underfull = fst.children()[B / 2 + 1].is_none();
+
+    if fst_almost_underfull {
         unsafe {
             fst.children_slice_range_mut(B / 2 + 1..)
                 .swap_with_slice(snd.children_slice_range_mut(..B / 2));
@@ -429,38 +446,17 @@ unsafe fn combine_internals<T, const B: usize, const C: usize>(
             debug_assert!(snd.children().iter().all(Option::is_none));
             free_internal(opt_snd.take().unwrap());
         }
-        // debug_assert_eq!(fst.len(), sum_lens(fst.children()));
-        return CombineResult::Merged;
-    }
-
-    if fst_underfull {
-        let x = slice_shift_left(snd.children_slice_mut(), None).unwrap();
-
-        snd.set_len(snd.len() - x.len());
-        fst.set_len(fst.len() + x.len());
-
-        *fst.get_child_mut(B / 2) = Some(x);
-        // debug_assert_eq!(fst.len(), sum_lens(fst.children()));
-        // debug_assert_eq!(snd.len(), sum_lens(snd.children()));
-        return CombineResult::Ok;
-    }
-
-    if snd_underfull {
+        CombineResult::Merged
+    } else {
         for i in (0..B).rev() {
-            if fst.get_child_mut(i).is_some() {
-                let x = fst.children_slice_mut()[i].take().unwrap();
-
+            if let Some(x) = fst.get_child_mut(i).take() {
                 fst.set_len(fst.len() - x.len());
                 snd.set_len(snd.len() + x.len());
 
                 slice_shift_right(snd.children_slice_mut(), Some(x));
-                // debug_assert_eq!(fst.len(), sum_lens(fst.children()));
-                // debug_assert_eq!(snd.len(), sum_lens(snd.children()));
                 return CombineResult::Ok;
             }
         }
         unreachable!();
     }
-
-    CombineResult::Ok
 }
