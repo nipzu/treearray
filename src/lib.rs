@@ -322,8 +322,7 @@ mod tests {
             assert_eq!(v_rem, b_5_1_rem);
         }
 
-        // assert_eq!(v, b_3_3.iter().copied().collect::<Vec<_>>());
-        assert_eq!(v, b_5_1.iter().copied().collect::<Vec<_>>());
+        assert!(b_5_1.is_empty());
     }
 
     #[test]
@@ -347,14 +346,38 @@ mod tests {
             let index = rng.gen_range(0..v.len());
             let v_rem = v.remove(index);
             // b_3_3.remove(index);
-            let b_5_1_rem = b_5_5.remove(index);
+            let b_5_5_rem = b_5_5.remove(index);
             // assert_eq!(v.len(), b_3_3.len());
             assert_eq!(v.len(), b_5_5.len());
-            assert_eq!(v_rem, b_5_1_rem);
+            assert_eq!(v_rem, b_5_5_rem);
+        }
+        assert!(b_5_5.is_empty());
+    }
+
+    #[test]
+    fn test_random_double_removals() {
+        use alloc::vec::Vec;
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+
+        let mut v = Vec::new();
+        let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
+
+        for x in 0..1000 {
+            v.push(x);
+            b_5_5.push_back(x);
         }
 
-        // assert_eq!(v, b_3_3.iter().copied().collect::<Vec<_>>());
-        assert_eq!(v, b_5_5.iter().copied().collect::<Vec<_>>());
+        while !v.is_empty() {
+            let index = rng.gen_range(0..v.len() - 1);
+            let mut cursor = b_5_5.cursor_at_mut(index);
+            let v1 = cursor.remove();
+            let v2 = cursor.remove();
+            assert_eq!(v1, v.remove(index));
+            assert_eq!(v2, v.remove(index));
+            assert_eq!(v.len(), b_5_5.len());
+        }
     }
 
     // #[test]
