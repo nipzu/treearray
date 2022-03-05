@@ -142,16 +142,16 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
     #[must_use]
     #[inline]
-    pub fn last(&self) -> Option<&T> {
-        // If `self.len() == 0`, the index wraps to `usize::MAX`
-        // which is definitely outside the range of an empty array.
-        self.get(self.len().wrapping_sub(1))
+    pub fn first_mut(&mut self) -> Option<&mut T> {
+        self.get_mut(0)
     }
 
     #[must_use]
     #[inline]
-    pub fn first_mut(&mut self) -> Option<&mut T> {
-        self.get_mut(0)
+    pub fn last(&self) -> Option<&T> {
+        // If `self.len() == 0`, the index wraps to `usize::MAX`
+        // which is definitely outside the range of an empty array.
+        self.get(self.len().wrapping_sub(1))
     }
 
     #[must_use]
