@@ -294,17 +294,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe { &mut (*self.node.ptr.children.as_ptr())[index] }
     }
 
-    // pub fn into_children_mut(self) -> impl Iterator<Item = DynNodeMut<'a, T, B, C>> {
-    //     // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
-    //     // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-    //     let children = unsafe { self.node.ptr.children.as_mut() };
-    //     let child_height = self.height.get() - 1;
-    //     children.iter_mut().map_while(move |m| {
-    //         m.as_mut()
-    //             .map(|n| unsafe { DynNodeMut::new(child_height, n) })
-    //     })
-    // }
-
     pub unsafe fn insert_node(
         &mut self,
         index: usize,
