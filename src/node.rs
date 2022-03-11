@@ -26,7 +26,7 @@ pub struct Node<T, const B: usize, const C: usize> {
 
 pub union NodePtr<T, const B: usize, const C: usize> {
     pub(crate) children: NonNull<[Option<Node<T, B, C>>; B]>,
-    pub(crate) values: NonNull<[MaybeUninit<T>; C]>,
+    values: NonNull<[MaybeUninit<T>; C]>,
 }
 
 impl<T, const B: usize, const C: usize> Node<T, B, C> {
@@ -38,14 +38,35 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         self.length.get()
     }
 
+    unsafe fn values(&self) -> &[MaybeUninit<T>; C] {
+        unsafe {
+            self.ptr.values.as_ref()
+        }
+    }
+
+    pub unsafe fn values_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
+        unsafe {
+            self.ptr.values.as_mut()
+        }
+    }
+
+    unsafe fn children(&self) -> &[Option<Self>; B] {
+        unsafe {
+            self.ptr.children.as_ref()
+        }
+    }
+
+    pub unsafe fn children_mut(&mut self) -> &mut [Option<Self>; B] {
+        unsafe {
+            self.ptr.children.as_mut()
+        }
+    }
+
     pub fn set_length(&mut self, length: usize) {
         self.length = NonZeroUsize::new(length).unwrap();
     }
 
     fn from_children(length: usize, children: Box<[Option<Self>; B]>) -> Self {
-        assert!(length > C);
-
-        // SAFETY: `length > C`, so the `Node` is considered an internal node as it should be.
         Self {
             length: NonZeroUsize::new(length).unwrap(),
             ptr: NodePtr {

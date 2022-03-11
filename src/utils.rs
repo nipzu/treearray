@@ -35,15 +35,15 @@ pub fn slice_shift_right<T>(slice: &mut [T], new_start: T) -> T {
     }
 }
 
-pub unsafe fn free_internal<T, const B: usize, const C: usize>(node: Node<T, B, C>) {
+pub unsafe fn free_internal<T, const B: usize, const C: usize>(mut node: Node<T, B, C>) {
     unsafe {
-        Box::from_raw(node.ptr.children.as_ptr());
+        Box::from_raw(node.children_mut());
     }
 }
 
-pub unsafe fn free_leaf<T, const B: usize, const C: usize>(node: Node<T, B, C>) {
+pub unsafe fn free_leaf<T, const B: usize, const C: usize>(mut node: Node<T, B, C>) {
     unsafe {
-        Box::from_raw(node.ptr.values.as_ptr());
+        Box::from_raw(node.values_mut());
     }
 }
 

@@ -30,7 +30,7 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
 
     pub fn values(&self) -> &'a [T] {
         debug_assert!(self.len() <= C);
-        unsafe { slice_assume_init_ref(&self.node.ptr.values.as_ref()[..self.len()]) }
+        unsafe { slice_assume_init_ref(&self.node.values()[..self.len()]) }
     }
 }
 
@@ -61,16 +61,16 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     pub unsafe fn pop_back(&mut self) -> T {
         unsafe {
             self.set_len(self.len() - 1);
-            self.node.ptr.values.as_ref()[self.len()].as_ptr().read()
+            self.node.values()[self.len()].as_ptr().read()
         }
     }
 
     pub unsafe fn pop_front(&mut self) -> T {
         unsafe {
             self.set_len(self.len() - 1);
-            let ret = self.node.ptr.values.as_mut()[0].as_ptr().read();
+            let ret = self.node.values_mut()[0].as_ptr().read();
             let new_len = self.len();
-            let value_ptr = self.node.ptr.values.as_mut().as_mut_ptr();
+            let value_ptr = self.node.values_mut().as_mut_ptr();
             ptr::copy(value_ptr.add(1), value_ptr, new_len);
             ret
         }
@@ -78,17 +78,19 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     pub fn values(&self) -> &[T] {
         debug_assert!(self.len() <= C);
-        unsafe { slice_assume_init_ref(&self.node.ptr.values.as_ref()[..self.len()]) }
+        unsafe { slice_assume_init_ref(&self.node.values()[..self.len()]) }
     }
 
     pub fn values_mut(&mut self) -> &mut [T] {
-        debug_assert!(self.len() <= C);
-        unsafe { slice_assume_init_mut(&mut self.node.ptr.values.as_mut()[..self.len()]) }
+        let len = self.len();
+        debug_assert!(len <= C);
+        unsafe { slice_assume_init_mut(&mut self.node.values_mut()[..len]) }
     }
 
     pub fn into_values_mut(self) -> &'a mut [T] {
-        debug_assert!(self.len() <= C);
-        unsafe { slice_assume_init_mut(&mut self.node.ptr.values.as_mut()[..self.len()]) }
+        let len = self.len();
+        debug_assert!(len <= C);
+        unsafe { slice_assume_init_mut(&mut self.node.values_mut()[..len]) }
     }
 
     fn is_full(&self) -> bool {
@@ -115,7 +117,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     fn insert_fitting_extending(&mut self, index: usize, value: T) {
         assert!(self.len() < C);
         unsafe {
-            let index_ptr = self.node.ptr.values.as_mut().as_mut_ptr().add(index);
+            let index_ptr = self.node.values_mut().as_mut_ptr().add(index);
             ptr::copy(index_ptr, index_ptr.add(1), self.len() - index);
             ptr::write(index_ptr, MaybeUninit::new(value));
             self.set_len(self.len() + 1);
@@ -199,9 +201,7 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
         unsafe {
             self.node
-                .ptr
-                .children
-                .as_ref()
+                .children()
                 .iter()
                 .map_while(Option::as_ref)
         }
@@ -243,19 +243,17 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     pub fn children(&self) -> &[Option<Node<T, B, C>>; B] {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe { self.node.ptr.children.as_ref() }
+        unsafe { self.node.children() }
     }
 
     pub fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
-        unsafe { self.node.ptr.children.as_mut() }
+        unsafe { self.node.children_mut() }
     }
 
     pub fn into_children_mut(self) -> impl Iterator<Item = &'a mut Node<T, B, C>> {
         unsafe {
             self.node
-                .ptr
-                .children
-                .as_mut()
+                .children_mut()
                 .iter_mut()
                 .map_while(Option::as_mut)
         }

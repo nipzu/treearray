@@ -225,9 +225,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                             .as_mut()
                             .unwrap()
                             .node
-                            .ptr
-                            .children
-                            .as_mut()[usize::from(update_ptr)]
+                            .children_mut()[usize::from(update_ptr)]
                         .as_mut()
                         .unwrap(),
                     );
@@ -383,7 +381,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
                 *self.root.as_mut() = Some(Root {
                     height: root_height - 1,
-                    node: old_root.node.ptr.children.as_mut()[0].take().unwrap(),
+                    node: old_root.node.children_mut()[0].take().unwrap(),
                 });
                 free_internal(old_root.node);
                 self.path[root_height - 1].write(&mut self.root.as_mut().as_mut().unwrap().node);
@@ -418,8 +416,8 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
     if prev.as_ref().unwrap().len() == C / 2 + 1 {
         let dst = prev.as_mut().unwrap();
         let mut src = cur.take().unwrap();
-        let dst_ptr = unsafe { dst.ptr.values.as_mut().as_mut_ptr().add(C / 2 + 1) };
-        let src_ptr = unsafe { src.ptr.values.as_mut().as_ptr() };
+        let dst_ptr = unsafe { dst.values_mut().as_mut_ptr().add(C / 2 + 1) };
+        let src_ptr = unsafe { src.values_mut().as_ptr() };
 
         ret = unsafe { ptr::read(src_ptr.add(*child_index)).assume_init() };
 
@@ -443,10 +441,10 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
             let cur = cur.as_mut().unwrap();
 
             let x = prev.pop_back();
-            ret = cur.ptr.values.as_mut()[*child_index].as_ptr().read();
-            let cur_ptr = cur.ptr.values.as_mut().as_mut_ptr();
+            ret = cur.values_mut()[*child_index].as_ptr().read();
+            let cur_ptr = cur.values_mut().as_mut_ptr();
             ptr::copy(cur_ptr, cur_ptr.add(1), *child_index);
-            cur.ptr.values.as_mut()[0].write(x);
+            cur.values_mut()[0].write(x);
             *child_index += 1;
         }
     }
@@ -467,8 +465,8 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
     if next.as_ref().unwrap().len() == C / 2 + 1 {
         let dst = cur.as_mut().unwrap();
         let mut src = next.take().unwrap();
-        let dst_ptr = unsafe { dst.ptr.values.as_mut().as_mut_ptr() };
-        let src_ptr = unsafe { src.ptr.values.as_mut().as_ptr() };
+        let dst_ptr = unsafe { dst.values_mut().as_mut_ptr() };
+        let src_ptr = unsafe { src.values_mut().as_ptr() };
 
         ret = unsafe { ptr::read(dst_ptr.add(child_index)).assume_init() };
 
@@ -490,14 +488,14 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
             let cur = cur.as_mut().unwrap();
 
             let x = next.pop_front();
-            ret = cur.ptr.values.as_mut()[child_index].as_ptr().read();
-            let cur_ptr = cur.ptr.values.as_mut().as_mut_ptr();
+            ret = cur.values_mut()[child_index].as_ptr().read();
+            let cur_ptr = cur.values_mut().as_mut_ptr();
             ptr::copy(
                 cur_ptr.add(child_index + 1),
                 cur_ptr.add(child_index),
                 C / 2 - child_index,
             );
-            cur.ptr.values.as_mut()[C / 2].write(x);
+            cur.values_mut()[C / 2].write(x);
         }
     }
 

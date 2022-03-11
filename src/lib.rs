@@ -16,11 +16,9 @@ pub use cursor::CursorMut;
 
 use iter::{Drain, Iter};
 use node::{
-    handle::{Internal, Leaf, LeafMut},
+    handle::{Internal, InternalMut, Leaf, LeafMut},
     Node,
 };
-
-use crate::node::handle::InternalMut;
 
 // CONST INVARIANTS:
 // - `B >= 5`
