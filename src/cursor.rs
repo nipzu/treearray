@@ -1,7 +1,6 @@
 use core::{
     marker::PhantomData,
     mem::MaybeUninit,
-    num::NonZeroUsize,
     ptr::{self, NonNull},
 };
 
@@ -240,7 +239,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             while height <= self.height() {
                 let node = self.path[height].assume_init().as_mut().unwrap();
                 height += 1;
-                node.set_length(node.len() + 1);
+                node.set_len(node.len() + 1);
             }
         }
     }
@@ -431,7 +430,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
             free_leaf(src);
         }
 
-        dst.length = NonZeroUsize::new(C).unwrap();
+        dst.set_len(C);
         slice_shift_left(&mut parent.children_slice_mut()[*self_index..], None);
         *self_index -= 1;
         *child_index += C / 2 + 1;
@@ -480,7 +479,7 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
             free_leaf(src);
         }
 
-        dst.length = NonZeroUsize::new(C).unwrap();
+        dst.set_len(C);
         slice_shift_left(&mut parent.children_slice_mut()[1..], None);
     } else {
         unsafe {

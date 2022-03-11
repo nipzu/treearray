@@ -1,6 +1,5 @@
 use core::{
     mem::{self, MaybeUninit},
-    num::NonZeroUsize,
     ops::RangeBounds,
     ptr, slice,
 };
@@ -55,7 +54,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 
     pub unsafe fn set_len(&mut self, new_len: usize) {
-        self.node.length = NonZeroUsize::new(new_len).unwrap();
+        self.node.set_len(new_len);
     }
 
     pub unsafe fn pop_back(&mut self) -> T {
@@ -231,7 +230,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn set_len(&mut self, new_len: usize) {
-        self.node.length = NonZeroUsize::new(new_len).unwrap();
+        self.node.set_len(new_len);
     }
 
     pub fn index_of_child_ptr(&self, elem_ptr: *const Option<Node<T, B, C>>) -> usize {

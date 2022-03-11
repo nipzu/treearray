@@ -20,7 +20,7 @@ pub struct Node<T, const B: usize, const C: usize> {
     // are `Some`, and the sum of their `len()`s is equal to `self.len()`.
     // Normal logic can assume that this assumption is upheld.
     // However, breaking this assumption must not cause Undefined Behavior.
-    pub(crate) length: NonZeroUsize,
+    length: NonZeroUsize,
     pub(crate) ptr: NodePtr<T, B, C>,
 }
 
@@ -62,8 +62,8 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         }
     }
 
-    pub fn set_length(&mut self, length: usize) {
-        self.length = NonZeroUsize::new(length).unwrap();
+    pub fn set_len(&mut self, new_len: usize) {
+        self.length = NonZeroUsize::new(new_len).unwrap();
     }
 
     fn from_children(length: usize, children: Box<[Option<Self>; B]>) -> Self {
