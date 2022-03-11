@@ -7,7 +7,7 @@ use core::{
 
 use alloc::boxed::Box;
 
-use super::{DynNode, DynNodeMut, Node};
+use super::Node;
 
 use crate::utils::{slice_assume_init_mut, slice_assume_init_ref, slice_insert_forget_last};
 
@@ -179,7 +179,6 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 }
 
 pub struct Internal<'a, T, const B: usize, const C: usize> {
-    height: NonZeroUsize,
     node: &'a Node<T, B, C>,
 }
 
@@ -187,41 +186,29 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
-    pub unsafe fn new(height: usize, node: &'a Node<T, B, C>) -> Self {
-        Self {
-            height: NonZeroUsize::new(height).unwrap(),
-            node,
-        }
+    pub const unsafe fn new(node: &'a Node<T, B, C>) -> Self {
+        Self { node }
     }
 
     pub fn is_singleton(&self) -> bool {
-        unsafe {
-            let children = self.node.ptr.children.as_ptr();
-            (*children).iter().take_while(|n| n.is_some()).count() == 1
-        }
+        self.children().count() == 1
     }
 
-    // pub fn children(&self) -> &'a [Option<Node<T, B, C>>; B] {
-    //     debug_assert!(self.node.len() > C);
-    //     // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
-    //     // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-    //     unsafe { &self.node.ptr.children }
-    // }
-
-    pub fn children<'b>(&'b self) -> impl Iterator<Item = DynNode<'a, T, B, C>> + 'b {
-        debug_assert!(self.node.len() > C);
+    pub fn children(&self) -> impl Iterator<Item = &'a Node<T, B, C>> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        let children = unsafe { self.node.ptr.children.as_ref() };
-        let child_height = self.height.get() - 1;
-        children
-            .iter()
-            .map_while(move |m| m.as_ref().map(|n| unsafe { DynNode::new(child_height, n) }))
+        unsafe {
+            self.node
+                .ptr
+                .children
+                .as_ref()
+                .iter()
+                .map_while(Option::as_ref)
+        }
     }
 }
 
 pub struct InternalMut<'a, T, const B: usize, const C: usize> {
-    height: NonZeroUsize,
     node: &'a mut Node<T, B, C>,
 }
 
@@ -231,11 +218,8 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
-    pub unsafe fn new(height: usize, node: &'a mut Node<T, B, C>) -> Self {
-        Self {
-            height: NonZeroUsize::new(height).unwrap(),
-            node,
-        }
+    pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
+        Self { node }
     }
 
     fn is_full(&self) -> bool {
@@ -264,6 +248,17 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
     pub fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
         unsafe { self.node.ptr.children.as_mut() }
+    }
+
+    pub fn into_children_mut(self) -> impl Iterator<Item = &'a mut Node<T, B, C>> {
+        unsafe {
+            self.node
+                .ptr
+                .children
+                .as_mut()
+                .iter_mut()
+                .map_while(Option::as_mut)
+        }
     }
 
     pub unsafe fn children_slice_range_mut(
@@ -299,16 +294,16 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe { &mut (*self.node.ptr.children.as_ptr())[index] }
     }
 
-    pub fn into_children_mut(self) -> impl Iterator<Item = DynNodeMut<'a, T, B, C>> {
-        // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
-        // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        let children = unsafe { self.node.ptr.children.as_mut() };
-        let child_height = self.height.get() - 1;
-        children.iter_mut().map_while(move |m| {
-            m.as_mut()
-                .map(|n| unsafe { DynNodeMut::new(child_height, n) })
-        })
-    }
+    // pub fn into_children_mut(self) -> impl Iterator<Item = DynNodeMut<'a, T, B, C>> {
+    //     // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
+    //     // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
+    //     let children = unsafe { self.node.ptr.children.as_mut() };
+    //     let child_height = self.height.get() - 1;
+    //     children.iter_mut().map_while(move |m| {
+    //         m.as_mut()
+    //             .map(|n| unsafe { DynNodeMut::new(child_height, n) })
+    //     })
+    // }
 
     pub unsafe fn insert_node(
         &mut self,

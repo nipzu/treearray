@@ -8,76 +8,6 @@ use alloc::boxed::Box;
 
 pub mod handle;
 
-use handle::{Internal, InternalMut, Leaf, LeafMut};
-
-pub struct DynNode<'a, T, const B: usize, const C: usize> {
-    height: usize,
-    node: &'a Node<T, B, C>,
-}
-
-impl<'a, T, const B: usize, const C: usize> DynNode<'a, T, B, C> {
-    pub const unsafe fn new(height: usize, node: &'a Node<T, B, C>) -> Self {
-        Self { height, node }
-    }
-
-    pub const fn len(&self) -> usize {
-        self.node.len()
-    }
-
-    pub fn variant(&self) -> Variant<'a, T, B, C> {
-        if self.height == 0 {
-            Variant::Leaf {
-                // TODO:
-                // SAFETY:
-                handle: unsafe { Leaf::new(self.node) },
-            }
-        } else {
-            Variant::Internal {
-                // TODO:
-                // SAFETY:
-                handle: unsafe { Internal::new(self.height, self.node) },
-            }
-        }
-    }
-}
-
-pub struct DynNodeMut<'a, T, const B: usize, const C: usize> {
-    height: usize,
-    pub(crate) node: &'a mut Node<T, B, C>,
-}
-
-impl<'a, T, const B: usize, const C: usize> DynNodeMut<'a, T, B, C> {
-    pub unsafe fn new(height: usize, node: &'a mut Node<T, B, C>) -> Self {
-        Self { height, node }
-    }
-
-    pub const fn len(&self) -> usize {
-        self.node.len()
-    }
-
-    pub fn node_ptr_mut(&mut self) -> *mut Node<T, B, C> {
-        self.node
-    }
-
-    pub const fn height(&self) -> usize {
-        self.height
-    }
-
-    pub fn into_variant_mut(self) -> VariantMut<'a, T, B, C> {
-        if self.height == 0 {
-            VariantMut::Leaf {
-                // SAFETY: the safety invariant `self.len() <= C` is satisfied.
-                handle: unsafe { LeafMut::new(self.node) },
-            }
-        } else {
-            VariantMut::Internal {
-                // SAFETY: the safety invariant `self.len() > C` is satisfied.
-                handle: unsafe { InternalMut::new(self.height, self.node) },
-            }
-        }
-    }
-}
-
 pub struct Node<T, const B: usize, const C: usize> {
     // INVARIANT: `length` is the number of values that this node eventually has as children
     //
@@ -97,16 +27,6 @@ pub struct Node<T, const B: usize, const C: usize> {
 pub union NodePtr<T, const B: usize, const C: usize> {
     pub(crate) children: NonNull<[Option<Node<T, B, C>>; B]>,
     pub(crate) values: NonNull<[MaybeUninit<T>; C]>,
-}
-
-pub enum Variant<'a, T, const B: usize, const C: usize> {
-    Internal { handle: Internal<'a, T, B, C> },
-    Leaf { handle: Leaf<'a, T, B, C> },
-}
-
-pub enum VariantMut<'a, T, const B: usize, const C: usize> {
-    Internal { handle: InternalMut<'a, T, B, C> },
-    Leaf { handle: LeafMut<'a, T, B, C> },
 }
 
 impl<T, const B: usize, const C: usize> Node<T, B, C> {

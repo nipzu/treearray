@@ -15,7 +15,12 @@ mod utils;
 pub use cursor::CursorMut;
 
 use iter::{Drain, Iter};
-use node::{DynNode, DynNodeMut, Node, Variant, VariantMut};
+use node::{
+    handle::{Internal, Leaf, LeafMut},
+    Node,
+};
+
+use crate::node::handle::InternalMut;
 
 // CONST INVARIANTS:
 // - `B >= 5`
@@ -29,16 +34,6 @@ pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
 struct Root<T, const B: usize, const C: usize> {
     height: usize,
     node: Node<T, B, C>,
-}
-
-impl<T, const B: usize, const C: usize> Root<T, B, C> {
-    const fn as_dyn(&self) -> DynNode<T, B, C> {
-        unsafe { DynNode::new(self.height, &self.node) }
-    }
-
-    fn as_dyn_mut(&mut self) -> DynNodeMut<T, B, C> {
-        unsafe { DynNodeMut::new(self.height, &mut self.node) }
-    }
 }
 
 impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
@@ -85,25 +80,24 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        let mut cur_node = self.root.as_ref()?.as_dyn();
-
-        'd: loop {
-            match cur_node.variant() {
-                Variant::Internal { handle } => {
-                    for child in handle.children() {
-                        if index < child.len() {
-                            cur_node = child;
-                            continue 'd;
-                        }
-                        index -= child.len();
-                    }
-                    unreachable!();
+        let Root { node, height } = self.root.as_ref()?;
+        // the height of `cur_node` is `height`
+        let mut cur_node = node;
+        // decrement the height of `cur_node` `height` times
+        'h: for _ in 0..*height {
+            let handle = unsafe { Internal::new(cur_node) };
+            for child in handle.children() {
+                if index < child.len() {
+                    cur_node = child;
+                    continue 'h;
                 }
-                Variant::Leaf { handle } => {
-                    return handle.values().get(index);
-                }
+                index -= child.len();
             }
+            unreachable!();
         }
+
+        // SAFETY: the height of `cur_node` is 0
+        unsafe { Some(&Leaf::new(cur_node).values()[index]) }
     }
 
     #[must_use]
@@ -112,25 +106,24 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        let mut cur_node = self.root.as_mut()?.as_dyn_mut();
-
-        'd: loop {
-            match cur_node.into_variant_mut() {
-                VariantMut::Internal { handle } => {
-                    for child in handle.into_children_mut() {
-                        if index < child.len() {
-                            cur_node = child;
-                            continue 'd;
-                        }
-                        index -= child.len();
-                    }
-                    unreachable!();
+        let Root { node, height } = self.root.as_mut()?;
+        // the height of `cur_node` is `height`
+        let mut cur_node = node;
+        // decrement the height of `cur_node` `height` times
+        'h: for _ in 0..*height {
+            let handle = unsafe { InternalMut::new(cur_node) };
+            for child in handle.into_children_mut() {
+                if index < child.len() {
+                    cur_node = child;
+                    continue 'h;
                 }
-                VariantMut::Leaf { handle } => {
-                    return handle.into_values_mut().get_mut(index);
-                }
+                index -= child.len();
             }
+            unreachable!();
         }
+
+        // SAFETY: the height of `cur_node` is 0
+        unsafe { Some(&mut LeafMut::new(cur_node).into_values_mut()[index]) }
     }
 
     #[must_use]
