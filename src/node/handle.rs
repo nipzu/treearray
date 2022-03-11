@@ -1,7 +1,9 @@
-use core::mem::{self, MaybeUninit};
-use core::num::NonZeroUsize;
-use core::ops::RangeBounds;
-use core::{ptr, slice};
+use core::{
+    mem::{self, MaybeUninit},
+    num::NonZeroUsize,
+    ops::RangeBounds,
+    ptr, slice,
+};
 
 use alloc::boxed::Box;
 
@@ -93,35 +95,30 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         self.values().len() == C
     }
 
-    pub fn insert(&mut self, index: usize, value: T) -> Option<Node<T, B, C>> {
-        if self.is_full() {
-            return Some(self.split_and_insert_value(index, value));
-        }
+    pub fn insert_value(&mut self, index: usize, value: T) -> InsertResult<T, B, C> {
+        assert!(index <= self.len());
 
-        self.insert_fitting_extending(index, value);
-        None
+        unsafe {
+            if self.is_full() {
+                if index <= C / 2 {
+                    InsertResult::SplitLeft(self.split_and_insert_left(index, value))
+                } else {
+                    InsertResult::SplitRight(self.split_and_insert_right(index, value))
+                }
+            } else {
+                self.insert_fitting_extending(index, value);
+                InsertResult::Fit
+            }
+        }
     }
 
     fn insert_fitting_extending(&mut self, index: usize, value: T) {
         assert!(self.len() < C);
-        assert!(index <= self.len());
         unsafe {
             let index_ptr = self.node.ptr.values.as_mut().as_mut_ptr().add(index);
             ptr::copy(index_ptr, index_ptr.add(1), self.len() - index);
             ptr::write(index_ptr, MaybeUninit::new(value));
             self.set_len(self.len() + 1);
-        }
-    }
-
-    fn split_and_insert_value(&mut self, index: usize, value: T) -> Node<T, B, C> {
-        assert!(index <= self.len());
-
-        unsafe {
-            if index <= C / 2 {
-                self.split_and_insert_left(index, value)
-            } else {
-                self.split_and_insert_right(index, value)
-            }
         }
     }
 
@@ -316,31 +313,27 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     pub unsafe fn insert_node(
         &mut self,
         index: usize,
-        new_child: Node<T, B, C>,
-    ) -> Option<Node<T, B, C>> {
-        if self.is_full() {
-            unsafe {
-                return Some(self.split_and_insert_node(index + 1, new_child));
+        node: Node<T, B, C>,
+    ) -> InsertResult<T, B, C> {
+        unsafe {
+            if self.is_full() {
+                use core::cmp::Ordering::{Equal, Greater, Less};
+                match index.cmp(&(B / 2 + 1)) {
+                    Less => InsertResult::SplitLeft(self.split_and_insert_left(index, node)),
+                    Equal => InsertResult::SplitMiddle(self.split_and_insert_right(index, node)),
+                    Greater => InsertResult::SplitRight(self.split_and_insert_right(index, node)),
+                }
+            } else {
+                self.insert_fitting(index, node);
+                InsertResult::Fit
             }
         }
-        self.insert_fitting(index + 1, new_child);
-        self.set_len(self.len() + 1);
-        None
     }
 
     fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
         debug_assert!(!self.is_full());
         slice_insert_forget_last(self.children_slice_mut(), index, Some(node));
-    }
-
-    unsafe fn split_and_insert_node(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
-        unsafe {
-            if index <= B / 2 {
-                self.split_and_insert_left(index, node)
-            } else {
-                self.split_and_insert_right(index, node)
-            }
-        }
+        self.set_len(self.len() + 1);
     }
 
     unsafe fn split_and_insert_left(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
@@ -399,4 +392,11 @@ fn sum_lens<T, const B: usize, const C: usize>(children: &[Option<Node<T, B, C>>
         .iter()
         .map(|n| n.as_ref().map_or(0, Node::len))
         .sum()
+}
+
+pub enum InsertResult<T, const B: usize, const C: usize> {
+    Fit,
+    SplitLeft(Node<T, B, C>),
+    SplitMiddle(Node<T, B, C>),
+    SplitRight(Node<T, B, C>),
 }

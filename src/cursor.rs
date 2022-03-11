@@ -1,10 +1,16 @@
-use crate::node::handle::{Internal, InternalMut, LeafMut};
-use crate::node::VariantMut;
-use crate::utils::{free_internal, free_leaf, slice_shift_left, slice_shift_right};
-use crate::{node::Node, Root};
-use core::num::NonZeroUsize;
-use core::ptr::{self, NonNull};
-use core::{marker::PhantomData, mem::MaybeUninit};
+use core::{
+    marker::PhantomData,
+    mem::MaybeUninit,
+    num::NonZeroUsize,
+    ptr::{self, NonNull},
+};
+
+use crate::{
+    node::handle::{InsertResult, Internal, InternalMut, LeafMut},
+    node::{Node, VariantMut},
+    utils::{free_internal, free_leaf, slice_shift_left, slice_shift_right},
+    Root,
+};
 
 // pub struct Cursor<'a, T, const B: usize, const C: usize> {
 //     leaf_index: usize,
@@ -159,27 +165,75 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
         let mut height = 0;
         let mut to_insert = unsafe {
-            LeafMut::new(&mut *self.path[0].assume_init()).insert(self.leaf_index, value)
+            LeafMut::new(&mut *self.path[0].assume_init()).insert_value(self.leaf_index, value)
         };
 
-        // TODO: adjust leaf_index
+        if let InsertResult::SplitRight(_) = to_insert {
+            self.leaf_index -= C / 2 + 1;
+        }
 
-        while let Some(new_node) = to_insert {
+        while let InsertResult::SplitLeft(_) | InsertResult::SplitRight(_) = to_insert {
             height += 1;
             unsafe {
                 if height <= self.height() {
-                    let mut node = InternalMut::new(height, &mut *self.path[height].assume_init());
+                    let mut parent =
+                        InternalMut::new(height, &mut *self.path[height].assume_init());
                     let child_ptr = self.path[height - 1].assume_init();
-                    let child_index = node.index_of_child_ptr(child_ptr.cast());
-                    to_insert = node.insert_node(child_index, new_node);
+                    let child_index = parent.index_of_child_ptr(child_ptr.cast());
+                    let (path_through_new, new_node) = match to_insert {
+                        InsertResult::SplitRight(n) => (true, n),
+                        InsertResult::SplitLeft(n) => (false, n),
+                        _ => unreachable!(),
+                    };
+                    to_insert = parent.insert_node(child_index + 1, new_node);
+                    if let InsertResult::SplitMiddle(n) = to_insert {
+                        to_insert = if path_through_new {
+                            InsertResult::SplitRight(n)
+                        } else {
+                            InsertResult::SplitLeft(n)
+                        };
+                    }
+                    let path_index = if path_through_new {
+                        child_index + 1
+                    } else {
+                        child_index
+                    };
+                    let ptr: *mut _ = match to_insert {
+                        InsertResult::Fit | InsertResult::SplitLeft(_) => {
+                            parent.get_child_mut(path_index).as_mut().unwrap()
+                        }
+                        InsertResult::SplitRight(ref mut n) => InternalMut::new(height, n)
+                            .get_child_mut(path_index - B / 2 - 1)
+                            .as_mut()
+                            .unwrap(),
+                        InsertResult::SplitMiddle(_) => unreachable!(),
+                    };
+                    self.path[height - 1].write(ptr);
                 } else {
                     let Root { node, .. } = self.root.as_mut().take().unwrap();
+                    let (new_node, update_ptr) = match to_insert {
+                        InsertResult::SplitLeft(n) => (n, false),
+                        InsertResult::SplitRight(n) => (n, true),
+                        _ => unreachable!(),
+                    };
 
                     *self.root.as_mut() = Some(Root {
                         height,
                         node: Node::from_child_array([node, new_node]),
                     });
 
+                    self.path[height - 1].write(
+                        self.root
+                            .as_mut()
+                            .as_mut()
+                            .unwrap()
+                            .node
+                            .ptr
+                            .children
+                            .as_mut()[usize::from(update_ptr)]
+                        .as_mut()
+                        .unwrap(),
+                    );
                     self.path[height].write(&mut self.root.as_mut().as_mut().unwrap().node);
                     return;
                 }

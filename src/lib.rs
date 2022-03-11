@@ -4,8 +4,7 @@
 
 extern crate alloc;
 
-use core::ptr::NonNull;
-use core::{fmt, marker::PhantomData};
+use core::{fmt, marker::PhantomData, ptr::NonNull};
 
 mod cursor;
 pub mod iter;
@@ -323,6 +322,35 @@ mod tests {
         }
 
         assert!(b_5_1.is_empty());
+    }
+
+    #[test]
+    fn test_random_double_insertions() {
+        use alloc::vec::Vec;
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+
+        let mut v = Vec::new();
+        let mut b_7_3 = BTreeVec::<i32, 7, 3>::new();
+        let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
+
+        for x in 0..500 {
+            let index = rng.gen_range(0..=v.len());
+            v.insert(index, 2 * x);
+            v.insert(index, 2 * x + 1);
+            let mut cursor_7_3 = b_7_3.cursor_at_mut(index);
+            let mut cursor_5_5 = b_5_5.cursor_at_mut(index);
+            cursor_7_3.insert(2 * x);
+            cursor_7_3.insert(2 * x + 1);
+            cursor_5_5.insert(2 * x);
+            cursor_5_5.insert(2 * x + 1);
+            assert_eq!(v.len(), b_7_3.len());
+            assert_eq!(v.len(), b_5_5.len());
+        }
+
+        assert_eq!(v, b_7_3.iter().copied().collect::<Vec<_>>());
+        assert_eq!(v, b_5_5.iter().copied().collect::<Vec<_>>());
     }
 
     #[test]
