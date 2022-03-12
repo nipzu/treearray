@@ -146,7 +146,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
     }
 
     pub fn insert(&mut self, value: T) {
-        if unsafe { self.tree.as_ref().root.as_ref().is_none() } {
+        if unsafe { self.tree.as_ref().root.is_none() } {
             unsafe {
                 self.tree.as_mut().height = 0;
                 self.tree.as_mut().root = Some(Node::from_value(value));
@@ -310,17 +310,15 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                         fst = parent.get_child_mut(parent_index - 1);
                         snd = &mut *cur_ptr.cast();
                         combine_res = combine_internals_snd_underfull(fst, snd);
-                        let new_child_ptr = match combine_res {
+                        let new_child_ptr: *mut _ = match combine_res {
                             CombineResult::Ok => InternalMut::new(snd.as_mut().unwrap())
                                 .children_slice_mut()[child_index + 1]
                                 .as_mut()
-                                .unwrap()
-                                as *mut _,
+                                .unwrap(),
                             CombineResult::Merged => InternalMut::new(fst.as_mut().unwrap())
                                 .children_slice_mut()[child_index + B / 2 + 1]
                                 .as_mut()
-                                .unwrap()
-                                as *mut _,
+                                .unwrap(),
                         };
                         self.path[height - 1].write(new_child_ptr);
                     }
@@ -364,7 +362,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         // move the root one level lower if needed
         unsafe {
             let root_height = self.height();
-            let root = Internal::new(&self.tree.as_ref().root.as_ref().unwrap());
+            let root = Internal::new(self.tree.as_ref().root.as_ref().unwrap());
 
             if root.is_singleton() {
                 let mut old_root = self.tree.as_mut().root.take().unwrap();
