@@ -240,6 +240,10 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe { self.node.children() }
     }
 
+    pub fn into_children_slice_mut(self) -> &'a mut [Option<Node<T, B, C>>; B] {
+        unsafe { self.node.children_mut() }
+    }
+
     pub fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
         unsafe { self.node.children_mut() }
     }
