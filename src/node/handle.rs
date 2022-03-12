@@ -198,12 +198,7 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     pub fn children(&self) -> impl Iterator<Item = &'a Node<T, B, C>> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe {
-            self.node
-                .children()
-                .iter()
-                .map_while(Option::as_ref)
-        }
+        unsafe { self.node.children().iter().map_while(Option::as_ref) }
     }
 }
 

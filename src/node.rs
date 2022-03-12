@@ -39,27 +39,19 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     unsafe fn values(&self) -> &[MaybeUninit<T>; C] {
-        unsafe {
-            self.ptr.values.as_ref()
-        }
+        unsafe { self.ptr.values.as_ref() }
     }
 
     pub unsafe fn values_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
-        unsafe {
-            self.ptr.values.as_mut()
-        }
+        unsafe { self.ptr.values.as_mut() }
     }
 
     unsafe fn children(&self) -> &[Option<Self>; B] {
-        unsafe {
-            self.ptr.children.as_ref()
-        }
+        unsafe { self.ptr.children.as_ref() }
     }
 
     pub unsafe fn children_mut(&mut self) -> &mut [Option<Self>; B] {
-        unsafe {
-            self.ptr.children.as_mut()
-        }
+        unsafe { self.ptr.children.as_mut() }
     }
 
     pub fn set_len(&mut self, new_len: usize) {
@@ -89,7 +81,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     /// # Safety
     ///
     /// The first `length` elements of `values` must be initialized and safe to use.
-    /// Note that this implies the condition `length <= C`.
+    /// Note that this implies that `length <= C`.
     unsafe fn from_values(length: usize, values: Box<[MaybeUninit<T>; C]>) -> Self {
         assert!(length <= C);
 

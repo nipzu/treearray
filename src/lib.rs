@@ -24,14 +24,11 @@ use node::{
 // - `B >= 5`
 // - `C % 2 == 1`, which implies `C >= 1`
 pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
-    root: Option<Root<T, B, C>>,
+    root: Option<Node<T, B, C>>,
+    // TODO: this is redundant when root is `None`
+    height: usize,
     // TODO: is this even needed?
     _marker: PhantomData<T>,
-}
-
-struct Root<T, const B: usize, const C: usize> {
-    height: usize,
-    node: Node<T, B, C>,
 }
 
 impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
@@ -44,7 +41,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     pub const fn new() -> Self {
         // Each (underfull) internal node has to have at least
         // two children to be considered an internal node.
-        assert!(B >= 5); // FIXME: that thing in remove
+        assert!(B >= 3); // FIXME: that thing in remove
 
         // If the root consist of 2 leaves of size `C/2`,
         // then it is also considered to be a leaf.
@@ -53,6 +50,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         Self {
             root: None,
+            height: 0,
             _marker: PhantomData,
         }
     }
@@ -61,7 +59,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[inline]
     pub const fn len(&self) -> usize {
         match self.root.as_ref() {
-            Some(root) => root.node.len(),
+            Some(root) => root.len(),
             None => 0,
         }
     }
@@ -78,11 +76,11 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        let Root { node, height } = self.root.as_ref()?;
+        let node = self.root.as_ref()?;
         // the height of `cur_node` is `height`
         let mut cur_node = node;
         // decrement the height of `cur_node` `height` times
-        'h: for _ in 0..*height {
+        'h: for _ in 0..self.height {
             let handle = unsafe { Internal::new(cur_node) };
             for child in handle.children() {
                 if index < child.len() {
@@ -104,11 +102,11 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        let Root { node, height } = self.root.as_mut()?;
+        let node = self.root.as_mut()?;
         // the height of `cur_node` is `height`
         let mut cur_node = node;
         // decrement the height of `cur_node` `height` times
-        'h: for _ in 0..*height {
+        'h: for _ in 0..self.height {
             let handle = unsafe { InternalMut::new(cur_node) };
             for child in handle.into_children_mut() {
                 if index < child.len() {
@@ -195,7 +193,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
     #[must_use]
     pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T, B, C> {
-        CursorMut::new_at(NonNull::from(&mut self.root), index)
+        CursorMut::new_at(NonNull::from(self), index)
     }
 }
 
