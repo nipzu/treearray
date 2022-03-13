@@ -38,23 +38,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         self.length.get()
     }
 
-    unsafe fn values(&self) -> &[MaybeUninit<T>; C] {
-        unsafe { self.ptr.values.as_ref() }
-    }
-
-    pub unsafe fn values_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
-        unsafe { self.ptr.values.as_mut() }
-    }
-
-    unsafe fn children(&self) -> &[Option<Self>; B] {
-        unsafe { self.ptr.children.as_ref() }
-    }
-
-    pub unsafe fn children_mut(&mut self) -> &mut [Option<Self>; B] {
-        unsafe { self.ptr.children.as_mut() }
-    }
-
-    pub fn set_len(&mut self, new_len: usize) {
+    pub unsafe fn set_len(&mut self, new_len: usize) {
         self.length = NonZeroUsize::new(new_len).unwrap();
     }
 

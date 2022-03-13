@@ -2,7 +2,10 @@ use core::{mem::MaybeUninit, ptr};
 
 use alloc::boxed::Box;
 
-use crate::node::Node;
+use crate::node::{
+    handle::{InternalMut, LeafMut},
+    Node,
+};
 
 pub fn slice_insert_forget_last<T>(slice: &mut [T], index: usize, value: T) {
     assert!(index < slice.len());
@@ -37,13 +40,13 @@ pub fn slice_shift_right<T>(slice: &mut [T], new_start: T) -> T {
 
 pub unsafe fn free_internal<T, const B: usize, const C: usize>(mut node: Node<T, B, C>) {
     unsafe {
-        Box::from_raw(node.children_mut());
+        Box::from_raw(InternalMut::new_node(&mut node).children_slice_mut());
     }
 }
 
 pub unsafe fn free_leaf<T, const B: usize, const C: usize>(mut node: Node<T, B, C>) {
     unsafe {
-        Box::from_raw(node.values_mut());
+        Box::from_raw(LeafMut::new_node(&mut node).values_maybe_uninit_mut());
     }
 }
 

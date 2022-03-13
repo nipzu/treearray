@@ -107,7 +107,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         let mut cur_node = node;
         // decrement the height of `cur_node` `height` times
         'h: for _ in 0..self.height {
-            let handle = unsafe { InternalMut::new(cur_node) };
+            let handle = unsafe { InternalMut::new_node(cur_node) };
             for child in handle.into_children_mut() {
                 if index < child.len() {
                     cur_node = child;
@@ -119,7 +119,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         }
 
         // SAFETY: the height of `cur_node` is 0
-        unsafe { Some(&mut LeafMut::new(cur_node).into_values_mut()[index]) }
+        unsafe { Some(&mut LeafMut::new_node(cur_node).into_values_mut()[index]) }
     }
 
     #[must_use]

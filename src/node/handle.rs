@@ -29,7 +29,7 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
 
     pub fn values(&self) -> &'a [T] {
         debug_assert!(self.len() <= C);
-        unsafe { slice_assume_init_ref(&self.node.values()[..self.len()]) }
+        unsafe { slice_assume_init_ref(&self.node.ptr.values.as_ref()[..self.len()]) }
     }
 }
 
@@ -43,7 +43,14 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a leaf node i.e. `node.len() <= C`.
-    pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
+    pub unsafe fn new(node: &'a mut Option<Node<T, B, C>>) -> Self {
+        let node = node.as_mut().unwrap();
+        debug_assert!(node.len() <= C);
+        debug_assert!(node.len() != 0);
+        Self { node }
+    }
+
+    pub unsafe fn new_node(node: &'a mut Node<T, B, C>) -> Self {
         debug_assert!(node.len() <= C);
         debug_assert!(node.len() != 0);
         Self { node }
@@ -54,42 +61,53 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 
     pub unsafe fn set_len(&mut self, new_len: usize) {
-        self.node.set_len(new_len);
+        debug_assert!(new_len <= C);
+        unsafe { self.node.set_len(new_len) };
     }
 
     pub unsafe fn pop_back(&mut self) -> T {
+        debug_assert!(self.len() > 0);
         unsafe {
             self.set_len(self.len() - 1);
-            self.node.values()[self.len()].as_ptr().read()
+            self.values_maybe_uninit()[self.len()].as_ptr().read()
         }
     }
 
     pub unsafe fn pop_front(&mut self) -> T {
+        debug_assert!(self.len() > 0);
         unsafe {
-            self.set_len(self.len() - 1);
-            let ret = self.node.values_mut()[0].as_ptr().read();
-            let new_len = self.len();
-            let value_ptr = self.node.values_mut().as_mut_ptr();
-            ptr::copy(value_ptr.add(1), value_ptr, new_len);
+            let new_len = self.len() - 1;
+            let fst_ptr = self.values_mut().as_mut_ptr();
+            let ret = fst_ptr.read();
+            ptr::copy(fst_ptr.add(1), fst_ptr, new_len);
+            self.set_len(new_len);
             ret
         }
     }
 
     pub fn values(&self) -> &[T] {
         debug_assert!(self.len() <= C);
-        unsafe { slice_assume_init_ref(&self.node.values()[..self.len()]) }
+        unsafe { slice_assume_init_ref(&self.node.ptr.values.as_ref()[..self.len()]) }
     }
 
     pub fn values_mut(&mut self) -> &mut [T] {
         let len = self.len();
         debug_assert!(len <= C);
-        unsafe { slice_assume_init_mut(&mut self.node.values_mut()[..len]) }
+        unsafe { slice_assume_init_mut(&mut self.node.ptr.values.as_mut()[..len]) }
+    }
+
+    pub fn values_maybe_uninit_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
+        unsafe { self.node.ptr.values.as_mut() }
+    }
+
+    pub fn values_maybe_uninit(&self) -> &[MaybeUninit<T>; C] {
+        unsafe { self.node.ptr.values.as_ref() }
     }
 
     pub fn into_values_mut(self) -> &'a mut [T] {
         let len = self.len();
         debug_assert!(len <= C);
-        unsafe { slice_assume_init_mut(&mut self.node.values_mut()[..len]) }
+        unsafe { slice_assume_init_mut(&mut self.node.ptr.values.as_mut()[..len]) }
     }
 
     fn is_full(&self) -> bool {
@@ -116,7 +134,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     fn insert_fitting_extending(&mut self, index: usize, value: T) {
         assert!(self.len() < C);
         unsafe {
-            let index_ptr = self.node.values_mut().as_mut_ptr().add(index);
+            let index_ptr = self.values_maybe_uninit_mut().as_mut_ptr().add(index);
             ptr::copy(index_ptr, index_ptr.add(1), self.len() - index);
             ptr::write(index_ptr, MaybeUninit::new(value));
             self.set_len(self.len() + 1);
@@ -198,7 +216,8 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     pub fn children(&self) -> impl Iterator<Item = &'a Node<T, B, C>> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe { self.node.children().iter().map_while(Option::as_ref) }
+        let children = unsafe { self.node.ptr.children.as_ref() };
+        children.iter().map_while(Option::as_ref)
     }
 }
 
@@ -212,7 +231,13 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
-    pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
+    pub unsafe fn new(node: &'a mut Option<Node<T, B, C>>) -> Self {
+        Self {
+            node: node.as_mut().unwrap(),
+        }
+    }
+
+    pub unsafe fn new_node(node: &'a mut Node<T, B, C>) -> Self {
         Self { node }
     }
 
@@ -225,7 +250,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn set_len(&mut self, new_len: usize) {
-        self.node.set_len(new_len);
+        unsafe { self.node.set_len(new_len) };
     }
 
     pub fn index_of_child_ptr(&self, elem_ptr: *const Option<Node<T, B, C>>) -> usize {
@@ -237,24 +262,20 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     pub fn children(&self) -> &[Option<Node<T, B, C>>; B] {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe { self.node.children() }
+        unsafe { self.node.ptr.children.as_ref() }
     }
 
     pub fn into_children_slice_mut(self) -> &'a mut [Option<Node<T, B, C>>; B] {
-        unsafe { self.node.children_mut() }
+        unsafe { self.node.ptr.children.as_mut() }
     }
 
     pub fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
-        unsafe { self.node.children_mut() }
+        unsafe { self.node.ptr.children.as_mut() }
     }
 
     pub fn into_children_mut(self) -> impl Iterator<Item = &'a mut Node<T, B, C>> {
-        unsafe {
-            self.node
-                .children_mut()
-                .iter_mut()
-                .map_while(Option::as_mut)
-        }
+        let children = unsafe { self.node.ptr.children.as_mut() };
+        children.iter_mut().map_while(Option::as_mut)
     }
 
     pub unsafe fn children_slice_range_mut(
