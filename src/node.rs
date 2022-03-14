@@ -82,16 +82,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     pub fn from_value(value: T) -> Self {
         let mut boxed_values = Box::new([Self::UNINIT; C]);
         boxed_values[0].write(value);
-
-        // SAFETY: the first value has been written to, so it is initialized.
-        // Since `1 <= C` by the const invariants of `BTreeVec`, the `Node` is considered
-        // a leaf node and the first value is initialized, satisfying `length = 1`.
-        Self {
-            length: NonZeroUsize::new(1).unwrap(),
-            ptr: NodePtr {
-                values: unsafe { NonNull::new_unchecked(Box::into_raw(boxed_values)) },
-            },
-        }
+        unsafe { Self::from_values(1, boxed_values) }
     }
 }
 
