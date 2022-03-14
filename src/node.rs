@@ -52,14 +52,14 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     pub fn from_child_array<const N: usize>(children: [Self; N]) -> Self {
-        let mut inner_children = [Self::NONE; B];
+        let mut boxed_children = Box::new([Self::NONE; B]);
         let mut length = 0;
         for (i, child) in children.into_iter().enumerate() {
             length += child.len();
-            inner_children[i] = Some(child);
+            boxed_children[i] = Some(child);
         }
 
-        Self::from_children(length, Box::new(inner_children))
+        Self::from_children(length, boxed_children)
     }
 
     /// # Safety

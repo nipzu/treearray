@@ -41,7 +41,6 @@ impl<'a, T, const B: usize, const C: usize> Iterator for Drain<'a, T, B, C> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // TODO: breaks stacked borrows
         (self.cursor.len() > 0).then(|| self.cursor.remove())
     }
 }

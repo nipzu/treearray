@@ -85,11 +85,6 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         }
     }
 
-    pub fn values(&self) -> &[T] {
-        debug_assert!(self.len() <= C);
-        unsafe { slice_assume_init_ref(&self.node.ptr.values.as_ref()[..self.len()]) }
-    }
-
     pub fn values_mut(&mut self) -> &mut [T] {
         let len = self.len();
         debug_assert!(len <= C);
@@ -111,7 +106,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 
     fn is_full(&self) -> bool {
-        self.values().len() == C
+        self.len() == C
     }
 
     pub fn insert_value(&mut self, index: usize, value: T) -> InsertResult<T, B, C> {
@@ -210,6 +205,7 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     }
 
     pub fn is_singleton(&self) -> bool {
+        // TODO: this is potentially slow
         self.children().count() == 1
     }
 

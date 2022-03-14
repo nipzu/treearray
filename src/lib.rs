@@ -41,7 +41,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     pub const fn new() -> Self {
         // Each (underfull) internal node has to have at least
         // two children to be considered an internal node.
-        assert!(B >= 3); // FIXME: that thing in remove
+        assert!(B >= 3);
 
         // If the root consist of 2 leaves of size `C/2`,
         // then it is also considered to be a leaf.
@@ -160,9 +160,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         self.insert(self.len(), value);
     }
 
-    // TODO: probably needs rework
     pub fn clear(&mut self) {
-        self.root = None;
+        self.drain();
     }
 
     /// # Panics
@@ -199,7 +198,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
 impl<T, const B: usize, const C: usize> Drop for BTreeVec<T, B, C> {
     fn drop(&mut self) {
-        self.drain();
+        self.clear();
     }
 }
 
