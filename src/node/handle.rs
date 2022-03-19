@@ -105,8 +105,12 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         unsafe { slice_assume_init_mut(&mut self.node.ptr.values.as_mut()[..len]) }
     }
 
-    fn is_full(&self) -> bool {
+    const fn is_full(&self) -> bool {
         self.len() == C
+    }
+
+    pub const fn is_almost_underfull(&self) -> bool {
+        self.len() == (C - 1) / 2 + 1
     }
 
     pub fn insert_value(&mut self, index: usize, value: T) -> InsertResult<T, B, C> {
@@ -157,7 +161,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     unsafe fn split_and_insert_right(&mut self, index: usize, value: T) -> Node<T, B, C> {
         let mut new_box = Box::new([Self::UNINIT; C]);
-        let split_index = C / 2 + 1;
+        let split_index = (C - 1) / 2 + 1;
         let tail_len = C - split_index;
 
         let tail_start_len = index - split_index;

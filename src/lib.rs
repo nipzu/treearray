@@ -46,7 +46,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         // If the root consist of 2 leaves of size `C/2`,
         // then it is also considered to be a leaf.
         // Also takes care of the `C == 0` case.
-        assert!(C % 2 == 1);
+        assert!(C >= 1);
 
         Self {
             root: None,
@@ -349,24 +349,26 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        // let mut b_3_3 = BTreeVec::<i32, 3, 3>::new();
+        let mut b_4_4 = BTreeVec::<i32, 5, 4>::new();
         let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
 
         for x in 0..1000 {
             v.push(x);
-            // b_3_3.push_back(x);
+            b_4_4.push_back(x);
             b_5_5.push_back(x);
         }
 
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len());
             let v_rem = v.remove(index);
-            // b_3_3.remove(index);
+            let b_4_4_rem = b_4_4.remove(index);
             let b_5_5_rem = b_5_5.remove(index);
-            // assert_eq!(v.len(), b_3_3.len());
+            assert_eq!(v.len(), b_4_4.len());
             assert_eq!(v.len(), b_5_5.len());
             assert_eq!(v_rem, b_5_5_rem);
+            assert_eq!(v_rem, b_4_4_rem);
         }
+        assert!(b_4_4.is_empty());
         assert!(b_5_5.is_empty());
     }
 
@@ -378,21 +380,33 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
+        // let mut b_4_4 = BTreeVec::<i32, 4, 4>::new();
         let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
 
         for x in 0..1000 {
             v.push(x);
+            // b_4_4.push_back(x);
             b_5_5.push_back(x);
         }
 
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len() - 1);
-            let mut cursor = b_5_5.cursor_at_mut(index);
-            let v1 = cursor.remove();
-            let v2 = cursor.remove();
-            assert_eq!(v1, v.remove(index));
-            assert_eq!(v2, v.remove(index));
-            assert_eq!(v.len(), b_5_5.len());
+            {
+                let mut cursor_5_5 = b_5_5.cursor_at_mut(index);
+                let v1 = cursor_5_5.remove();
+                let v2 = cursor_5_5.remove();
+                assert_eq!(v1, v.remove(index));
+                assert_eq!(v2, v.remove(index));
+                assert_eq!(v.len(), b_5_5.len());
+            }
+            // {
+            //     let mut cursor_4_4 = b_4_4.cursor_at_mut(index);
+            //     let v1 = cursor_4_4.remove();
+            //     let v2 = cursor_4_4.remove();
+            //     assert_eq!(v1, v.remove(index));
+            //     assert_eq!(v2, v.remove(index));
+            //     assert_eq!(v.len(), b_4_4.len());
+            // }
         }
     }
 

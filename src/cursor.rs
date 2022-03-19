@@ -162,12 +162,11 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         }
 
         let mut height = 0;
-        let mut to_insert = unsafe {
-            LeafMut::new(&mut *self.path[0].assume_init()).insert_value(self.leaf_index, value)
-        };
+        let mut leaf = unsafe { LeafMut::new(&mut *self.path[0].assume_init()) };
+        let mut to_insert = leaf.insert_value(self.leaf_index, value);
 
         if let InsertResult::SplitRight(_) = to_insert {
-            self.leaf_index -= C / 2 + 1;
+            self.leaf_index -= leaf.len();
         }
 
         while let InsertResult::SplitLeft(_) | InsertResult::SplitRight(_) = to_insert {
@@ -274,16 +273,16 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             // Do this before because reasons?
             parent.set_len(parent.len() - 1);
             let mut leaf = LeafMut::new(&mut *self.path[0].assume_init());
-            if leaf.len() - 1 > C / 2 {
-                ret = leaf.remove_no_underflow(self.leaf_index);
-            } else {
+            if leaf.is_almost_underfull() {
                 if self_index > 0 {
                     ret = combine_leaves_tail(&mut parent, &mut self.leaf_index, &mut self_index);
                 } else {
                     ret = combine_leaves_head(&mut parent, self.leaf_index);
                 }
                 self.path[0].write(parent.get_child_mut(self_index));
-            };
+            } else {
+                ret = leaf.remove_no_underflow(self.leaf_index);
+            }
         }
 
         // update lengths and merge nodes if needed
@@ -406,11 +405,13 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
         .try_into()
         .unwrap();
 
-    if prev.as_ref().unwrap().len() == C / 2 + 1 {
-        let mut dst = unsafe { LeafMut::new(prev) };
+    let prev_len = prev.as_ref().unwrap().len();
+    let mut prev = unsafe { LeafMut::new(prev) };
+    if prev.is_almost_underfull() {
         let mut src_node = cur.take().unwrap();
         let mut src = unsafe { LeafMut::new_node(&mut src_node) };
-        let dst_ptr = unsafe { dst.values_maybe_uninit_mut().as_mut_ptr().add(C / 2 + 1) };
+        let src_len = src.len();
+        let dst_ptr = unsafe { prev.values_maybe_uninit_mut().as_mut_ptr().add(prev_len) };
         let src_ptr = src.values_maybe_uninit_mut().as_ptr();
 
         ret = unsafe { ptr::read(src_ptr.add(*child_index)).assume_init() };
@@ -420,18 +421,17 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
             ptr::copy_nonoverlapping(
                 src_ptr.add(*child_index + 1),
                 dst_ptr.add(*child_index),
-                C / 2 - *child_index,
+                src_len - 1 - *child_index,
             );
             free_leaf(src_node);
 
-            dst.set_len(C);
+            prev.set_len(src_len + prev_len - 1);
         }
         slice_shift_left(&mut parent.children_slice_mut()[*self_index..], None);
         *self_index -= 1;
-        *child_index += C / 2 + 1;
+        *child_index += prev_len;
     } else {
         unsafe {
-            let mut prev = LeafMut::new(prev);
             let mut cur = LeafMut::new(cur);
 
             let x = prev.pop_back();
@@ -456,10 +456,12 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
         .try_into()
         .unwrap();
 
-    if next.as_ref().unwrap().len() == C / 2 + 1 {
+    if unsafe { LeafMut::new(next).is_almost_underfull() } {
         let mut dst = unsafe { LeafMut::new(cur) };
         let mut src_node = next.take().unwrap();
         let mut src = unsafe { LeafMut::new_node(&mut src_node) };
+        let src_len = src.len();
+        let dst_len = dst.len();
         let dst_ptr = dst.values_maybe_uninit_mut().as_mut_ptr();
         let src_ptr = src.values_maybe_uninit_mut().as_ptr();
 
@@ -474,13 +476,14 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
             ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(dst.len() - 1), src.len());
             free_leaf(src_node);
 
-            dst.set_len(C);
+            dst.set_len(src_len + dst_len - 1);
         }
         slice_shift_left(&mut parent.children_slice_mut()[1..], None);
     } else {
         unsafe {
             let mut next = LeafMut::new(next);
             let mut cur = LeafMut::new(cur);
+            let cur_len = cur.len();
 
             let x = next.pop_front();
             ret = cur.values_maybe_uninit_mut()[child_index].as_ptr().read();
@@ -488,9 +491,9 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
             ptr::copy(
                 cur_ptr.add(child_index + 1),
                 cur_ptr.add(child_index),
-                C / 2 - child_index,
+                cur_len - 1 - child_index,
             );
-            cur.values_maybe_uninit_mut()[C / 2].write(x);
+            cur.values_maybe_uninit_mut()[cur_len - 1].write(x);
         }
     }
 
