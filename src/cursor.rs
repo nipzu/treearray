@@ -509,11 +509,7 @@ unsafe fn combine_internals_fst_underfull<T, const B: usize, const C: usize>(
 
     if snd.is_almost_underfull() {
         unsafe {
-            fst.children_slice_range_mut((B - 1) / 2..(B + 1) / 2 + (B - 1) / 2)
-                .swap_with_slice(snd.children_slice_range_mut(..=(B - 1) / 2));
-            fst.set_len(fst.len() + snd.len());
-            debug_assert!(snd.children().iter().all(Option::is_none));
-            free_internal(opt_snd.take().unwrap());
+            take_children(fst, opt_snd, (B - 1) / 2, (B - 1) / 2 + 1);
         }
         CombineResult::Merged
     } else {
@@ -536,11 +532,7 @@ unsafe fn combine_internals_snd_underfull<T, const B: usize, const C: usize>(
 
     if fst.is_almost_underfull() {
         unsafe {
-            fst.children_slice_range_mut((B - 1) / 2 + 1..(B + 1) / 2 + (B - 1) / 2)
-                .swap_with_slice(snd.children_slice_range_mut(..(B - 1) / 2));
-            fst.set_len(fst.len() + snd.len());
-            debug_assert!(snd.children().iter().all(Option::is_none));
-            free_internal(opt_snd.take().unwrap());
+            take_children(fst, opt_snd, (B - 1) / 2 + 1, (B - 1) / 2);
         }
         CombineResult::Merged
     } else {
@@ -554,5 +546,22 @@ unsafe fn combine_internals_snd_underfull<T, const B: usize, const C: usize>(
             }
         }
         unreachable!();
+    }
+}
+
+unsafe fn take_children<T, const B: usize, const C: usize>(
+    mut fst: InternalMut<T, B, C>,
+    opt_snd: &mut Option<Node<T, B, C>>,
+    fst_len: usize,
+    snd_len: usize,
+) {
+    let mut snd = unsafe { InternalMut::new(opt_snd) };
+
+    unsafe {
+        fst.children_slice_range_mut(fst_len..fst_len + snd_len)
+            .swap_with_slice(snd.children_slice_range_mut(..snd_len));
+        fst.set_len(fst.len() + snd.len());
+        debug_assert!(snd.children().iter().all(Option::is_none));
+        free_internal(opt_snd.take().unwrap());
     }
 }
