@@ -310,9 +310,9 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                             cur_node.index_of_child_ptr(self.path[height - 1].assume_init());
                         fst = InternalMut::new(parent.get_child_mut(parent_index - 1));
                         snd = InternalMut::new(&mut *cur_ptr);
-                        combine_res = combine_internals_snd_underfull(fst, snd);
-                        fst = InternalMut::new(parent.get_child_mut(parent_index - 1));
-                        snd = InternalMut::new(&mut *cur_ptr);
+                        combine_res =
+                            combine_internals_snd_underfull(fst.reborrow(), snd.reborrow());
+
                         let new_child_ptr: *mut _ = match combine_res {
                             CombineResult::Ok => &mut snd.children_slice_mut()[child_index + 1],
                             CombineResult::Merged => {

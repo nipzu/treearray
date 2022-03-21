@@ -392,6 +392,10 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         self.set_len(new_self_len);
         Node::from_children(new_nodes_len + node_len + 1, new_box)
     }
+
+    pub fn reborrow(&mut self) -> InternalMut<'_, T, B, C> {
+        InternalMut { node: self.node }
+    }
 }
 
 fn sum_lens<T, const B: usize, const C: usize>(children: &[Option<Node<T, B, C>>]) -> usize {
