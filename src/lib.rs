@@ -120,7 +120,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         }
 
         // SAFETY: the height of `cur_node` is 0
-        unsafe { Some(&mut LeafMut::new_node(cur_node.as_mut().unwrap()).into_values_mut()[index]) }
+        unsafe { Some(&mut LeafMut::new(cur_node).into_values_mut()[index]) }
     }
 
     #[must_use]

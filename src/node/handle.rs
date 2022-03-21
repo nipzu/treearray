@@ -34,7 +34,7 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
 }
 
 pub struct LeafMut<'a, T, const B: usize, const C: usize> {
-    pub node: &'a mut Node<T, B, C>,
+    pub node: &'a mut Option<Node<T, B, C>>,
 }
 
 impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
@@ -44,25 +44,25 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     ///
     /// `node` must be a leaf node i.e. `node.len() <= C`.
     pub unsafe fn new(node: &'a mut Option<Node<T, B, C>>) -> Self {
-        let node = node.as_mut().unwrap();
-        debug_assert!(node.len() <= C);
-        debug_assert!(node.len() != 0);
+        debug_assert!(node.as_ref().unwrap().len() <= C);
+        debug_assert!(node.as_ref().unwrap().len() != 0);
         Self { node }
     }
 
-    pub unsafe fn new_node(node: &'a mut Node<T, B, C>) -> Self {
-        debug_assert!(node.len() <= C);
-        debug_assert!(node.len() != 0);
-        Self { node }
-    }
-
-    pub const fn len(&self) -> usize {
-        self.node.len()
+    pub fn len(&self) -> usize {
+        self.node.as_ref().unwrap().len()
     }
 
     pub unsafe fn set_len(&mut self, new_len: usize) {
         debug_assert!(new_len <= C);
-        unsafe { self.node.set_len(new_len) };
+        unsafe { self.node.as_mut().unwrap().set_len(new_len) };
+    }
+
+    pub fn free(mut self) {
+        unsafe {
+            Box::from_raw(self.values_maybe_uninit_mut());
+        }
+        *self.node = None;
     }
 
     pub unsafe fn pop_back(&mut self) -> T {
@@ -88,28 +88,28 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     pub fn values_mut(&mut self) -> &mut [T] {
         let len = self.len();
         debug_assert!(len <= C);
-        unsafe { slice_assume_init_mut(&mut self.node.ptr.values.as_mut()[..len]) }
+        unsafe { slice_assume_init_mut(&mut self.node.as_mut().unwrap().ptr.values.as_mut()[..len]) }
     }
 
     pub fn values_maybe_uninit_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
-        unsafe { self.node.ptr.values.as_mut() }
+        unsafe { self.node.as_mut().unwrap().ptr.values.as_mut() }
     }
 
     pub fn values_maybe_uninit(&self) -> &[MaybeUninit<T>; C] {
-        unsafe { self.node.ptr.values.as_ref() }
+        unsafe { self.node.as_ref().unwrap().ptr.values.as_ref() }
     }
 
     pub fn into_values_mut(self) -> &'a mut [T] {
         let len = self.len();
         debug_assert!(len <= C);
-        unsafe { slice_assume_init_mut(&mut self.node.ptr.values.as_mut()[..len]) }
+        unsafe { slice_assume_init_mut(&mut self.node.as_mut().unwrap().ptr.values.as_mut()[..len]) }
     }
 
-    const fn is_full(&self) -> bool {
+    fn is_full(&self) -> bool {
         self.len() == C
     }
 
-    pub const fn is_almost_underfull(&self) -> bool {
+    pub fn is_almost_underfull(&self) -> bool {
         self.len() == (C - 1) / 2 + 1
     }
 

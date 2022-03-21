@@ -7,7 +7,7 @@ use core::{
 use crate::{
     node::handle::{InsertResult, Internal, InternalMut, LeafMut},
     node::Node,
-    utils::{free_leaf, slice_shift_left, slice_shift_right},
+    utils::{slice_shift_left, slice_shift_right},
     BTreeVec,
 };
 
@@ -256,8 +256,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     ret = leaf.remove_no_underflow(self.leaf_index);
                 } else {
                     ret = leaf.values_mut().as_mut_ptr().read();
-                    free_leaf(self.tree.as_mut().root.take().unwrap());
-                    self.tree.as_mut().root = None;
+                    leaf.free();
                 }
                 return ret;
             }
@@ -408,8 +407,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
     let prev_len = prev.as_ref().unwrap().len();
     let mut prev = unsafe { LeafMut::new(prev) };
     if prev.is_almost_underfull() {
-        let mut src_node = cur.take().unwrap();
-        let mut src = unsafe { LeafMut::new_node(&mut src_node) };
+        let mut src = unsafe { LeafMut::new(cur) };
         let src_len = src.len();
         let dst_ptr = unsafe { prev.values_maybe_uninit_mut().as_mut_ptr().add(prev_len) };
         let src_ptr = src.values_maybe_uninit_mut().as_ptr();
@@ -423,8 +421,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
                 dst_ptr.add(*child_index),
                 src_len - 1 - *child_index,
             );
-            free_leaf(src_node);
-
+            src.free();
             prev.set_len(src_len + prev_len - 1);
         }
         slice_shift_left(&mut parent.children_slice_mut()[*self_index..], None);
@@ -458,8 +455,7 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
 
     if unsafe { LeafMut::new(next).is_almost_underfull() } {
         let mut dst = unsafe { LeafMut::new(cur) };
-        let mut src_node = next.take().unwrap();
-        let mut src = unsafe { LeafMut::new_node(&mut src_node) };
+        let mut src = unsafe { LeafMut::new(next) };
         let src_len = src.len();
         let dst_len = dst.len();
         let dst_ptr = dst.values_maybe_uninit_mut().as_mut_ptr();
@@ -474,8 +470,7 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
                 dst_len - child_index - 1,
             );
             ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(dst_len - 1), src_len);
-            free_leaf(src_node);
-
+            src.free();
             dst.set_len(src_len + dst_len - 1);
         }
         slice_shift_left(&mut parent.children_slice_mut()[1..], None);
