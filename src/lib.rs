@@ -266,20 +266,20 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_7_3 = BTreeVec::<i32, 7, 3>::new();
-        let mut b_5_1 = BTreeVec::<i32, 5, 1>::new();
+        let mut b_4_5 = BTreeVec::<i32, 4, 5>::new();
+        let mut b_5_4 = BTreeVec::<i32, 5, 4>::new();
 
         for x in 0..1000 {
             let index = rng.gen_range(0..=v.len());
             v.insert(index, x);
-            b_7_3.insert(index, x);
-            b_5_1.insert(index, x);
-            assert_eq!(v.len(), b_7_3.len());
-            assert_eq!(v.len(), b_5_1.len());
+            b_4_5.insert(index, x);
+            b_5_4.insert(index, x);
+            assert_eq!(v.len(), b_4_5.len());
+            assert_eq!(v.len(), b_5_4.len());
         }
 
-        assert_eq!(v, b_7_3.iter().copied().collect::<Vec<_>>());
-        assert_eq!(v, b_5_1.iter().copied().collect::<Vec<_>>());
+        assert_eq!(v, b_4_5.iter().copied().collect::<Vec<_>>());
+        assert_eq!(v, b_5_4.iter().copied().collect::<Vec<_>>());
     }
 
     #[test]
@@ -349,7 +349,7 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_4 = BTreeVec::<i32, 5, 4>::new();
+        let mut b_4_4 = BTreeVec::<i32, 4, 4>::new();
         let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
 
         for x in 0..1000 {
@@ -380,33 +380,35 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        // let mut b_4_4 = BTreeVec::<i32, 4, 4>::new();
+        let mut b_4_4 = BTreeVec::<i32, 4, 4>::new();
         let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
 
         for x in 0..1000 {
             v.push(x);
-            // b_4_4.push_back(x);
+            b_4_4.push_back(x);
             b_5_5.push_back(x);
         }
 
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len() - 1);
+            let v1 = v.remove(index);
+            let v2 = v.remove(index);
             {
                 let mut cursor_5_5 = b_5_5.cursor_at_mut(index);
-                let v1 = cursor_5_5.remove();
-                let v2 = cursor_5_5.remove();
-                assert_eq!(v1, v.remove(index));
-                assert_eq!(v2, v.remove(index));
+                let b1 = cursor_5_5.remove();
+                let b2 = cursor_5_5.remove();
+                assert_eq!(b1, v1);
+                assert_eq!(b2, v2);
                 assert_eq!(v.len(), b_5_5.len());
             }
-            // {
-            //     let mut cursor_4_4 = b_4_4.cursor_at_mut(index);
-            //     let v1 = cursor_4_4.remove();
-            //     let v2 = cursor_4_4.remove();
-            //     assert_eq!(v1, v.remove(index));
-            //     assert_eq!(v2, v.remove(index));
-            //     assert_eq!(v.len(), b_4_4.len());
-            // }
+            {
+                let mut cursor_4_4 = b_4_4.cursor_at_mut(index);
+                let b1 = cursor_4_4.remove();
+                let b2 = cursor_4_4.remove();
+                assert_eq!(b1, v1);
+                assert_eq!(b2, v2);
+                assert_eq!(v.len(), b_4_4.len());
+            }
         }
     }
 

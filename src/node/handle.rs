@@ -232,9 +232,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
     pub unsafe fn new(node: &'a mut Option<Node<T, B, C>>) -> Self {
-        Self {
-            node: node.as_mut().unwrap(),
-        }
+        unsafe { Self::new_node(node.as_mut().unwrap()) }
     }
 
     pub unsafe fn new_node(node: &'a mut Node<T, B, C>) -> Self {
@@ -243,6 +241,14 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
     fn is_full(&self) -> bool {
         matches!(self.children().last(), Some(&Some(_)))
+    }
+
+    pub fn is_underfull(&self) -> bool {
+        self.children()[(B - 1) / 2].is_none()
+    }
+
+    pub fn is_almost_underfull(&self) -> bool {
+        self.children()[(B - 1) / 2 + 1].is_none()
     }
 
     pub const fn len(&self) -> usize {

@@ -296,7 +296,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
                 parent.set_len(parent.len() - 1);
 
-                if cur_node.children()[B / 2].is_none() {
+                if cur_node.is_underfull() {
                     let mut parent_index = parent.index_of_child_ptr(cur_ptr);
                     let (fst, snd, combine_res);
 
@@ -316,7 +316,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                                 &mut InternalMut::new(snd).children_slice_mut()[child_index + 1]
                             }
                             CombineResult::Merged => &mut InternalMut::new(fst)
-                                .children_slice_mut()[child_index + B / 2 + 1],
+                                .children_slice_mut()[child_index + (B - 1) / 2 + 1],
                         };
                         self.path[height - 1].write(new_child_ptr);
                     }
@@ -471,9 +471,9 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
             ptr::copy(
                 dst_ptr.add(child_index + 1),
                 dst_ptr.add(child_index),
-                dst.len() - child_index - 1,
+                dst_len - child_index - 1,
             );
-            ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(dst.len() - 1), src.len());
+            ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(dst_len - 1), src_len);
             free_leaf(src_node);
 
             dst.set_len(src_len + dst_len - 1);
@@ -506,12 +506,11 @@ unsafe fn combine_internals_fst_underfull<T, const B: usize, const C: usize>(
 ) -> CombineResult {
     let mut fst = unsafe { InternalMut::new(opt_fst) };
     let mut snd = unsafe { InternalMut::new(opt_snd) };
-    let snd_almost_underfull = snd.children()[B / 2 + 1].is_none();
 
-    if snd_almost_underfull {
+    if snd.is_almost_underfull() {
         unsafe {
-            fst.children_slice_range_mut(B / 2..)
-                .swap_with_slice(snd.children_slice_range_mut(..=B / 2));
+            fst.children_slice_range_mut((B - 1) / 2..(B + 1) / 2 + (B - 1) / 2)
+                .swap_with_slice(snd.children_slice_range_mut(..=(B - 1) / 2));
             fst.set_len(fst.len() + snd.len());
             debug_assert!(snd.children().iter().all(Option::is_none));
             free_internal(opt_snd.take().unwrap());
@@ -523,7 +522,7 @@ unsafe fn combine_internals_fst_underfull<T, const B: usize, const C: usize>(
         snd.set_len(snd.len() - x.len());
         fst.set_len(fst.len() + x.len());
 
-        *fst.get_child_mut(B / 2) = Some(x);
+        *fst.get_child_mut((B - 1) / 2) = Some(x);
         CombineResult::Ok
     }
 }
@@ -534,12 +533,11 @@ unsafe fn combine_internals_snd_underfull<T, const B: usize, const C: usize>(
 ) -> CombineResult {
     let mut fst = unsafe { InternalMut::new(opt_fst) };
     let mut snd = unsafe { InternalMut::new(opt_snd) };
-    let fst_almost_underfull = fst.children()[B / 2 + 1].is_none();
 
-    if fst_almost_underfull {
+    if fst.is_almost_underfull() {
         unsafe {
-            fst.children_slice_range_mut(B / 2 + 1..)
-                .swap_with_slice(snd.children_slice_range_mut(..B / 2));
+            fst.children_slice_range_mut((B - 1) / 2 + 1..(B + 1) / 2 + (B - 1) / 2)
+                .swap_with_slice(snd.children_slice_range_mut(..(B - 1) / 2));
             fst.set_len(fst.len() + snd.len());
             debug_assert!(snd.children().iter().all(Option::is_none));
             free_internal(opt_snd.take().unwrap());
