@@ -222,7 +222,7 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
 }
 
 pub struct InternalMut<'a, T, const B: usize, const C: usize> {
-    node: &'a mut Node<T, B, C>,
+    node: &'a mut Option<Node<T, B, C>>,
 }
 
 impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
@@ -232,10 +232,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
     pub unsafe fn new(node: &'a mut Option<Node<T, B, C>>) -> Self {
-        unsafe { Self::new_node(node.as_mut().unwrap()) }
-    }
-
-    pub unsafe fn new_node(node: &'a mut Node<T, B, C>) -> Self {
         Self { node }
     }
 
@@ -251,16 +247,16 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         self.children()[(B - 1) / 2 + 1].is_none()
     }
 
-    pub const fn len(&self) -> usize {
-        self.node.len()
+    pub fn len(&self) -> usize {
+        self.node.as_ref().unwrap().len()
     }
 
     pub fn set_len(&mut self, new_len: usize) {
-        unsafe { self.node.set_len(new_len) };
+        unsafe { self.node.as_mut().unwrap().set_len(new_len) };
     }
 
     pub fn index_of_child_ptr(&self, elem_ptr: *const Option<Node<T, B, C>>) -> usize {
-        let slice_addr = unsafe { self.node.ptr.children.as_ptr() as usize };
+        let slice_addr = unsafe { self.node.as_ref().unwrap().ptr.children.as_ptr() as usize };
         let elem_addr = elem_ptr as usize;
         (elem_addr - slice_addr) / mem::size_of::<Option<Node<T, B, C>>>()
     }
@@ -268,20 +264,22 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     pub fn children(&self) -> &[Option<Node<T, B, C>>; B] {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe { self.node.ptr.children.as_ref() }
+        unsafe { self.node.as_ref().unwrap().ptr.children.as_ref() }
     }
 
     pub fn into_children_slice_mut(self) -> &'a mut [Option<Node<T, B, C>>; B] {
-        unsafe { self.node.ptr.children.as_mut() }
+        unsafe { self.node.as_mut().unwrap().ptr.children.as_mut() }
     }
 
     pub fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
-        unsafe { self.node.ptr.children.as_mut() }
+        unsafe { self.node.as_mut().unwrap().ptr.children.as_mut() }
     }
 
-    pub fn into_children_mut(self) -> impl Iterator<Item = &'a mut Node<T, B, C>> {
-        let children = unsafe { self.node.ptr.children.as_mut() };
-        children.iter_mut().map_while(Option::as_mut)
+    pub fn free(mut self) {
+        unsafe {
+            Box::from_raw(self.children_slice_mut());
+        }
+        *self.node = None;
     }
 
     pub unsafe fn children_slice_range_mut(
@@ -303,6 +301,8 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe {
             slice::from_raw_parts_mut(
                 self.node
+                    .as_mut()
+                    .unwrap()
                     .ptr
                     .children
                     .as_ptr()
@@ -314,7 +314,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn get_child_mut(&mut self, index: usize) -> &mut Option<Node<T, B, C>> {
-        unsafe { &mut (*self.node.ptr.children.as_ptr())[index] }
+        unsafe { &mut (*self.node.as_mut().unwrap().ptr.children.as_ptr())[index] }
     }
 
     pub unsafe fn insert_node(

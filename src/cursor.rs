@@ -7,7 +7,7 @@ use core::{
 use crate::{
     node::handle::{InsertResult, Internal, InternalMut, LeafMut},
     node::Node,
-    utils::{free_internal, free_leaf, slice_shift_left, slice_shift_right},
+    utils::{free_leaf, slice_shift_left, slice_shift_right},
     BTreeVec,
 };
 
@@ -199,7 +199,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                             parent.get_child_mut(path_index)
                         }
                         InsertResult::SplitRight(ref mut n) => {
-                            InternalMut::new_node(n).get_child_mut(path_index - B / 2 - 1)
+                            &mut (*n.ptr.children.as_ptr())[path_index - B / 2 - 1]
                         }
                         InsertResult::SplitMiddle(_) => unreachable!(),
                     };
@@ -364,18 +364,17 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         // move the root one level lower if needed
         unsafe {
             let root_height = self.height();
+            // TODO: deduplicate
             let root = Internal::new(self.tree.as_ref().root.as_ref().unwrap());
 
             if root.is_singleton() {
-                let mut old_root = self.tree.as_mut().root.take().unwrap();
+                let mut old_root = InternalMut::new(&mut self.tree.as_mut().root);
+                let new_root = old_root.children_slice_mut()[0].take().unwrap();
+                // `old_root` points to the `root` field of `self` so it must be freed before assigning a new root
+                old_root.free();
 
                 self.tree.as_mut().height = root_height - 1;
-                self.tree.as_mut().root = Some(
-                    InternalMut::new_node(&mut old_root).children_slice_mut()[0]
-                        .take()
-                        .unwrap(),
-                );
-                free_internal(old_root);
+                self.tree.as_mut().root = Some(new_root);
                 self.path[root_height - 1].write(&mut self.tree.as_mut().root);
             }
         }
@@ -562,6 +561,6 @@ unsafe fn take_children<T, const B: usize, const C: usize>(
             .swap_with_slice(snd.children_slice_range_mut(..snd_len));
         fst.set_len(fst.len() + snd.len());
         debug_assert!(snd.children().iter().all(Option::is_none));
-        free_internal(opt_snd.take().unwrap());
+        snd.free();
     }
 }

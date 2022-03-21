@@ -21,11 +21,11 @@ pub struct Node<T, const B: usize, const C: usize> {
     // Normal logic can assume that this assumption is upheld.
     // However, breaking this assumption must not cause Undefined Behavior.
     length: NonZeroUsize,
-    ptr: NodePtr<T, B, C>,
+    pub ptr: NodePtr<T, B, C>,
 }
 
 pub union NodePtr<T, const B: usize, const C: usize> {
-    children: NonNull<[Option<Node<T, B, C>>; B]>,
+    pub children: NonNull<[Option<Node<T, B, C>>; B]>,
     values: NonNull<[MaybeUninit<T>; C]>,
 }
 
