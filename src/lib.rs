@@ -244,22 +244,6 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_front_back2() {
-        let mut b = BTreeVec::<i32, 5, 5>::new();
-        for x in 0..20 {
-            b.push_back(x);
-        }
-
-        for x in (-20..0).rev() {
-            b.push_front(x)
-        }
-
-        for (a, b) in b.iter().zip(-20..) {
-            assert_eq!(*a, b);
-        }
-    }
-
-    #[test]
     fn test_random_insertions() {
         use alloc::vec::Vec;
         use rand::{Rng, SeedableRng};

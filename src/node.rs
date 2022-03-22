@@ -38,10 +38,6 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         self.length.get()
     }
 
-    pub unsafe fn set_len(&mut self, new_len: usize) {
-        self.length = NonZeroUsize::new(new_len).unwrap();
-    }
-
     fn from_children(length: usize, children: Box<[Option<Self>; B]>) -> Self {
         Self {
             length: NonZeroUsize::new(length).unwrap(),

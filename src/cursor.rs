@@ -226,14 +226,9 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             }
         }
 
-        height += 1;
-        unsafe {
-            while height <= self.height() {
-                let node = self.path[height].assume_init().as_mut().unwrap();
-                height += 1;
-                let len = node.as_ref().unwrap().len();
-                node.as_mut().unwrap().set_len(len + 1);
-            }
+        for h in height + 1..=self.height() {
+            let mut node = unsafe { InternalMut::new(&mut *self.path[h].assume_init()) };
+            node.set_len(node.len() + 1);
         }
     }
 
