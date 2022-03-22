@@ -199,7 +199,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                             parent.get_child_mut(path_index)
                         }
                         InsertResult::SplitRight(ref mut n) => {
-                            &mut (*n.ptr.children.as_ptr())[path_index - B / 2 - 1]
+                            &mut (*n.ptr.children.as_ptr())
+                                [path_index - InternalMut::<T, B, C>::UNDERFULL_LEN - 1]
                         }
                         InsertResult::SplitMiddle(_) => unreachable!(),
                     };
@@ -314,9 +315,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
                         let new_child_ptr: *mut _ = match combine_res {
                             CombineResult::Ok => &mut snd.children_slice_mut()[child_index + 1],
-                            CombineResult::Merged => {
-                                &mut fst.children_slice_mut()[child_index + (B - 1) / 2 + 1]
-                            }
+                            CombineResult::Merged => &mut fst.children_slice_mut()
+                                [child_index + InternalMut::<T, B, C>::UNDERFULL_LEN + 1],
                         };
                         self.path[height - 1].write(new_child_ptr);
                     }
@@ -501,7 +501,12 @@ unsafe fn combine_internals_fst_underfull<T, const B: usize, const C: usize>(
 ) -> CombineResult {
     if snd.is_almost_underfull() {
         unsafe {
-            take_children(fst, snd, (B - 1) / 2, (B - 1) / 2 + 1);
+            take_children(
+                fst,
+                snd,
+                InternalMut::<T, B, C>::UNDERFULL_LEN,
+                InternalMut::<T, B, C>::UNDERFULL_LEN + 1,
+            );
         }
         CombineResult::Merged
     } else {
@@ -510,7 +515,7 @@ unsafe fn combine_internals_fst_underfull<T, const B: usize, const C: usize>(
         snd.set_len(snd.len() - x.len());
         fst.set_len(fst.len() + x.len());
 
-        *fst.get_child_mut((B - 1) / 2) = Some(x);
+        *fst.get_child_mut(InternalMut::<T, B, C>::UNDERFULL_LEN) = Some(x);
         CombineResult::Ok
     }
 }
@@ -521,7 +526,12 @@ unsafe fn combine_internals_snd_underfull<T, const B: usize, const C: usize>(
 ) -> CombineResult {
     if fst.is_almost_underfull() {
         unsafe {
-            take_children(fst, snd, (B - 1) / 2 + 1, (B - 1) / 2);
+            take_children(
+                fst,
+                snd,
+                InternalMut::<T, B, C>::UNDERFULL_LEN + 1,
+                InternalMut::<T, B, C>::UNDERFULL_LEN,
+            );
         }
         CombineResult::Merged
     } else {

@@ -88,7 +88,9 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     pub fn values_mut(&mut self) -> &mut [T] {
         let len = self.len();
         debug_assert!(len <= C);
-        unsafe { slice_assume_init_mut(&mut self.node.as_mut().unwrap().ptr.values.as_mut()[..len]) }
+        unsafe {
+            slice_assume_init_mut(&mut self.node.as_mut().unwrap().ptr.values.as_mut()[..len])
+        }
     }
 
     pub fn values_maybe_uninit_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
@@ -102,7 +104,9 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     pub fn into_values_mut(self) -> &'a mut [T] {
         let len = self.len();
         debug_assert!(len <= C);
-        unsafe { slice_assume_init_mut(&mut self.node.as_mut().unwrap().ptr.values.as_mut()[..len]) }
+        unsafe {
+            slice_assume_init_mut(&mut self.node.as_mut().unwrap().ptr.values.as_mut()[..len])
+        }
     }
 
     fn is_full(&self) -> bool {
@@ -228,6 +232,8 @@ pub struct InternalMut<'a, T, const B: usize, const C: usize> {
 impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     const NONE: Option<Node<T, B, C>> = None;
 
+    pub const UNDERFULL_LEN: usize = (B - 1) / 2;
+
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
@@ -240,11 +246,11 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn is_underfull(&self) -> bool {
-        self.children()[(B - 1) / 2].is_none()
+        self.children()[Self::UNDERFULL_LEN].is_none()
     }
 
     pub fn is_almost_underfull(&self) -> bool {
-        self.children()[(B - 1) / 2 + 1].is_none()
+        self.children()[Self::UNDERFULL_LEN + 1].is_none()
     }
 
     pub fn len(&self) -> usize {
@@ -325,7 +331,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe {
             if self.is_full() {
                 use core::cmp::Ordering::{Equal, Greater, Less};
-                match index.cmp(&(B / 2 + 1)) {
+                match index.cmp(&(Self::UNDERFULL_LEN + 1)) {
                     Less => InsertResult::SplitLeft(self.split_and_insert_left(index, node)),
                     Equal => InsertResult::SplitMiddle(self.split_and_insert_right(index, node)),
                     Greater => InsertResult::SplitRight(self.split_and_insert_right(index, node)),
@@ -346,7 +352,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     unsafe fn split_and_insert_left(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
         let mut new_box = Box::new([Self::NONE; B]);
         let node_len = node.len();
-        let split_index = B / 2;
+        let split_index = Self::UNDERFULL_LEN;
         let tail_len = B - split_index;
 
         let new_self_len = sum_lens(&self.children_slice_mut()[..split_index]);
@@ -373,7 +379,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     ) -> Node<T, B, C> {
         let mut new_box = Box::new([Self::NONE; B]);
         let node_len = node.len();
-        let split_index = B / 2 + 1;
+        let split_index = Self::UNDERFULL_LEN + 1;
         let tail_len = B - split_index;
 
         let tail_start_len = index - split_index;
