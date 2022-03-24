@@ -7,11 +7,9 @@ use core::{
 
 use alloc::boxed::Box;
 
-use super::Node;
-
-use crate::utils::{
-    slice_assume_init_mut, slice_assume_init_ref, slice_insert_forget_last, slice_shift_left,
-    slice_shift_right,
+use crate::{
+    node::Node,
+    utils::{slice_assume_init_mut, slice_assume_init_ref, slice_shift_left, slice_shift_right},
 };
 
 pub struct Leaf<'a, T, const B: usize, const C: usize> {
@@ -376,7 +374,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
     fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
         debug_assert!(!self.is_full());
-        slice_insert_forget_last(self.children_slice_mut(), index, Some(node));
+        slice_shift_right(&mut self.children_slice_mut()[index..], Some(node));
         self.set_len(self.len() + 1);
     }
 
@@ -391,9 +389,8 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
         self.children_slice_mut()[split_index..].swap_with_slice(&mut new_box[..tail_len]);
 
-        slice_insert_forget_last(
-            &mut self.children_slice_mut()[..=split_index],
-            index,
+        slice_shift_right(
+            &mut self.children_slice_mut()[index..=split_index],
             Some(node),
         );
 

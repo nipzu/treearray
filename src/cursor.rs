@@ -445,12 +445,12 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
         let dst_len = dst.len();
         let src_ptr = src.values_maybe_uninit_mut().as_ptr();
 
-
         unsafe {
             ret = slice_shift_left(
                 &mut dst.values_maybe_uninit_mut()[child_index..dst_len],
                 MaybeUninit::uninit(),
-            ).assume_init();
+            )
+            .assume_init();
             let dst_ptr = dst.values_maybe_uninit_mut().as_mut_ptr();
             ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(dst_len - 1), src_len);
             src.free();
