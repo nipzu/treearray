@@ -9,7 +9,10 @@ use alloc::boxed::Box;
 
 use super::Node;
 
-use crate::utils::{slice_assume_init_mut, slice_assume_init_ref, slice_insert_forget_last};
+use crate::utils::{
+    slice_assume_init_mut, slice_assume_init_ref, slice_insert_forget_last, slice_shift_left,
+    slice_shift_right,
+};
 
 pub struct Leaf<'a, T, const B: usize, const C: usize> {
     node: &'a Node<T, B, C>,
@@ -86,12 +89,13 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     pub unsafe fn pop_front(&mut self) -> T {
         debug_assert!(self.len() > 0);
         unsafe {
-            let new_len = self.len() - 1;
-            let fst_ptr = self.values_mut().as_mut_ptr();
-            let ret = fst_ptr.read();
-            ptr::copy(fst_ptr.add(1), fst_ptr, new_len);
-            self.set_len(new_len);
-            ret
+            let old_len = self.len();
+            self.set_len(old_len - 1);
+            slice_shift_left(
+                &mut self.values_maybe_uninit_mut()[..old_len],
+                MaybeUninit::uninit(),
+            )
+            .assume_init()
         }
     }
 
@@ -143,10 +147,12 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     fn insert_fitting_extending(&mut self, index: usize, value: T) {
         assert!(self.len() < C);
         unsafe {
-            let index_ptr = self.values_maybe_uninit_mut().as_mut_ptr().add(index);
-            ptr::copy(index_ptr, index_ptr.add(1), self.len() - index);
-            ptr::write(index_ptr, MaybeUninit::new(value));
-            self.set_len(self.len() + 1);
+            let old_len = self.len();
+            slice_shift_right(
+                &mut self.values_maybe_uninit_mut()[index..=old_len],
+                MaybeUninit::new(value),
+            );
+            self.set_len(old_len + 1);
         }
     }
 
@@ -156,13 +162,13 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         let tail_len = C - split_index;
 
         unsafe {
-            let values_ptr = self.values_mut().as_mut_ptr();
-            let index_ptr = values_ptr.add(index);
-            let split_ptr = values_ptr.add(split_index);
+            let split_ptr = self.values_mut().as_mut_ptr().add(split_index);
             let box_ptr = new_box.as_mut_ptr();
             ptr::copy_nonoverlapping(split_ptr, box_ptr.cast::<T>(), tail_len);
-            ptr::copy(index_ptr, index_ptr.add(1), split_index - index);
-            ptr::write(index_ptr, value);
+            slice_shift_right(
+                &mut self.values_maybe_uninit_mut()[index..=split_index],
+                MaybeUninit::new(value),
+            );
 
             self.set_len(split_index + 1);
             Node::from_values(tail_len, new_box)
@@ -197,11 +203,13 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         debug_assert!(index < self.len());
 
         unsafe {
-            let index_ptr = self.values_mut().as_mut_ptr().add(index);
-            let ret = index_ptr.read();
-            ptr::copy(index_ptr.add(1), index_ptr, self.len() - index - 1);
-            self.set_len(self.len() - 1);
-            ret
+            let old_len = self.len();
+            self.set_len(old_len - 1);
+            slice_shift_left(
+                &mut self.values_maybe_uninit_mut()[index..old_len],
+                MaybeUninit::uninit(),
+            )
+            .assume_init()
         }
     }
 }
@@ -342,14 +350,22 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         &mut self,
         index: usize,
         node: Node<T, B, C>,
+        path_through_new: bool,
     ) -> InsertResult<T, B, C> {
         unsafe {
             if self.is_full() {
                 use core::cmp::Ordering::{Equal, Greater, Less};
                 match index.cmp(&(Self::UNDERFULL_LEN + 1)) {
                     Less => InsertResult::SplitLeft(self.split_and_insert_left(index, node)),
-                    Equal => InsertResult::SplitMiddle(self.split_and_insert_right(index, node)),
                     Greater => InsertResult::SplitRight(self.split_and_insert_right(index, node)),
+                    Equal => {
+                        let n = self.split_and_insert_right(index, node);
+                        if path_through_new {
+                            InsertResult::SplitRight(n)
+                        } else {
+                            InsertResult::SplitLeft(n)
+                        }
+                    }
                 }
             } else {
                 self.insert_fitting(index, node);
@@ -429,6 +445,5 @@ fn sum_lens<T, const B: usize, const C: usize>(children: &[Option<Node<T, B, C>>
 pub enum InsertResult<T, const B: usize, const C: usize> {
     Fit,
     SplitLeft(Node<T, B, C>),
-    SplitMiddle(Node<T, B, C>),
     SplitRight(Node<T, B, C>),
 }

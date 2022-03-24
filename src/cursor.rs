@@ -179,21 +179,11 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     let (path_through_new, new_node) = match to_insert {
                         InsertResult::SplitRight(n) => (true, n),
                         InsertResult::SplitLeft(n) => (false, n),
-                        _ => unreachable!(),
+                        InsertResult::Fit => unreachable!(),
                     };
-                    to_insert = parent.insert_node(child_index + 1, new_node);
-                    if let InsertResult::SplitMiddle(n) = to_insert {
-                        to_insert = if path_through_new {
-                            InsertResult::SplitRight(n)
-                        } else {
-                            InsertResult::SplitLeft(n)
-                        };
-                    }
-                    let path_index = if path_through_new {
-                        child_index + 1
-                    } else {
-                        child_index
-                    };
+                    let path_index = child_index + usize::from(path_through_new);
+
+                    to_insert = parent.insert_node(child_index + 1, new_node, path_through_new);
                     let ptr: *mut _ = match to_insert {
                         InsertResult::Fit | InsertResult::SplitLeft(_) => {
                             parent.get_child_mut(path_index)
@@ -202,7 +192,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                             &mut (*n.ptr.children.as_ptr())
                                 [path_index - InternalMut::<T, B, C>::UNDERFULL_LEN - 1]
                         }
-                        InsertResult::SplitMiddle(_) => unreachable!(),
                     };
                     self.path[height - 1].write(ptr);
                 } else {
@@ -210,7 +199,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     let (new_node, update_ptr) = match to_insert {
                         InsertResult::SplitLeft(n) => (n, false),
                         InsertResult::SplitRight(n) => (n, true),
-                        _ => unreachable!(),
+                        InsertResult::Fit => unreachable!(),
                     };
 
                     self.tree.as_mut().height = height;
@@ -427,10 +416,11 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
             let mut cur = LeafMut::new(cur);
 
             let x = prev.pop_back();
-            ret = cur.values_maybe_uninit_mut()[*child_index].as_ptr().read();
-            let cur_ptr = cur.values_maybe_uninit_mut().as_mut_ptr();
-            ptr::copy(cur_ptr, cur_ptr.add(1), *child_index);
-            cur.values_maybe_uninit_mut()[0].write(x);
+            ret = slice_shift_right(
+                &mut cur.values_maybe_uninit_mut()[..=*child_index],
+                MaybeUninit::new(x),
+            )
+            .assume_init();
             *child_index += 1;
         }
     }
@@ -453,17 +443,15 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
         let mut src = unsafe { LeafMut::new(next) };
         let src_len = src.len();
         let dst_len = dst.len();
-        let dst_ptr = dst.values_maybe_uninit_mut().as_mut_ptr();
         let src_ptr = src.values_maybe_uninit_mut().as_ptr();
 
-        ret = unsafe { ptr::read(dst_ptr.add(child_index)).assume_init() };
 
         unsafe {
-            ptr::copy(
-                dst_ptr.add(child_index + 1),
-                dst_ptr.add(child_index),
-                dst_len - child_index - 1,
-            );
+            ret = slice_shift_left(
+                &mut dst.values_maybe_uninit_mut()[child_index..dst_len],
+                MaybeUninit::uninit(),
+            ).assume_init();
+            let dst_ptr = dst.values_maybe_uninit_mut().as_mut_ptr();
             ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(dst_len - 1), src_len);
             src.free();
             dst.set_len(src_len + dst_len - 1);
@@ -473,17 +461,9 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
         unsafe {
             let mut next = LeafMut::new(next);
             let mut cur = LeafMut::new(cur);
-            let cur_len = cur.len();
 
             let x = next.pop_front();
-            ret = cur.values_maybe_uninit_mut()[child_index].as_ptr().read();
-            let cur_ptr = cur.values_maybe_uninit_mut().as_mut_ptr();
-            ptr::copy(
-                cur_ptr.add(child_index + 1),
-                cur_ptr.add(child_index),
-                cur_len - 1 - child_index,
-            );
-            cur.values_maybe_uninit_mut()[cur_len - 1].write(x);
+            ret = slice_shift_left(&mut cur.values_mut()[child_index..], x);
         }
     }
 
