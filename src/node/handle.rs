@@ -78,23 +78,12 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     pub unsafe fn pop_back(&mut self) -> T {
         debug_assert!(self.len() > 0);
-        unsafe {
-            self.set_len(self.len() - 1);
-            self.values_maybe_uninit()[self.len()].as_ptr().read()
-        }
+        unsafe { self.remove_no_underflow(self.len() - 1) }
     }
 
     pub unsafe fn pop_front(&mut self) -> T {
         debug_assert!(self.len() > 0);
-        unsafe {
-            let old_len = self.len();
-            self.set_len(old_len - 1);
-            slice_shift_left(
-                &mut self.values_maybe_uninit_mut()[..old_len],
-                MaybeUninit::uninit(),
-            )
-            .assume_init()
-        }
+        unsafe { self.remove_no_underflow(0) }
     }
 
     pub fn values_mut(&mut self) -> &mut [T] {
@@ -105,10 +94,6 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     pub fn values_maybe_uninit_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
         unsafe { self.node_mut().ptr.values.as_mut() }
-    }
-
-    pub fn values_maybe_uninit(&self) -> &[MaybeUninit<T>; C] {
-        unsafe { self.node().ptr.values.as_ref() }
     }
 
     pub fn into_values_mut(mut self) -> &'a mut [T] {

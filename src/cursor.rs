@@ -240,7 +240,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 if leaf.len() > 1 {
                     ret = leaf.remove_no_underflow(self.leaf_index);
                 } else {
-                    ret = leaf.values_mut().as_mut_ptr().read();
+                    ret = leaf.values_mut().as_ptr().read();
                     leaf.free();
                 }
                 return ret;
@@ -416,11 +416,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
             let mut cur = LeafMut::new(cur);
 
             let x = prev.pop_back();
-            ret = slice_shift_right(
-                &mut cur.values_maybe_uninit_mut()[..=*child_index],
-                MaybeUninit::new(x),
-            )
-            .assume_init();
+            ret = slice_shift_right(&mut cur.values_mut()[..=*child_index], x);
             *child_index += 1;
         }
     }
@@ -443,7 +439,6 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
         let mut src = unsafe { LeafMut::new(next) };
         let src_len = src.len();
         let dst_len = dst.len();
-        let src_ptr = src.values_maybe_uninit_mut().as_ptr();
 
         unsafe {
             ret = slice_shift_left(
@@ -451,6 +446,7 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
                 MaybeUninit::uninit(),
             )
             .assume_init();
+            let src_ptr = src.values_maybe_uninit_mut().as_ptr();
             let dst_ptr = dst.values_maybe_uninit_mut().as_mut_ptr();
             ptr::copy_nonoverlapping(src_ptr, dst_ptr.add(dst_len - 1), src_len);
             src.free();
