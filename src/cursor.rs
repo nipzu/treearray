@@ -226,48 +226,14 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             panic!();
         }
 
-        let ret;
-
         // handle root being a leaf
-        unsafe {
-            if self.height() == 0 {
-                debug_assert_eq!(self.leaf_index, self.index);
-                let mut leaf = LeafMut::new(&mut self.tree.as_mut().root);
-                if self.leaf_index >= leaf.len() {
-                    // TODO: better
-                    panic!("out of bounds");
-                }
-                if leaf.len() > 1 {
-                    ret = leaf.remove_no_underflow(self.leaf_index);
-                } else {
-                    ret = leaf.values_mut().as_ptr().read();
-                    leaf.free();
-                }
-                return ret;
+        if self.height() == 0 {
+            unsafe {
+                return self.remove_from_root_leaf();
             }
         }
 
-        // remove element from leaf
-        unsafe {
-            // root is internal
-            let mut parent = InternalMut::new(&mut *self.path[1].assume_init());
-            let child_ptr = self.path[0].assume_init();
-            let mut self_index = parent.index_of_child_ptr(child_ptr);
-
-            // Do this before because reasons?
-            parent.set_len(parent.len() - 1);
-            let mut leaf = LeafMut::new(&mut *self.path[0].assume_init());
-            if leaf.is_almost_underfull() {
-                if self_index > 0 {
-                    ret = combine_leaves_tail(&mut parent, &mut self.leaf_index, &mut self_index);
-                } else {
-                    ret = combine_leaves_head(&mut parent, self.leaf_index);
-                }
-                self.path[0].write(parent.get_child_mut(self_index));
-            } else {
-                ret = leaf.remove_no_underflow(self.leaf_index);
-            }
-        }
+        let ret = unsafe { self.remove_from_leaf() };
 
         // update lengths and merge nodes if needed
         unsafe {
@@ -363,6 +329,47 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         }
 
         ret
+    }
+
+    unsafe fn remove_from_leaf(&mut self) -> T {
+        unsafe {
+            // root is internal
+            let mut parent = InternalMut::new(&mut *self.path[1].assume_init());
+            let child_ptr = self.path[0].assume_init();
+            let mut self_index = parent.index_of_child_ptr(child_ptr);
+
+            // Do this before because reasons?
+            parent.set_len(parent.len() - 1);
+            let mut leaf = LeafMut::new(&mut *self.path[0].assume_init());
+            if leaf.is_almost_underfull() {
+                let ret = if self_index > 0 {
+                    combine_leaves_tail(&mut parent, &mut self.leaf_index, &mut self_index)
+                } else {
+                    combine_leaves_head(&mut parent, self.leaf_index)
+                };
+                self.path[0].write(parent.get_child_mut(self_index));
+                ret
+            } else {
+                leaf.remove_no_underflow(self.leaf_index)
+            }
+        }
+    }
+
+    unsafe fn remove_from_root_leaf(&mut self) -> T {
+        unsafe {
+            debug_assert_eq!(self.leaf_index, self.index);
+            let mut leaf = LeafMut::new(&mut self.tree.as_mut().root);
+            // TODO: better
+            assert!(self.leaf_index < leaf.len(), "out of bounds");
+            
+            if leaf.len() > 1 {
+                leaf.remove_no_underflow(self.leaf_index)
+            } else {
+                let ret = leaf.values_mut().as_ptr().read();
+                leaf.free();
+                ret
+            }
+        }
     }
 
     // pub fn move_next(&mut self) {

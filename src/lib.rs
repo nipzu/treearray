@@ -1,5 +1,6 @@
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
+#![allow(clippy::module_name_repetitions)]
 // TODO #![deny(missing_docs)]
 
 extern crate alloc;
