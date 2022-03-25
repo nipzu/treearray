@@ -206,8 +206,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     self.tree.as_mut().root = Some(Node::from_child_array([node, new_node]));
 
                     self.path[height - 1].write(
-                        &mut InternalMut::new(&mut self.tree.as_mut().root).children_slice_mut()
-                            [usize::from(update_ptr)],
+                        InternalMut::new(&mut self.tree.as_mut().root)
+                            .get_child_mut(usize::from(update_ptr)),
                     );
                     self.path[height].write(&mut self.tree.as_mut().root);
                     return;
@@ -298,9 +298,10 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                             combine_internals_snd_underfull(fst.reborrow(), snd.reborrow());
 
                         let new_child_ptr: *mut _ = match combine_res {
-                            CombineResult::Ok => &mut snd.children_slice_mut()[child_index + 1],
-                            CombineResult::Merged => &mut fst.children_slice_mut()
-                                [child_index + InternalMut::<T, B, C>::UNDERFULL_LEN + 1],
+                            CombineResult::Ok => snd.get_child_mut(child_index + 1),
+                            CombineResult::Merged => fst.get_child_mut(
+                                child_index + InternalMut::<T, B, C>::UNDERFULL_LEN + 1,
+                            ),
                         };
                         self.path[height - 1].write(new_child_ptr);
                     }
@@ -353,7 +354,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
             if root.is_singleton() {
                 let mut old_root = InternalMut::new(&mut self.tree.as_mut().root);
-                let new_root = old_root.children_slice_mut()[0].take().unwrap();
+                let new_root = old_root.get_child_mut(0).take().unwrap();
                 // `old_root` points to the `root` field of `self` so it must be freed before assigning a new root
                 old_root.free();
 
