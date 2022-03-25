@@ -288,6 +288,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn free(mut self) {
+        debug_assert!(self.children().iter().all(Option::is_none));
         unsafe {
             Box::from_raw(self.children_slice_mut());
         }

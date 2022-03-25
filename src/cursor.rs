@@ -528,7 +528,7 @@ unsafe fn take_children<T, const B: usize, const C: usize>(
 ) {
     unsafe {
         fst.children_slice_range_mut(fst_len..fst_len + snd_len)
-            .swap_with_slice(snd.children_slice_range_mut(..snd_len));
+            .swap_with_slice(&mut snd.children_slice_mut()[..snd_len]);
     }
     fst.set_len(fst.len() + snd.len());
     debug_assert!(snd.children().iter().all(Option::is_none));
