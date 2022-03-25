@@ -279,23 +279,23 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe { self.node().ptr.children.as_ref() }
     }
 
-    pub fn into_children_slice_mut(mut self) -> &'a mut [Option<Node<T, B, C>>; B] {
+    pub fn children_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
         unsafe { self.node_mut().ptr.children.as_mut() }
     }
 
-    pub fn children_slice_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
+    pub fn into_children_mut(mut self) -> &'a mut [Option<Node<T, B, C>>; B] {
         unsafe { self.node_mut().ptr.children.as_mut() }
     }
 
     pub fn free(mut self) {
         debug_assert!(self.children().iter().all(Option::is_none));
         unsafe {
-            Box::from_raw(self.children_slice_mut());
+            Box::from_raw(self.children_mut());
         }
         *self.node = None;
     }
 
-    pub unsafe fn children_slice_range_mut(
+    pub unsafe fn children_range_mut(
         &mut self,
         range: impl RangeBounds<usize>,
     ) -> &mut [Option<Node<T, B, C>>] {
@@ -360,7 +360,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
     fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
         debug_assert!(!self.is_full());
-        slice_shift_right(&mut self.children_slice_mut()[index..], Some(node));
+        slice_shift_right(&mut self.children_mut()[index..], Some(node));
         self.set_len(self.len() + 1);
     }
 
@@ -370,15 +370,12 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         let split_index = Self::UNDERFULL_LEN;
         let tail_len = B - split_index;
 
-        let new_self_len = sum_lens(&self.children_slice_mut()[..split_index]);
+        let new_self_len = sum_lens(&self.children_mut()[..split_index]);
         let new_nodes_len = self.len() - node_len - new_self_len;
 
-        self.children_slice_mut()[split_index..].swap_with_slice(&mut new_box[..tail_len]);
+        self.children_mut()[split_index..].swap_with_slice(&mut new_box[..tail_len]);
 
-        slice_shift_right(
-            &mut self.children_slice_mut()[index..=split_index],
-            Some(node),
-        );
+        slice_shift_right(&mut self.children_mut()[index..=split_index], Some(node));
 
         debug_assert_eq!(new_self_len + node_len, sum_lens(self.children()));
         debug_assert_eq!(new_nodes_len + 1, sum_lens(new_box.as_ref()));
@@ -398,13 +395,11 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
         let tail_start_len = index - split_index;
 
-        let new_self_len = sum_lens(&self.children_slice_mut()[..split_index]);
+        let new_self_len = sum_lens(&self.children_mut()[..split_index]);
         let new_nodes_len = self.len() - node_len - new_self_len;
 
-        self.children_slice_mut()[split_index..index]
-            .swap_with_slice(&mut new_box[..tail_start_len]);
-        self.children_slice_mut()[index..]
-            .swap_with_slice(&mut new_box[tail_start_len + 1..=tail_len]);
+        self.children_mut()[split_index..index].swap_with_slice(&mut new_box[..tail_start_len]);
+        self.children_mut()[index..].swap_with_slice(&mut new_box[tail_start_len + 1..=tail_len]);
         new_box[tail_start_len] = Some(node);
 
         debug_assert_eq!(new_self_len, sum_lens(self.children()));
