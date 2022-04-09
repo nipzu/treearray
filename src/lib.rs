@@ -229,6 +229,13 @@ mod tests {
     }
 
     #[test]
+    fn test_bvec_size() {
+        use core::mem::size_of;
+
+        assert_eq!(size_of::<BTreeVec<i32>>(), 3 * size_of::<usize>())
+    }
+
+    #[test]
     fn test_insert_front_back() {
         let mut b = BTreeVec::<i32, 7, 5>::new();
         for x in 0..500 {
@@ -413,9 +420,9 @@ mod tests {
 
     #[test]
     fn test_bvec_covariant() {
-        fn foo<'a>(_x: crate::BTreeVec<&'a i32>, _y: &'a i32) {}
+        fn foo<'a>(_x: BTreeVec<&'a i32>, _y: &'a i32) {}
 
-        let x = crate::BTreeVec::<&'static i32>::new();
+        let x = BTreeVec::<&'static i32>::new();
         let v = 123;
         let r = &v;
         foo(x, r);
@@ -428,3 +435,25 @@ mod tests {
         t.compile_fail("tests/compile_fail/test_bvec_drop_check.rs");
     }
 }
+
+// enum Action {
+//     Get(usize),
+//     Insert(usize, i32),
+// }
+
+// fn fuzz_random_insertions_4_4(input: alloc::vec::Vec<Action>) {
+//     let mut v = alloc::vec::Vec::new();
+//     let mut b = BTreeVec::<i32, 4, 4>::new();
+//     for action in input {
+//         match action {
+//             Action::Get(i) => assert_eq!(v.get(i), b.get(i)),
+//             Action::Insert(i, x) => {
+//                 assert_eq!(v.len(), b.len());
+//                 if i < v.len() {
+//                     v.insert(i, x);
+//                     b.insert(i, x);
+//                 }
+//             }
+//         }
+//     }
+// }

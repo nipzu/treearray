@@ -83,7 +83,7 @@ pub struct CursorMut<'a, T, const B: usize, const C: usize> {
 }
 
 impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
-    pub(crate) fn new_at(mut tree: NonNull<BTreeVec<T, B, C>>, mut index: usize) -> Self {
+    pub(crate) fn new_at(mut tree: NonNull<BTreeVec<T, B, C>>, index: usize) -> Self {
         let len = unsafe { tree.as_ref().len() };
         if index > len {
             panic!();
@@ -103,16 +103,15 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         }
 
         let is_past_the_end = index == len;
+        let mut remaining_index = index;
 
         if is_past_the_end {
-            index -= 1;
+            remaining_index -= 1;
         }
 
-        let j = index;
         let height = unsafe { tree.as_ref().height };
-        let node = unsafe { &mut tree.as_mut().root };
         // the height of `cur_node` is `height`
-        let mut cur_node = node;
+        let mut cur_node = unsafe { &mut tree.as_mut().root };
         path[height].write(cur_node);
         // decrement the height of `cur_node` `height` times
         'h: for h in (0..height).rev() {
@@ -122,21 +121,23 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 .iter_mut()
                 .take_while(|x| x.is_some())
             {
-                if index < child.as_ref().unwrap().len() {
+                if remaining_index < child.as_ref().unwrap().len() {
                     cur_node = child;
                     path[h].write(cur_node);
                     continue 'h;
                 }
-                index -= child.as_ref().unwrap().len();
+                remaining_index -= child.as_ref().unwrap().len();
             }
             unreachable!();
         }
 
+        let leaf_index = remaining_index + usize::from(is_past_the_end);
+
         Self {
             path,
-            index: j + usize::from(is_past_the_end),
+            index,
             tree,
-            leaf_index: index + usize::from(is_past_the_end),
+            leaf_index,
             _marker: PhantomData,
         }
     }
@@ -186,7 +187,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     to_insert = parent.insert_node(child_index + 1, new_node, path_through_new);
                     let ptr: *mut _ = match to_insert {
                         InsertResult::Fit | InsertResult::SplitLeft(_) => {
-                            parent.get_child_mut(path_index)
+                            parent.child_mut(path_index)
                         }
                         InsertResult::SplitRight(ref mut n) => {
                             &mut (*n.ptr.children.as_ptr())
@@ -207,7 +208,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
                     self.path[height - 1].write(
                         InternalMut::new(&mut self.tree.as_mut().root)
-                            .get_child_mut(usize::from(update_ptr)),
+                            .child_mut(usize::from(update_ptr)),
                     );
                     self.path[height].write(&mut self.tree.as_mut().root);
                     return;
@@ -228,9 +229,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
         // handle root being a leaf
         if self.height() == 0 {
-            unsafe {
-                return self.remove_from_root_leaf();
-            }
+            return unsafe { self.remove_from_root_leaf() };
         }
 
         let ret = unsafe { self.remove_from_leaf() };
@@ -251,28 +250,27 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     let combine_res;
 
                     if parent_index == 0 {
-                        let next = InternalMut::new(parent.get_child_mut(1));
+                        let next = InternalMut::new(parent.child_mut(1));
                         parent_index += 1;
                         combine_res = combine_internals_fst_underfull(cur_node, next);
                     } else {
                         let child_index =
                             cur_node.index_of_child_ptr(self.path[height - 1].assume_init());
-                        let mut prev = InternalMut::new(parent.get_child_mut(parent_index - 1));
+                        let mut prev = InternalMut::new(parent.child_mut(parent_index - 1));
                         combine_res =
                             combine_internals_snd_underfull(prev.reborrow(), cur_node.reborrow());
 
                         let new_child_ptr: *mut _ = match combine_res {
-                            CombineResult::Ok => cur_node.get_child_mut(child_index + 1),
-                            CombineResult::Merged => prev.get_child_mut(
-                                child_index + InternalMut::<T, B, C>::UNDERFULL_LEN + 1,
-                            ),
+                            CombineResult::Ok => cur_node.child_mut(child_index + 1),
+                            CombineResult::Merged => prev
+                                .child_mut(child_index + InternalMut::<T, B, C>::UNDERFULL_LEN + 1),
                         };
                         self.path[height - 1].write(new_child_ptr);
                     }
 
                     if let CombineResult::Merged = combine_res {
                         slice_shift_left(parent.children_range_mut(parent_index..), None);
-                        self.path[height].write(parent.get_child_mut(parent_index - 1));
+                        self.path[height].write(parent.child_mut(parent_index - 1));
                     }
                 }
             }
@@ -294,12 +292,12 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     let parent_index =
                         parent.index_of_child_ptr(self.path[height - 1].assume_init());
                     if parent_index + 1 < B {
-                        if let n @ Some(_) = parent.get_child_mut(parent_index + 1) {
+                        if let n @ Some(_) = parent.child_mut(parent_index + 1) {
                             let mut cur = n as *mut _;
                             for h in (0..height).rev() {
                                 self.path[h].write(cur);
                                 if h > 0 {
-                                    cur = InternalMut::new(&mut *cur).get_child_mut(0);
+                                    cur = InternalMut::new(&mut *cur).child_mut(0);
                                 }
                             }
                             self.leaf_index = 0;
@@ -318,7 +316,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
             if root.is_singleton() {
                 let mut old_root = InternalMut::new(&mut self.tree.as_mut().root);
-                let new_root = old_root.get_child_mut(0).take().unwrap();
+                let new_root = old_root.child_mut(0).take().unwrap();
                 // `old_root` points to the `root` field of `self` so it must be freed before assigning a new root
                 old_root.free();
 
@@ -347,7 +345,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 } else {
                     combine_leaves_head(&mut parent, self.leaf_index)
                 };
-                self.path[0].write(parent.get_child_mut(self_index));
+                self.path[0].write(parent.child_mut(self_index));
                 ret
             } else {
                 leaf.remove_no_underflow(self.leaf_index)
@@ -361,7 +359,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             let mut leaf = LeafMut::new(&mut self.tree.as_mut().root);
             // TODO: better
             assert!(self.leaf_index < leaf.len(), "out of bounds");
-            
+
             if leaf.len() > 1 {
                 leaf.remove_no_underflow(self.leaf_index)
             } else {
@@ -394,40 +392,57 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
         .try_into()
         .unwrap();
 
-    let prev_len = prev.as_ref().unwrap().len();
-    let mut prev = unsafe { LeafMut::new(prev) };
+    let prev = unsafe { LeafMut::new(prev) };
+    let cur = unsafe { LeafMut::new(cur) };
     if prev.is_almost_underfull() {
-        let mut src = unsafe { LeafMut::new(cur) };
-        let src_len = src.len();
-        let dst_ptr = unsafe { prev.values_maybe_uninit_mut().as_mut_ptr().add(prev_len) };
-        let src_ptr = src.values_maybe_uninit_mut().as_ptr();
-
-        ret = unsafe { ptr::read(src_ptr.add(*child_index)).assume_init() };
-
-        unsafe {
-            ptr::copy_nonoverlapping(src_ptr, dst_ptr, *child_index);
-            ptr::copy_nonoverlapping(
-                src_ptr.add(*child_index + 1),
-                dst_ptr.add(*child_index),
-                src_len - 1 - *child_index,
-            );
-            src.free();
-            prev.set_len(src_len + prev_len - 1);
-        }
+        let prev_len = prev.len();
+        ret = unsafe { merge_with_previous(prev, cur, *child_index) };
         slice_shift_left(&mut parent.children_mut()[*self_index..], None);
         *self_index -= 1;
         *child_index += prev_len;
     } else {
-        unsafe {
-            let mut cur = LeafMut::new(cur);
-
-            let x = prev.pop_back();
-            ret = slice_shift_right(&mut cur.values_mut()[..=*child_index], x);
-            *child_index += 1;
-        }
+        ret = unsafe { rotate_from_previous(prev, cur, *child_index) };
+        *child_index += 1;
     }
 
     ret
+}
+
+unsafe fn merge_with_previous<T, const B: usize, const C: usize>(
+    mut prev: LeafMut<T, B, C>,
+    mut src: LeafMut<T, B, C>,
+    child_index: usize,
+) -> T {
+    let prev_len = prev.len();
+    let src_len = src.len();
+    let dst_ptr = unsafe { prev.values_maybe_uninit_mut().as_mut_ptr().add(prev_len) };
+    let src_ptr = src.values_maybe_uninit_mut().as_ptr();
+
+    let ret = unsafe { ptr::read(src_ptr.add(child_index)).assume_init() };
+
+    unsafe {
+        ptr::copy_nonoverlapping(src_ptr, dst_ptr, child_index);
+        ptr::copy_nonoverlapping(
+            src_ptr.add(child_index + 1),
+            dst_ptr.add(child_index),
+            src_len - 1 - child_index,
+        );
+        src.free();
+        prev.set_len(src_len + prev_len - 1);
+    }
+
+    ret
+}
+
+unsafe fn rotate_from_previous<T, const B: usize, const C: usize>(
+    mut prev: LeafMut<T, B, C>,
+    mut cur: LeafMut<T, B, C>,
+    index: usize,
+) -> T {
+    unsafe {
+        let x = prev.pop_back();
+        slice_shift_right(&mut cur.values_mut()[..=index], x)
+    }
 }
 
 unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
@@ -439,9 +454,12 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
     let [cur, next]: &mut [Option<Node<T, B, C>>; 2] =
         (&mut parent.children_mut()[0..=1]).try_into().unwrap();
 
-    if unsafe { LeafMut::new(next).is_almost_underfull() } {
-        let mut dst = unsafe { LeafMut::new(cur) };
-        let mut src = unsafe { LeafMut::new(next) };
+    let mut next = unsafe { LeafMut::new(next) };
+    let mut cur = unsafe { LeafMut::new(cur) };
+
+    if next.is_almost_underfull() {
+        let mut dst = cur;
+        let mut src = next;
         let src_len = src.len();
         let dst_len = dst.len();
 
@@ -460,9 +478,6 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
         slice_shift_left(&mut parent.children_mut()[1..], None);
     } else {
         unsafe {
-            let mut next = LeafMut::new(next);
-            let mut cur = LeafMut::new(cur);
-
             let x = next.pop_front();
             ret = slice_shift_left(&mut cur.values_mut()[child_index..], x);
         }
@@ -476,13 +491,9 @@ unsafe fn combine_internals_fst_underfull<T, const B: usize, const C: usize>(
     snd: InternalMut<T, B, C>,
 ) -> CombineResult {
     if snd.is_almost_underfull() {
+        let uf = InternalMut::<T, B, C>::UNDERFULL_LEN;
         unsafe {
-            take_children(
-                fst,
-                snd,
-                InternalMut::<T, B, C>::UNDERFULL_LEN,
-                InternalMut::<T, B, C>::UNDERFULL_LEN + 1,
-            );
+            take_children(fst, snd, uf, uf + 1);
         }
         CombineResult::Merged
     } else {
@@ -502,7 +513,7 @@ unsafe fn take_from_snd<T, const B: usize, const C: usize>(
     snd.set_len(snd.len() - x.len());
     fst.set_len(fst.len() + x.len());
 
-    *fst.get_child_mut(InternalMut::<T, B, C>::UNDERFULL_LEN) = Some(x);
+    *fst.child_mut(InternalMut::<T, B, C>::UNDERFULL_LEN) = Some(x);
 }
 
 unsafe fn combine_internals_snd_underfull<T, const B: usize, const C: usize>(
@@ -510,13 +521,9 @@ unsafe fn combine_internals_snd_underfull<T, const B: usize, const C: usize>(
     snd: InternalMut<T, B, C>,
 ) -> CombineResult {
     if fst.is_almost_underfull() {
+        let uf = InternalMut::<T, B, C>::UNDERFULL_LEN;
         unsafe {
-            take_children(
-                fst,
-                snd,
-                InternalMut::<T, B, C>::UNDERFULL_LEN + 1,
-                InternalMut::<T, B, C>::UNDERFULL_LEN,
-            );
+            take_children(fst, snd, uf + 1, uf);
         }
         CombineResult::Merged
     } else {
@@ -532,7 +539,7 @@ unsafe fn take_from_fst<T, const B: usize, const C: usize>(
     mut snd: InternalMut<T, B, C>,
 ) {
     for i in (0..B).rev() {
-        if let Some(x) = fst.get_child_mut(i).take() {
+        if let Some(x) = fst.child_mut(i).take() {
             fst.set_len(fst.len() - x.len());
             snd.set_len(snd.len() + x.len());
 

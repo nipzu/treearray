@@ -326,7 +326,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         }
     }
 
-    pub fn get_child_mut(&mut self, index: usize) -> &mut Option<Node<T, B, C>> {
+    pub fn child_mut(&mut self, index: usize) -> &mut Option<Node<T, B, C>> {
         unsafe { &mut (*self.node_mut().ptr.children.as_ptr())[index] }
     }
 
