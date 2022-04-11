@@ -21,6 +21,10 @@ use node::{
     Node,
 };
 
+pub fn foo(b: &BTreeVec<i32, 31, 31>, x: usize) -> Option<&i32> {
+    b.get(x)
+}
+
 // CONST INVARIANTS:
 // - `B >= 5`
 // - `C % 2 == 1`, which implies `C >= 1`
@@ -77,9 +81,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        let node = self.root.as_ref()?;
         // the height of `cur_node` is `height`
-        let mut cur_node = node;
+        let mut cur_node = self.root.as_ref().unwrap();
         // decrement the height of `cur_node` `height` times
         'h: for _ in 0..self.height {
             let handle = unsafe { Internal::new(cur_node) };
@@ -103,9 +106,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        let node = &mut self.root;
         // the height of `cur_node` is `height`
-        let mut cur_node = node;
+        let mut cur_node = &mut self.root;
         // decrement the height of `cur_node` `height` times
         'h: for _ in 0..self.height {
             let handle = unsafe { InternalMut::new(cur_node) };
@@ -435,25 +437,3 @@ mod tests {
         t.compile_fail("tests/compile_fail/test_bvec_drop_check.rs");
     }
 }
-
-// enum Action {
-//     Get(usize),
-//     Insert(usize, i32),
-// }
-
-// fn fuzz_random_insertions_4_4(input: alloc::vec::Vec<Action>) {
-//     let mut v = alloc::vec::Vec::new();
-//     let mut b = BTreeVec::<i32, 4, 4>::new();
-//     for action in input {
-//         match action {
-//             Action::Get(i) => assert_eq!(v.get(i), b.get(i)),
-//             Action::Insert(i, x) => {
-//                 assert_eq!(v.len(), b.len());
-//                 if i < v.len() {
-//                     v.insert(i, x);
-//                     b.insert(i, x);
-//                 }
-//             }
-//         }
-//     }
-// }
