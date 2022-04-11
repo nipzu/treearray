@@ -21,7 +21,7 @@ use node::{
     Node,
 };
 
-pub fn foo(b: &BTreeVec<i32, 31, 31>, x: usize) -> Option<&i32> {
+pub fn foo(b: &BTreeVec<i32, 66, 1>, x: usize) -> Option<&i32> {
     b.get(x)
 }
 
@@ -87,11 +87,12 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         'h: for _ in 0..self.height {
             let handle = unsafe { Internal::new(cur_node) };
             for child in handle.children() {
-                if index < child.len() {
-                    cur_node = child;
+                let len = unsafe { child.as_ref().unwrap_unchecked().len() };
+                if index < len {
+                    cur_node = unsafe { child.as_ref().unwrap_unchecked() };
                     continue 'h;
                 }
-                index -= child.len();
+                index -= len;
             }
             unreachable!();
         }

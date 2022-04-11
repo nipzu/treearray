@@ -210,15 +210,13 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     }
 
     pub fn is_singleton(&self) -> bool {
-        // TODO: this is potentially slow
-        self.children().count() == 1
+        self.children()[1].is_none()
     }
 
-    pub fn children(&self) -> impl Iterator<Item = &'a Node<T, B, C>> {
+    pub fn children(&self) -> &'a [Option<Node<T, B, C>>; B] {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        let children = unsafe { self.node.ptr.children.as_ref() };
-        children.iter().map_while(Option::as_ref)
+        unsafe { self.node.ptr.children.as_ref() }
     }
 }
 
