@@ -1,6 +1,4 @@
-use core::mem::MaybeUninit;
-use core::num::NonZeroUsize;
-use core::ptr::NonNull;
+use core::{mem::MaybeUninit, num::NonZeroUsize, ptr::NonNull};
 
 use alloc::boxed::Box;
 

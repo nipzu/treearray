@@ -24,22 +24,6 @@ pub fn slice_shift_right<T>(slice: &mut [T], new_start: T) -> T {
 
 // TODO: use functions from core when https://github.com/rust-lang/rust/issues/63569 stabilises
 
-/// Assuming all the elements are initialized, get a slice to them.
-///
-/// # Safety
-///
-/// It is up to the caller to guarantee that the `MaybeUninit<T>` elements
-/// really are in an initialized state.
-/// Calling this when the content is not yet fully initialized causes undefined behavior.
-#[inline]
-pub const unsafe fn slice_assume_init_ref<T>(slice: &[MaybeUninit<T>]) -> &[T] {
-    // SAFETY: casting slice to a `*const [T]` is safe since the caller guarantees that
-    // `slice` is initialized, and`MaybeUninit` is guaranteed to have the same layout as `T`.
-    // The pointer obtained is valid since it refers to memory owned by `slice` which is a
-    // reference and thus guaranteed to be valid for reads.
-    unsafe { &*(slice as *const [MaybeUninit<T>] as *const [T]) }
-}
-
 /// Assuming all the elements are initialized, get a mutable slice to them.
 ///
 /// # Safety

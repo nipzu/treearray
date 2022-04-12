@@ -1,4 +1,5 @@
 use core::{
+    hint::unreachable_unchecked,
     mem::{self, MaybeUninit},
     num::NonZeroUsize,
     ops::RangeBounds,
@@ -9,7 +10,7 @@ use alloc::boxed::Box;
 
 use crate::{
     node::Node,
-    utils::{slice_assume_init_mut, slice_assume_init_ref, slice_shift_left, slice_shift_right},
+    utils::{slice_assume_init_mut, slice_shift_left, slice_shift_right},
 };
 
 pub struct Leaf<'a, T, const B: usize, const C: usize> {
@@ -29,9 +30,22 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
         self.node.len()
     }
 
-    pub fn values(&self) -> &'a [T] {
+    pub unsafe fn value_unchecked(&self, index: usize) -> &'a T {
         debug_assert!(self.len() <= C);
-        unsafe { slice_assume_init_ref(&self.node.ptr.values.as_ref()[..self.len()]) }
+        debug_assert!(index < self.len());
+
+        // We own a shared reference to this leaf, so there
+        // should not be any mutable references which
+        // could cause aliasing problems with taking
+        // a reference to the whole array.
+        unsafe {
+            self.node
+                .ptr
+                .values
+                .as_ref()
+                .get_unchecked(index)
+                .assume_init_ref()
+        }
     }
 }
 
@@ -89,17 +103,25 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     pub fn values_mut(&mut self) -> &mut [T] {
         let len = self.len();
         debug_assert!(len <= C);
-        unsafe { slice_assume_init_mut(&mut self.node_mut().ptr.values.as_mut()[..len]) }
+        unsafe { slice_assume_init_mut(self.values_maybe_uninit_mut().get_unchecked_mut(..len)) }
     }
 
     pub fn values_maybe_uninit_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
         unsafe { self.node_mut().ptr.values.as_mut() }
     }
 
-    pub fn into_values_mut(mut self) -> &'a mut [T] {
+    pub fn into_value_unchecked_mut(mut self, index: usize) -> &'a mut T {
         let len = self.len();
         debug_assert!(len <= C);
-        unsafe { slice_assume_init_mut(&mut self.node_mut().ptr.values.as_mut()[..len]) }
+        debug_assert!(index < len);
+        unsafe {
+            self.node_mut()
+                .ptr
+                .values
+                .as_mut()
+                .get_unchecked_mut(index)
+                .assume_init_mut()
+        }
     }
 
     fn is_full(&self) -> bool {
@@ -217,6 +239,22 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
         unsafe { self.node.ptr.children.as_ref() }
+    }
+
+    pub unsafe fn get_child_containing_index(&self, index: &mut usize) -> &'a Node<T, B, C> {
+        fn child_len<T, const B: usize, const C: usize>(child: &Option<Node<T, B, C>>) -> usize {
+            child.as_ref().map_or(0, Node::len)
+        }
+
+        for child in self.children() {
+            let len = child_len(child);
+            match index.checked_sub(len) {
+                Some(r) => *index = r,
+                None => return unsafe { child.as_ref().unwrap_unchecked() },
+            }
+        }
+
+        unsafe { unreachable_unchecked() };
     }
 }
 

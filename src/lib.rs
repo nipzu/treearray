@@ -21,7 +21,7 @@ use node::{
     Node,
 };
 
-pub fn foo(b: &BTreeVec<i32, 66, 1>, x: usize) -> Option<&i32> {
+pub fn foo(b: &BTreeVec<i32, 32, 64>, x: usize) -> Option<&i32> {
     b.get(x)
 }
 
@@ -31,6 +31,7 @@ pub fn foo(b: &BTreeVec<i32, 66, 1>, x: usize) -> Option<&i32> {
 pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
     root: Option<Node<T, B, C>>,
     // TODO: this is redundant when root is `None`
+    // TODO: consider using a smaller type like u16
     height: usize,
     // TODO: is this even needed?
     _marker: PhantomData<T>,
@@ -81,24 +82,18 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        // the height of `cur_node` is `height`
-        let mut cur_node = self.root.as_ref().unwrap();
-        // decrement the height of `cur_node` `height` times
-        'h: for _ in 0..self.height {
+        // the height of `cur_node` is `self.height`
+        let mut cur_node = unsafe { self.root.as_ref().unwrap_unchecked() };
+        // decrement the height of `cur_node` `self.height` times
+        for _ in 0..self.height {
             let handle = unsafe { Internal::new(cur_node) };
-            for child in handle.children() {
-                let len = unsafe { child.as_ref().unwrap_unchecked().len() };
-                if index < len {
-                    cur_node = unsafe { child.as_ref().unwrap_unchecked() };
-                    continue 'h;
-                }
-                index -= len;
-            }
-            unreachable!();
+            cur_node = unsafe { handle.get_child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
-        unsafe { Some(&Leaf::new(cur_node).values()[index]) }
+        let leaf = unsafe { Leaf::new(cur_node) };
+        // SAFETY: from `get_child_containing_index` we know that index < leaf.len()
+        unsafe { Some(leaf.value_unchecked(index)) }
     }
 
     #[must_use]
@@ -124,7 +119,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         }
 
         // SAFETY: the height of `cur_node` is 0
-        unsafe { Some(&mut LeafMut::new(cur_node).into_values_mut()[index]) }
+        unsafe { Some(LeafMut::new(cur_node).into_value_unchecked_mut(index)) }
     }
 
     #[must_use]
