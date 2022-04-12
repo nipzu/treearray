@@ -92,12 +92,12 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     pub unsafe fn pop_back(&mut self) -> T {
         debug_assert!(self.len() > 0);
-        unsafe { self.remove_no_underflow(self.len() - 1) }
+        unsafe { self.remove_unchecked(self.len() - 1) }
     }
 
     pub unsafe fn pop_front(&mut self) -> T {
         debug_assert!(self.len() > 0);
-        unsafe { self.remove_no_underflow(0) }
+        unsafe { self.remove_unchecked(0) }
     }
 
     pub fn values_mut(&mut self) -> &mut [T] {
@@ -204,7 +204,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         }
     }
 
-    pub unsafe fn remove_no_underflow(&mut self, index: usize) -> T {
+    pub unsafe fn remove_unchecked(&mut self, index: usize) -> T {
         debug_assert!(index < self.len());
 
         unsafe {
@@ -446,6 +446,43 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
     pub fn reborrow(&mut self) -> InternalMut<'_, T, B, C> {
         InternalMut { node: self.node }
+    }
+
+    pub unsafe fn append_from(
+        &mut self,
+        mut other: InternalMut<T, B, C>,
+        self_len: usize,
+        other_len: usize,
+    ) {
+        unsafe {
+            self.children_range_mut(self_len..self_len + other_len)
+                .swap_with_slice(&mut other.children_mut()[..other_len]);
+        }
+        self.set_len(self.len() + other.len());
+        debug_assert!(other.children().iter().all(Option::is_none));
+        other.free();
+    }
+
+    pub unsafe fn rotate_from_next(&mut self, mut next: InternalMut<T, B, C>) {
+        let x = slice_shift_left(next.children_mut(), None).unwrap();
+
+        next.set_len(next.len() - x.len());
+        self.set_len(self.len() + x.len());
+
+        *self.child_mut(InternalMut::<T, B, C>::UNDERFULL_LEN) = Some(x);
+    }
+
+    pub unsafe fn rotate_from_previous(&mut self, mut prev: InternalMut<T, B, C>) {
+        for i in (0..B).rev() {
+            if let Some(x) = prev.child_mut(i).take() {
+                prev.set_len(prev.len() - x.len());
+                self.set_len(self.len() + x.len());
+
+                slice_shift_right(self.children_mut(), Some(x));
+                return;
+            }
+        }
+        unreachable!();
     }
 }
 

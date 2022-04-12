@@ -348,7 +348,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 self.path[0].write(parent.child_mut(self_index));
                 ret
             } else {
-                leaf.remove_no_underflow(self.leaf_index)
+                leaf.remove_unchecked(self.leaf_index)
             }
         }
     }
@@ -361,7 +361,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             assert!(self.leaf_index < leaf.len(), "out of bounds");
 
             if leaf.len() > 1 {
-                leaf.remove_no_underflow(self.leaf_index)
+                leaf.remove_unchecked(self.leaf_index)
             } else {
                 let ret = leaf.values_mut().as_ptr().read();
                 leaf.free();
@@ -378,34 +378,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 enum CombineResult {
     Ok,
     Merged,
-}
-
-unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
-    parent: &mut InternalMut<T, B, C>,
-    child_index: &mut usize,
-    self_index: &mut usize,
-) -> T {
-    let ret;
-
-    let [prev, cur]: &mut [Option<Node<T, B, C>>; 2] = (&mut parent.children_mut()
-        [*self_index - 1..=*self_index])
-        .try_into()
-        .unwrap();
-
-    let prev = unsafe { LeafMut::new(prev) };
-    let cur = unsafe { LeafMut::new(cur) };
-    if prev.is_almost_underfull() {
-        let prev_len = prev.len();
-        ret = unsafe { merge_with_previous(prev, cur, *child_index) };
-        slice_shift_left(&mut parent.children_mut()[*self_index..], None);
-        *self_index -= 1;
-        *child_index += prev_len;
-    } else {
-        ret = unsafe { rotate_from_previous(prev, cur, *child_index) };
-        *child_index += 1;
-    }
-
-    ret
 }
 
 unsafe fn merge_with_previous<T, const B: usize, const C: usize>(
@@ -443,6 +415,34 @@ unsafe fn rotate_from_previous<T, const B: usize, const C: usize>(
         let x = prev.pop_back();
         slice_shift_right(&mut cur.values_mut()[..=index], x)
     }
+}
+
+unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
+    parent: &mut InternalMut<T, B, C>,
+    child_index: &mut usize,
+    self_index: &mut usize,
+) -> T {
+    let ret;
+
+    let [prev, cur]: &mut [Option<Node<T, B, C>>; 2] = (&mut parent.children_mut()
+        [*self_index - 1..=*self_index])
+        .try_into()
+        .unwrap();
+
+    let prev = unsafe { LeafMut::new(prev) };
+    let cur = unsafe { LeafMut::new(cur) };
+    if prev.is_almost_underfull() {
+        let prev_len = prev.len();
+        ret = unsafe { merge_with_previous(prev, cur, *child_index) };
+        slice_shift_left(&mut parent.children_mut()[*self_index..], None);
+        *self_index -= 1;
+        *child_index += prev_len;
+    } else {
+        ret = unsafe { rotate_from_previous(prev, cur, *child_index) };
+        *child_index += 1;
+    }
+
+    ret
 }
 
 unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
@@ -487,80 +487,37 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
 }
 
 unsafe fn combine_internals_fst_underfull<T, const B: usize, const C: usize>(
-    fst: InternalMut<T, B, C>,
+    mut fst: InternalMut<T, B, C>,
     snd: InternalMut<T, B, C>,
 ) -> CombineResult {
     if snd.is_almost_underfull() {
         let uf = InternalMut::<T, B, C>::UNDERFULL_LEN;
         unsafe {
-            take_children(fst, snd, uf, uf + 1);
+            fst.append_from(snd, uf, uf + 1);
         }
         CombineResult::Merged
     } else {
         unsafe {
-            take_from_snd(fst, snd);
+            fst.rotate_from_next(snd);
         }
         CombineResult::Ok
     }
 }
 
-unsafe fn take_from_snd<T, const B: usize, const C: usize>(
+unsafe fn combine_internals_snd_underfull<T, const B: usize, const C: usize>(
     mut fst: InternalMut<T, B, C>,
     mut snd: InternalMut<T, B, C>,
-) {
-    let x = slice_shift_left(snd.children_mut(), None).unwrap();
-
-    snd.set_len(snd.len() - x.len());
-    fst.set_len(fst.len() + x.len());
-
-    *fst.child_mut(InternalMut::<T, B, C>::UNDERFULL_LEN) = Some(x);
-}
-
-unsafe fn combine_internals_snd_underfull<T, const B: usize, const C: usize>(
-    fst: InternalMut<T, B, C>,
-    snd: InternalMut<T, B, C>,
 ) -> CombineResult {
     if fst.is_almost_underfull() {
         let uf = InternalMut::<T, B, C>::UNDERFULL_LEN;
         unsafe {
-            take_children(fst, snd, uf + 1, uf);
+            fst.append_from(snd, uf + 1, uf);
         }
         CombineResult::Merged
     } else {
         unsafe {
-            take_from_fst(fst, snd);
+            snd.rotate_from_previous(fst);
         }
         CombineResult::Ok
     }
-}
-
-unsafe fn take_from_fst<T, const B: usize, const C: usize>(
-    mut fst: InternalMut<T, B, C>,
-    mut snd: InternalMut<T, B, C>,
-) {
-    for i in (0..B).rev() {
-        if let Some(x) = fst.child_mut(i).take() {
-            fst.set_len(fst.len() - x.len());
-            snd.set_len(snd.len() + x.len());
-
-            slice_shift_right(snd.children_mut(), Some(x));
-            return;
-        }
-    }
-    unreachable!();
-}
-
-unsafe fn take_children<T, const B: usize, const C: usize>(
-    mut fst: InternalMut<T, B, C>,
-    mut snd: InternalMut<T, B, C>,
-    fst_len: usize,
-    snd_len: usize,
-) {
-    unsafe {
-        fst.children_range_mut(fst_len..fst_len + snd_len)
-            .swap_with_slice(&mut snd.children_mut()[..snd_len]);
-    }
-    fst.set_len(fst.len() + snd.len());
-    debug_assert!(snd.children().iter().all(Option::is_none));
-    snd.free();
 }
