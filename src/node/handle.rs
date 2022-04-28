@@ -1,9 +1,5 @@
 use core::{
-    hint::unreachable_unchecked,
-    mem::{self, MaybeUninit},
-    num::NonZeroUsize,
-    ops::RangeBounds,
-    ptr, slice,
+    hint::unreachable_unchecked, mem::MaybeUninit, num::NonZeroUsize, ops::RangeBounds, ptr, slice,
 };
 
 use alloc::boxed::Box;
@@ -84,9 +80,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 
     pub fn free(mut self) {
-        unsafe {
-            Box::from_raw(self.values_maybe_uninit_mut());
-        }
+        unsafe { Box::from_raw(self.values_maybe_uninit_mut()) };
         *self.node = None;
     }
 
@@ -110,7 +104,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         unsafe { self.node_mut().ptr.values.as_mut() }
     }
 
-    pub fn into_value_unchecked_mut(mut self, index: usize) -> &'a mut T {
+    pub unsafe fn into_value_unchecked_mut(mut self, index: usize) -> &'a mut T {
         let len = self.len();
         debug_assert!(len <= C);
         debug_assert!(index < len);
@@ -303,10 +297,31 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         self.node_mut().length = new_len;
     }
 
-    pub fn index_of_child_ptr(&self, elem_ptr: *const Option<Node<T, B, C>>) -> usize {
-        let slice_addr = unsafe { self.node().ptr.children.as_ptr() as usize };
-        let elem_addr = elem_ptr as usize;
-        (elem_addr - slice_addr) / mem::size_of::<Option<Node<T, B, C>>>()
+    pub unsafe fn into_child_containing_index(
+        self,
+        index: &mut usize,
+    ) -> &'a mut Option<Node<T, B, C>> {
+        fn child_len<T, const B: usize, const C: usize>(child: &Option<Node<T, B, C>>) -> usize {
+            child.as_ref().map_or(0, Node::len)
+        }
+
+        for child in self.into_children_mut() {
+            let len = child_len(child);
+            match index.checked_sub(len) {
+                Some(r) => *index = r,
+                None => return child,
+            }
+        }
+
+        unsafe { unreachable_unchecked() };
+    }
+
+    pub unsafe fn index_of_child_ptr(&self, elem_ptr: *const Option<Node<T, B, C>>) -> usize {
+        let slice_ptr = unsafe { self.node().ptr.children.as_ptr() };
+        #[allow(clippy::cast_sign_loss)]
+        unsafe {
+            elem_ptr.offset_from(slice_ptr.cast()) as usize
+        }
     }
 
     pub fn children(&self) -> &[Option<Node<T, B, C>>; B] {
@@ -325,9 +340,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
     pub fn free(mut self) {
         debug_assert!(self.children().iter().all(Option::is_none));
-        unsafe {
-            Box::from_raw(self.children_mut());
-        }
+        unsafe { Box::from_raw(self.children_mut()) };
         *self.node = None;
     }
 

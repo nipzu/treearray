@@ -22,6 +22,9 @@ pub struct Node<T, const B: usize, const C: usize> {
     pub ptr: NodePtr<T, B, C>,
 }
 
+// `Box`es cannot be used here because they would assert
+// unique ownership over the child node. We don't want that
+// because aliasing pointers are created when using `CursorMut`.
 pub union NodePtr<T, const B: usize, const C: usize> {
     pub children: NonNull<[Option<Node<T, B, C>>; B]>,
     values: NonNull<[MaybeUninit<T>; C]>,
@@ -40,7 +43,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         Self {
             length: NonZeroUsize::new(length).unwrap(),
             ptr: NodePtr {
-                children: unsafe { NonNull::new_unchecked(Box::into_raw(children)) },
+                children: NonNull::from(Box::leak(children)),
             },
         }
     }
@@ -68,7 +71,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         Self {
             length: NonZeroUsize::new(length).unwrap(),
             ptr: NodePtr {
-                values: unsafe { NonNull::new_unchecked(Box::into_raw(values)) },
+                values: NonNull::from(Box::leak(values)),
             },
         }
     }
@@ -88,18 +91,14 @@ mod test {
     fn test_node_size() {
         use core::mem::size_of;
 
-        assert_eq!(size_of::<Node<i32, 10, 37>>(), 2 * size_of::<usize>());
-        assert_eq!(size_of::<Node<i128, 3, 3>>(), 2 * size_of::<usize>());
-        assert_eq!(size_of::<Node<(), 3, 3>>(), 2 * size_of::<usize>());
+        let node_size = size_of::<usize>() + size_of::<*mut ()>();
 
-        assert_eq!(
-            size_of::<Option<Node<i32, 10, 37>>>(),
-            2 * size_of::<usize>()
-        );
-        assert_eq!(
-            size_of::<Option<Node<i128, 3, 3>>>(),
-            2 * size_of::<usize>()
-        );
-        assert_eq!(size_of::<Option<Node<(), 3, 3>>>(), 2 * size_of::<usize>());
+        assert_eq!(size_of::<Node<i32, 10, 37>>(), node_size);
+        assert_eq!(size_of::<Node<i128, 3, 3>>(), node_size);
+        assert_eq!(size_of::<Node<(), 3, 3>>(), node_size);
+
+        assert_eq!(size_of::<Option<Node<i32, 10, 37>>>(), node_size);
+        assert_eq!(size_of::<Option<Node<i128, 3, 3>>>(), node_size);
+        assert_eq!(size_of::<Option<Node<(), 3, 3>>>(), node_size);
     }
 }

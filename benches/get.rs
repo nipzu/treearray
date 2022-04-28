@@ -11,7 +11,7 @@ fn bench_get(c: &mut Criterion) {
     let mut bvec = BTreeVec::<i32, 32, 64>::new();
     let mut vec = Vec::new();
     let mut im_vec = Vector::new();
-    let size = 200_000;
+    let size = 10_000;
     for x in 0..size {
         let i = rng.gen_range(0..=bvec.len());
 

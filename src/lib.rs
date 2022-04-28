@@ -26,8 +26,8 @@ pub fn foo(b: &BTreeVec<i32, 32, 64>, x: usize) -> Option<&i32> {
 }
 
 // CONST INVARIANTS:
-// - `B >= 5`
-// - `C % 2 == 1`, which implies `C >= 1`
+// - `B >= 3`
+// - `C >= 1`
 pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
     root: Option<Node<T, B, C>>,
     // TODO: this is redundant when root is `None`
@@ -40,18 +40,12 @@ pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
 impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     /// # Panics
     /// Panics if any of
-    /// - `B < 5`,
-    /// - `C` is even,
+    /// - `B < 3`,
+    /// - `C` is zero,
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
-        // Each (underfull) internal node has to have at least
-        // two children to be considered an internal node.
         assert!(B >= 3);
-
-        // If the root consist of 2 leaves of size `C/2`,
-        // then it is also considered to be a leaf.
-        // Also takes care of the `C == 0` case.
         assert!(C >= 1);
 
         Self {
@@ -105,21 +99,15 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         // the height of `cur_node` is `height`
         let mut cur_node = &mut self.root;
         // decrement the height of `cur_node` `height` times
-        'h: for _ in 0..self.height {
+        for _ in 0..self.height {
             let handle = unsafe { InternalMut::new(cur_node) };
-            for child in handle.into_children_mut() {
-                let len = child.as_ref().unwrap().len();
-                if index < len {
-                    cur_node = child;
-                    continue 'h;
-                }
-                index -= len;
-            }
-            unreachable!();
+            cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
-        unsafe { Some(LeafMut::new(cur_node).into_value_unchecked_mut(index)) }
+        let leaf = unsafe { LeafMut::new(cur_node) };
+        // SAFETY: from `into_child_containing_index` we know that index < leaf.len()
+        unsafe { Some(leaf.into_value_unchecked_mut(index)) }
     }
 
     #[must_use]
@@ -224,6 +212,7 @@ mod tests {
     #[test]
     fn test_new() {
         const _: BTreeVec<i32, 7, 3> = BTreeVec::new();
+        let _ = BTreeVec::<usize>::new();
     }
 
     #[test]
