@@ -21,9 +21,9 @@ use node::{
     Node,
 };
 
-pub fn foo(b: &BTreeVec<i32, 32, 64>, x: usize) -> Option<&i32> {
-    b.get(x)
-}
+// pub fn foo(b: &BTreeVec<i32, 32, 64>, x: usize) -> Option<&i32> {
+//     b.get(x)
+// }
 
 // CONST INVARIANTS:
 // - `B >= 3`

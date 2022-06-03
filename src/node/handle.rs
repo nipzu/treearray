@@ -131,19 +131,19 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
         unsafe {
             if self.is_full() {
-                if index <= C / 2 {
-                    InsertResult::SplitLeft(self.split_and_insert_left(index, value))
+                InsertResult::Split(if index <= C / 2 {
+                    SplitResult::Left(self.split_and_insert_left(index, value))
                 } else {
-                    InsertResult::SplitRight(self.split_and_insert_right(index, value))
-                }
+                    SplitResult::Right(self.split_and_insert_right(index, value))
+                })
             } else {
-                self.insert_fitting_extending(index, value);
+                self.insert_fitting(index, value);
                 InsertResult::Fit
             }
         }
     }
 
-    fn insert_fitting_extending(&mut self, index: usize, value: T) {
+    fn insert_fitting(&mut self, index: usize, value: T) {
         assert!(self.len() < C);
         unsafe {
             let old_len = self.len();
@@ -204,11 +204,10 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         unsafe {
             let old_len = self.len();
             self.set_len(old_len - 1);
-            slice_shift_left(
-                &mut self.values_maybe_uninit_mut()[index..old_len],
-                MaybeUninit::uninit(),
-            )
-            .assume_init()
+            let slice = self
+                .values_maybe_uninit_mut()
+                .get_unchecked_mut(index..old_len);
+            slice_shift_left(slice, MaybeUninit::uninit()).assume_init()
         }
     }
 }
@@ -266,6 +265,10 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     /// `node` must be a child node i.e. `node.len() > C`.
     pub unsafe fn new(node: &'a mut Option<Node<T, B, C>>) -> Self {
         Self { node }
+    }
+
+    pub unsafe fn from_ptr(ptr: *mut Option<Node<T, B, C>>) -> Self {
+        unsafe { Self::new(&mut *ptr) }
     }
 
     fn node(&self) -> &Node<T, B, C> {
@@ -382,24 +385,22 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     pub unsafe fn insert_node(
         &mut self,
         index: usize,
-        node: Node<T, B, C>,
-        path_through_new: bool,
+        prev_split_res: SplitResult<T, B, C>,
     ) -> InsertResult<T, B, C> {
+        let (path_through_self, node) = match prev_split_res {
+            SplitResult::Right(n) => (false, n),
+            SplitResult::Left(n) => (true, n),
+        };
         unsafe {
             if self.is_full() {
-                use core::cmp::Ordering::{Equal, Greater, Less};
-                match index.cmp(&(Self::UNDERFULL_LEN + 1)) {
-                    Less => InsertResult::SplitLeft(self.split_and_insert_left(index, node)),
-                    Greater => InsertResult::SplitRight(self.split_and_insert_right(index, node)),
-                    Equal => {
-                        let n = self.split_and_insert_right(index, node);
-                        if path_through_new {
-                            InsertResult::SplitRight(n)
-                        } else {
-                            InsertResult::SplitLeft(n)
-                        }
+                use core::cmp::Ordering::{Equal, Less};
+                InsertResult::Split(match index.cmp(&(Self::UNDERFULL_LEN + 1)) {
+                    Less => SplitResult::Left(self.split_and_insert_left(index, node)),
+                    Equal if path_through_self => {
+                        SplitResult::Left(self.split_and_insert_right(index, node))
                     }
-                }
+                    _ => SplitResult::Right(self.split_and_insert_right(index, node)),
+                })
             } else {
                 self.insert_fitting(index, node);
                 InsertResult::Fit
@@ -508,6 +509,10 @@ fn sum_lens<T, const B: usize, const C: usize>(children: &[Option<Node<T, B, C>>
 
 pub enum InsertResult<T, const B: usize, const C: usize> {
     Fit,
-    SplitLeft(Node<T, B, C>),
-    SplitRight(Node<T, B, C>),
+    Split(SplitResult<T, B, C>),
+}
+
+pub enum SplitResult<T, const B: usize, const C: usize> {
+    Left(Node<T, B, C>),
+    Right(Node<T, B, C>),
 }
