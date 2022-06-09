@@ -234,7 +234,7 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
         unsafe { self.node.ptr.children.as_ref() }
     }
 
-    pub unsafe fn get_child_containing_index(&self, index: &mut usize) -> &'a Node<T, B, C> {
+    pub unsafe fn child_containing_index(&self, index: &mut usize) -> &'a Node<T, B, C> {
         fn child_len<T, const B: usize, const C: usize>(child: &Option<Node<T, B, C>>) -> usize {
             child.as_ref().map_or(0, Node::len)
         }

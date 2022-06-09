@@ -136,8 +136,9 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         let leaf_len = unsafe { self.leaf_mut().len() };
 
         // fast path
-        // TODO: overflow
-        if self.leaf_index + offset < leaf_len {
+        // equivalent to self.leaf_index + offset < leaf_len, 
+        // but avoids overflow with large offsets
+        if offset <= leaf_len - self.leaf_index {
             self.leaf_index += offset;
             return;
         }

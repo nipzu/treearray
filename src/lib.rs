@@ -81,7 +81,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         // decrement the height of `cur_node` `self.height` times
         for _ in 0..self.height {
             let handle = unsafe { Internal::new(cur_node) };
-            cur_node = unsafe { handle.get_child_containing_index(&mut index) };
+            cur_node = unsafe { handle.child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
