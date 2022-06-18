@@ -65,7 +65,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[must_use]
     #[inline]
     pub const fn is_empty(&self) -> bool {
-        self.root.is_none()
+        self.height == 0
     }
 
     #[must_use]
@@ -74,10 +74,10 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        // the height of `cur_node` is `self.height`
+        // the height of `cur_node` is `self.height - 1`
         let mut cur_node = unsafe { self.root.as_ref().unwrap_unchecked() };
-        // decrement the height of `cur_node` `self.height` times
-        for _ in 0..self.height {
+        // decrement the height of `cur_node` `self.height - 1` times
+        for _ in 1..self.height {
             let handle = unsafe { Internal::new(cur_node) };
             cur_node = unsafe { handle.child_containing_index(&mut index) };
         }
@@ -94,10 +94,10 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        // the height of `cur_node` is `height`
+        // the height of `cur_node` is `self.height - 1`
         let mut cur_node = &mut self.root;
-        // decrement the height of `cur_node` `height` times
-        for _ in 0..self.height {
+        // decrement the height of `cur_node` `self.height - 1` times
+        for _ in 1..self.height {
             let handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }

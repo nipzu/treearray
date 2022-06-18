@@ -102,7 +102,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             remaining_index -= 1;
         }
 
-        let height = unsafe { tree.as_ref().height };
+        let height = unsafe { tree.as_ref().height - 1 };
         // the height of `cur_node` is `height`
         let mut cur_node = unsafe { &mut tree.as_mut().root };
         path[height].write(cur_node);
@@ -211,7 +211,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
     }
 
     unsafe fn insert_to_empty(&mut self, value: T) {
-        self.tree_mut().height = 0;
+        self.tree_mut().height = 1;
         *self.root_mut() = Some(Node::from_value(value));
         let root_ptr: *mut _ = self.root_mut();
         self.path[0].write(root_ptr);
@@ -235,8 +235,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             unsafe { InternalMut::new(self.root_mut()).child_mut(root_path_index) };
         let root_ptr: *mut _ = self.root_mut();
 
-        self.path[old_height].write(child_ptr);
-        self.path[old_height + 1].write(root_ptr);
+        self.path[old_height - 1].write(child_ptr);
+        self.path[old_height].write(root_ptr);
     }
 
     pub fn insert(&mut self, value: T) {
@@ -257,7 +257,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         while let InsertResult::Split(split_res) = to_insert {
             height += 1;
 
-            if height > self.height() {
+            // should not be >?
+            if height >= self.height() {
                 unsafe { self.split_root(split_res) };
                 return;
             }
@@ -280,7 +281,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             }
         }
 
-        for h in height + 1..=self.height() {
+        for h in height + 1..self.height() {
             let mut node = unsafe { self.path_internal_mut(h) };
             node.set_len(node.len() + 1);
         }
@@ -293,7 +294,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         }
 
         // handle root being a leaf
-        if self.height() == 0 {
+        if self.height() == 1 {
             return unsafe { self.remove_from_root_leaf() };
         }
 
@@ -302,7 +303,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         // update lengths and merge nodes if needed
         unsafe {
             // height of `cur_node`
-            for height in 1..self.height() {
+            for height in 1..self.height() - 1 {
                 let mut parent = self.path_internal_mut(height + 1);
                 // TODO: make another loop after non-underfull?
                 let cur_ptr = self.path[height].assume_init();
@@ -344,7 +345,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         // move cursor to start of next leaf if pointing past the end of the current leaf
         unsafe {
             if self.leaf_index == self.leaf_mut().len() {
-                for height in 1..=self.height() {
+                for height in 1..self.height() {
                     let (mut parent, parent_index) = self.path_node_and_index_of_child(height);
                     if parent_index + 1 < B {
                         if let n @ Some(_) = parent.child_mut(parent_index + 1) {
@@ -378,7 +379,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 self.tree_mut().height = root_height - 1;
                 *self.root_mut() = Some(new_root);
                 let root_ptr: *mut _ = self.root_mut();
-                self.path[root_height - 1].write(root_ptr);
+                self.path[root_height - 2].write(root_ptr);
             }
         }
 
@@ -428,6 +429,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             } else {
                 let ret = leaf.values_mut().as_ptr().read();
                 leaf.free();
+                self.tree_mut().height = 0;
                 ret
             }
         }
