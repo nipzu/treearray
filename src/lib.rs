@@ -39,9 +39,7 @@ pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
 
 impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     /// # Panics
-    /// Panics if any of
-    /// - `B < 3`,
-    /// - `C` is zero,
+    /// Panics if `B < 3` or `C == 0`
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
@@ -389,6 +387,27 @@ mod tests {
                 assert_eq!(b2, v2);
                 assert_eq!(v.len(), b_4_4.len());
             }
+        }
+    }
+
+    #[test]
+    fn test_random_cursor_get() {
+        let mut b_4_4 = BTreeVec::<i32, 4, 4>::new();
+        let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
+        let n = 1000;
+
+        for x in 0..n as i32 {
+            b_4_4.push_back(x);
+            b_5_5.push_back(x);
+        }
+
+        for i in 0..n {
+            let x = *b_4_4.get(i).unwrap();
+            let y = *b_5_5.get(i).unwrap();
+
+            assert_eq!(x, y);
+            assert_eq!(x, *b_4_4.cursor_at_mut(i).get().unwrap());
+            assert_eq!(y, *b_5_5.cursor_at_mut(i).get().unwrap());
         }
     }
 

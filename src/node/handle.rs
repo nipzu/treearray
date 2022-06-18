@@ -94,6 +94,35 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         unsafe { self.remove_unchecked(0) }
     }
 
+    pub unsafe fn push_front(&mut self, value: T) {
+        debug_assert!(!self.is_full());
+        self.insert_fitting(0, value);
+    }
+
+    pub unsafe fn push_back(&mut self, value: T) {
+        debug_assert!(!self.is_full());
+        unsafe {
+            let len = self.len();
+            self.values_maybe_uninit_mut()[len].write(value);
+            self.set_len(len + 1);
+        }
+    }
+
+    pub unsafe fn append_from(&mut self, mut other: Self) {
+        // TODO: debug_asserts
+        let self_len = self.len();
+        let other_len = other.len();
+        debug_assert!(self_len + other_len <= C);
+        let self_ptr = unsafe { self.values_maybe_uninit_mut().as_mut_ptr().add(self_len) };
+        let other_ptr = other.values_maybe_uninit_mut().as_ptr();
+
+        unsafe {
+            ptr::copy_nonoverlapping(other_ptr, self_ptr, other_len);
+            other.free();
+            self.set_len(self_len + other_len);
+        }
+    }
+
     pub fn values_mut(&mut self) -> &mut [T] {
         let len = self.len();
         debug_assert!(len <= C);
@@ -126,6 +155,10 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         self.len() == (C - 1) / 2 + 1
     }
 
+    pub fn is_underfull(&self) -> bool {
+        self.len() < (C - 1) / 2 + 1
+    }
+
     pub fn insert_value(&mut self, index: usize, value: T) -> InsertResult<T, B, C> {
         assert!(index <= self.len());
 
@@ -144,7 +177,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 
     fn insert_fitting(&mut self, index: usize, value: T) {
-        assert!(self.len() < C);
+        assert!(!self.is_full());
         unsafe {
             let old_len = self.len();
             slice_shift_right(
@@ -248,6 +281,14 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
         }
 
         unsafe { unreachable_unchecked() };
+    }
+
+    pub unsafe fn index_of_child_ptr(&self, elem_ptr: *const Option<Node<T, B, C>>) -> usize {
+        let slice_ptr = unsafe { self.node.ptr.children.as_ptr() };
+        #[allow(clippy::cast_sign_loss)]
+        unsafe {
+            elem_ptr.offset_from(slice_ptr.cast()) as usize
+        }
     }
 }
 
