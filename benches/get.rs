@@ -49,7 +49,7 @@ fn bench_insert(c: &mut Criterion) {
     let mut rng = thread_rng();
 
     for size in [1_000, 10_000, 100_000] {
-        let mut bvec = BTreeVec::<i32, 32, 64>::new();
+        let mut bvec = BTreeVec::<i32, 8, 64>::new();
         let mut vec = Vec::new();
         let mut im_vec = Vector::new();
 
@@ -62,7 +62,7 @@ fn bench_insert(c: &mut Criterion) {
         }
 
         c.bench_with_input(
-            BenchmarkId::new("BVec<i32,32,64>::insert (random)", size),
+            BenchmarkId::new("BVec<i32,32,64>::insert_remove (random)", size),
             &size,
             |b, &s| {
                 b.iter_batched(
@@ -77,7 +77,7 @@ fn bench_insert(c: &mut Criterion) {
         );
 
         c.bench_with_input(
-            BenchmarkId::new("Vec<i32>::insert (random)", size),
+            BenchmarkId::new("Vec<i32>::insert_remove (random)", size),
             &size,
             |b, &s| {
                 b.iter_batched(
@@ -92,7 +92,7 @@ fn bench_insert(c: &mut Criterion) {
         );
 
         c.bench_with_input(
-            BenchmarkId::new("im::Vector<i32>::insert (random)", size),
+            BenchmarkId::new("im::Vector<i32>::insert_remove (random)", size),
             &size,
             |b, &s| {
                 b.iter_batched(

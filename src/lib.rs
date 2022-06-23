@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use core::{fmt, marker::PhantomData};
+use core::{fmt, marker::PhantomData, mem::MaybeUninit};
 
 mod cursor;
 pub mod iter;
@@ -29,7 +29,7 @@ use node::{
 // - `B >= 3`
 // - `C >= 1`
 pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
-    root: Option<Node<T, B, C>>,
+    root: MaybeUninit<Node<T, B, C>>,
     // TODO: this is redundant when root is `None`
     // TODO: consider using a smaller type like u16
     height: usize,
@@ -39,9 +39,7 @@ pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
 
 impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     /// # Panics
-    /// Panics if any of
-    /// - `B < 3`,
-    /// - `C` is zero,
+    /// Panics if `B < 3` or `C == 0`
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
@@ -49,7 +47,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         assert!(C >= 1);
 
         Self {
-            root: None,
+            root: MaybeUninit::uninit(),
             height: 0,
             _marker: PhantomData,
         }
@@ -58,16 +56,24 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[must_use]
     #[inline]
     pub const fn len(&self) -> usize {
-        match self.root.as_ref() {
+        match self.root().as_ref() {
             Some(root) => root.len(),
             None => 0,
+        }
+    }
+
+    const fn root(&self) -> Option<&Node<T, B, C>> {
+        if self.is_empty() {
+            None
+        } else {
+            unsafe { Some(self.root.assume_init_ref()) }
         }
     }
 
     #[must_use]
     #[inline]
     pub const fn is_empty(&self) -> bool {
-        self.root.is_none()
+        self.height == 0
     }
 
     #[must_use]
@@ -76,12 +82,12 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        // the height of `cur_node` is `self.height`
-        let mut cur_node = unsafe { self.root.as_ref().unwrap_unchecked() };
-        // decrement the height of `cur_node` `self.height` times
-        for _ in 0..self.height {
+        // the height of `cur_node` is `self.height - 1`
+        let mut cur_node = unsafe { self.root.assume_init_ref() };
+        // decrement the height of `cur_node` `self.height - 1` times
+        for _ in 1..self.height {
             let handle = unsafe { Internal::new(cur_node) };
-            cur_node = unsafe { handle.get_child_containing_index(&mut index) };
+            cur_node = unsafe { handle.child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
@@ -96,10 +102,10 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             return None;
         }
 
-        // the height of `cur_node` is `height`
-        let mut cur_node = &mut self.root;
-        // decrement the height of `cur_node` `height` times
-        for _ in 0..self.height {
+        // the height of `cur_node` is `self.height - 1`
+        let mut cur_node = unsafe { self.root.assume_init_mut() };
+        // decrement the height of `cur_node` `self.height - 1` times
+        for _ in 1..self.height {
             let handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
@@ -186,7 +192,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
 impl<T, const B: usize, const C: usize> Drop for BTreeVec<T, B, C> {
     fn drop(&mut self) {
-        self.clear();
+        // self.clear();
     }
 }
 
@@ -223,7 +229,7 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_front_back() {
+    fn test_push_front_back() {
         let mut b = BTreeVec::<i32, 7, 5>::new();
         for x in 0..500 {
             b.push_back(x);
@@ -235,6 +241,36 @@ mod tests {
 
         for (a, b) in b.iter().zip(-500..) {
             assert_eq!(*a, b);
+        }
+    }
+
+    #[test]
+    fn test_push_pop_front_back() {
+        use alloc::vec::Vec;
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+
+        let mut b = BTreeVec::<i32, 7, 5>::new();
+        let mut v = Vec::new();
+        for x in 0..1000 {
+            if rng.gen() {
+                b.push_back(x);
+                v.push(x);
+            } else {
+                b.push_front(x);
+                v.insert(0, x);
+            }
+        }
+
+        for _ in 0..1000 {
+            let (x, y) = if rng.gen() {
+                (b.remove(b.len() - 1), v.pop().unwrap())
+            } else {
+                (b.remove(0),v.remove(0))
+            };
+            assert_eq!(x, y);
+            assert_eq!(b.len(), v.len());
         }
     }
 
@@ -271,7 +307,7 @@ mod tests {
 
         let mut v = Vec::new();
         // let mut b_3_3 = BTreeVec::<i32, 3, 3>::new();
-        let mut b_5_1 = BTreeVec::<i32, 5, 1>::new();
+        let mut b_5_1 = BTreeVec::<i32, 5, 2>::new();
 
         for x in 0..1000 {
             v.push(x);
@@ -389,6 +425,27 @@ mod tests {
                 assert_eq!(b2, v2);
                 assert_eq!(v.len(), b_4_4.len());
             }
+        }
+    }
+
+    #[test]
+    fn test_random_cursor_get() {
+        let mut b_4_4 = BTreeVec::<i32, 4, 4>::new();
+        let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
+        let n = 1000;
+
+        for x in 0..n as i32 {
+            b_4_4.push_back(x);
+            b_5_5.push_back(x);
+        }
+
+        for i in 0..n {
+            let x = *b_4_4.get(i).unwrap();
+            let y = *b_5_5.get(i).unwrap();
+
+            assert_eq!(x, y);
+            assert_eq!(x, *b_4_4.cursor_at_mut(i).get().unwrap());
+            assert_eq!(y, *b_5_5.cursor_at_mut(i).get().unwrap());
         }
     }
 
