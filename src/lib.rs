@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use core::{fmt, marker::PhantomData, ptr::NonNull};
+use core::{fmt, marker::PhantomData};
 
 mod cursor;
 pub mod iter;
@@ -180,7 +180,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
     #[must_use]
     pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T, B, C> {
-        CursorMut::new_at(NonNull::from(self), index)
+        CursorMut::new_at(self, index)
     }
 }
 

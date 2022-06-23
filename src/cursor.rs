@@ -81,19 +81,19 @@ pub struct CursorMut<'a, T, const B: usize, const C: usize> {
 }
 
 impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
-    pub(crate) fn new_at(mut tree: NonNull<BTreeVec<T, B, C>>, index: usize) -> Self {
-        let len = unsafe { tree.as_ref().len() };
+    pub(crate) fn new_at(tree: &'a mut BTreeVec<T, B, C>, index: usize) -> Self {
+        let len = tree.len();
         if index > len {
             panic!();
         }
 
         let mut path = [MaybeUninit::uninit(); usize::BITS as usize];
 
-        if unsafe { tree.as_ref().root.is_none() } {
+        if tree.root.is_none() {
             return Self {
                 path,
                 index: 0,
-                tree,
+                tree: NonNull::from(tree),
                 leaf_index: 0,
                 _marker: PhantomData,
             };
@@ -106,7 +106,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             remaining_index -= 1;
         }
 
-        let height = unsafe { tree.as_ref().height };
+        let height = tree.height;
+        let mut tree = NonNull::from(tree);
         // the height of `cur_node` is `height`
         let mut cur_node = unsafe { &mut tree.as_mut().root };
         path[height].write(cur_node);
