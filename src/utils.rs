@@ -22,6 +22,13 @@ pub fn slice_shift_right<T>(slice: &mut [T], new_start: T) -> T {
     }
 }
 
+pub fn slice_cut_at<T>(slice: &mut [T], index: usize) -> (&mut [T], &mut T, &mut [T]) {
+    assert!(!slice.is_empty());
+    let (prevs, tail) = slice.split_at_mut(index);
+    let (x, nexts) = tail.split_first_mut().unwrap();
+    (prevs, x, nexts)
+}
+
 // TODO: use functions from core when https://github.com/rust-lang/rust/issues/63569 stabilises
 
 /// Assuming all the elements are initialized, get a mutable slice to them.

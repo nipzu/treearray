@@ -1,6 +1,12 @@
-use core::{mem::MaybeUninit, num::NonZeroUsize, ptr::NonNull};
+use core::{
+    mem::MaybeUninit,
+    num::NonZeroUsize,
+    ptr::{self, NonNull},
+};
 
 use alloc::boxed::Box;
+
+use crate::utils::{slice_assume_init_mut, slice_shift_left, slice_shift_right};
 
 // use crate::panics::panic_length_overflow;
 
@@ -26,20 +32,111 @@ pub struct Node<T, const B: usize, const C: usize> {
 // unique ownership over the child node. We don't want that
 // because aliasing pointers are created when using `CursorMut`.
 pub union NodePtr<T, const B: usize, const C: usize> {
-    pub children: NonNull<[Option<Node<T, B, C>>; B]>,
+    pub children: NonNull<Children<T, B, C>>,
     values: NonNull<[MaybeUninit<T>; C]>,
 }
 
+pub struct Children<T, const B: usize, const C: usize> {
+    pub children: [MaybeUninit<Node<T, B, C>>; B],
+    len: usize,
+}
+
+impl<T, const B: usize, const C: usize> Children<T, B, C> {
+    pub const fn new() -> Self {
+        Self {
+            children: unsafe { MaybeUninit::uninit().assume_init() },
+            len: 0,
+        }
+    }
+
+    pub fn children(&self) -> &[Node<T, B, C>] {
+        unsafe { &*(&self.children[..self.len] as *const _ as *const _) }
+    }
+
+    pub fn children_mut(&mut self) -> &mut [Node<T, B, C>] {
+        unsafe { slice_assume_init_mut(&mut self.children[..self.len]) }
+    }
+
+    pub unsafe fn pop_front(&mut self) -> Node<T, B, C> {
+        let old_len = self.len;
+        self.len -= 1;
+        unsafe {
+            slice_shift_left(&mut self.children[..old_len], MaybeUninit::uninit()).assume_init()
+        }
+    }
+
+    pub unsafe fn pop_back(&mut self) -> Node<T, B, C> {
+        self.len -= 1;
+        unsafe { self.children[self.len].assume_init_read() }
+    }
+
+    pub unsafe fn push_front(&mut self, value: Node<T, B, C>) {
+        self.len += 1;
+        slice_shift_right(&mut self.children[..self.len], MaybeUninit::new(value));
+    }
+
+    pub unsafe fn push_back(&mut self, value: Node<T, B, C>) {
+        self.children[self.len].write(value);
+        self.len += 1;
+    }
+
+    pub unsafe fn insert(&mut self, index: usize, value: Node<T, B, C>) {
+        debug_assert!(index <= self.len);
+        self.len += 1;
+        slice_shift_right(&mut self.children[index..self.len], MaybeUninit::new(value));
+    }
+
+    pub unsafe fn remove(&mut self, index: usize) -> Node<T, B, C> {
+        self.len -= 1;
+        unsafe {
+            slice_shift_left(&mut self.children[index..=self.len], MaybeUninit::uninit())
+                .assume_init()
+        }
+    }
+
+    pub unsafe fn split(&mut self, index: usize) -> Box<Self> {
+        let mut new_children = Box::new(Self::new());
+        // use B insted of self.len
+        // self.len should be B or B - 1
+        new_children.len = self.len - index;
+        self.len = index;
+        unsafe {
+            ptr::copy_nonoverlapping(
+                self.children.as_ptr().add(index),
+                new_children.children.as_mut_ptr(),
+                B - index,
+            );
+        }
+        new_children
+    }
+
+    pub unsafe fn merge_with_next(&mut self, next: Box<Self>) {
+        unsafe {
+            ptr::copy_nonoverlapping(
+                next.children.as_ptr(),
+                self.children.as_mut_ptr().add(self.len),
+                next.len,
+            );
+        }
+        self.len += next.len;
+    }
+
+    pub fn sum_lens(&self) -> usize {
+        self.children().iter().map(Node::len).sum()
+    }
+}
+
 impl<T, const B: usize, const C: usize> Node<T, B, C> {
-    const UNINIT: MaybeUninit<T> = MaybeUninit::uninit();
-    const NONE: Option<Self> = None;
+    const UNINIT_T: MaybeUninit<T> = MaybeUninit::uninit();
+    const UNINIT_SELF: MaybeUninit<Self> = MaybeUninit::uninit();
 
     #[inline]
     pub const fn len(&self) -> usize {
         self.length.get()
     }
 
-    fn from_children(length: usize, children: Box<[Option<Self>; B]>) -> Self {
+    fn from_children(length: usize, children: Box<Children<T, B, C>>) -> Self {
+        debug_assert_eq!(children.sum_lens(), length);
         Self {
             length: NonZeroUsize::new(length).unwrap(),
             ptr: NodePtr {
@@ -49,11 +146,15 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     pub fn from_child_array<const N: usize>(children: [Self; N]) -> Self {
-        let mut boxed_children = Box::new([Self::NONE; B]);
+        let mut boxed_children = Box::new(Children {
+            children: [Self::UNINIT_SELF; B],
+            len: 0,
+        });
         let mut length = 0;
         for (i, child) in children.into_iter().enumerate() {
             length += child.len();
-            boxed_children[i] = Some(child);
+            boxed_children.len += 1;
+            boxed_children.children[i].write(child);
         }
 
         Self::from_children(length, boxed_children)
@@ -77,7 +178,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     pub fn from_value(value: T) -> Self {
-        let mut boxed_values = Box::new([Self::UNINIT; C]);
+        let mut boxed_values = Box::new([Self::UNINIT_T; C]);
         boxed_values[0].write(value);
         unsafe { Self::from_values(1, boxed_values) }
     }
@@ -97,8 +198,8 @@ mod test {
         assert_eq!(size_of::<Node<i128, 3, 3>>(), node_size);
         assert_eq!(size_of::<Node<(), 3, 3>>(), node_size);
 
-        assert_eq!(size_of::<Option<Node<i32, 10, 37>>>(), node_size);
-        assert_eq!(size_of::<Option<Node<i128, 3, 3>>>(), node_size);
-        assert_eq!(size_of::<Option<Node<(), 3, 3>>>(), node_size);
+        assert_eq!(size_of::<MaybeUninit<Node<i32, 10, 37>>>(), node_size);
+        assert_eq!(size_of::<MaybeUninit<Node<i128, 3, 3>>>(), node_size);
+        assert_eq!(size_of::<MaybeUninit<Node<(), 3, 3>>>(), node_size);
     }
 }

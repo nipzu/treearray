@@ -5,7 +5,7 @@ use core::{
 use alloc::boxed::Box;
 
 use crate::{
-    node::Node,
+    node::{Children, Node},
     utils::{slice_assume_init_mut, slice_shift_left, slice_shift_right},
 };
 
@@ -46,7 +46,7 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
 }
 
 pub struct LeafMut<'a, T, const B: usize, const C: usize> {
-    pub node: &'a mut Option<Node<T, B, C>>,
+    pub node: &'a mut Node<T, B, C>,
 }
 
 impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
@@ -55,33 +55,25 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a leaf node i.e. `node.len() <= C`.
-    pub unsafe fn new(node: &'a mut Option<Node<T, B, C>>) -> Self {
-        debug_assert!(node.as_ref().unwrap().len() <= C);
-        debug_assert!(node.as_ref().unwrap().len() != 0);
+    pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
+        debug_assert!(node.len() <= C);
+        debug_assert!(node.len() != 0);
+
         Self { node }
     }
 
     pub fn len(&self) -> usize {
-        self.node().len()
-    }
-
-    fn node(&self) -> &Node<T, B, C> {
-        self.node.as_ref().unwrap()
-    }
-
-    fn node_mut(&mut self) -> &mut Node<T, B, C> {
-        self.node.as_mut().unwrap()
+        self.node.len()
     }
 
     pub unsafe fn set_len(&mut self, new_len: usize) {
         debug_assert!(new_len <= C);
         let new_len = NonZeroUsize::new(new_len).unwrap();
-        self.node_mut().length = new_len;
+        self.node.length = new_len;
     }
 
     pub fn free(mut self) {
         unsafe { Box::from_raw(self.values_maybe_uninit_mut()) };
-        *self.node = None;
     }
 
     pub unsafe fn pop_back(&mut self) -> T {
@@ -130,15 +122,15 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 
     pub fn values_maybe_uninit_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
-        unsafe { self.node_mut().ptr.values.as_mut() }
+        unsafe { self.node.ptr.values.as_mut() }
     }
 
-    pub unsafe fn into_value_unchecked_mut(mut self, index: usize) -> &'a mut T {
+    pub unsafe fn into_value_unchecked_mut(self, index: usize) -> &'a mut T {
         let len = self.len();
         debug_assert!(len <= C);
         debug_assert!(index < len);
         unsafe {
-            self.node_mut()
+            self.node
                 .ptr
                 .values
                 .as_mut()
@@ -258,32 +250,34 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     }
 
     pub fn is_singleton(&self) -> bool {
-        self.children()[1].is_none()
+        unsafe { self.children()[0].assume_init_ref().len() == self.node.len() }
     }
 
-    pub fn children(&self) -> &'a [Option<Node<T, B, C>>; B] {
+    pub fn children(&self) -> &'a [MaybeUninit<Node<T, B, C>>; B] {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe { self.node.ptr.children.as_ref() }
+        unsafe { &self.node.ptr.children.as_ref().children }
     }
 
     pub unsafe fn child_containing_index(&self, index: &mut usize) -> &'a Node<T, B, C> {
-        fn child_len<T, const B: usize, const C: usize>(child: &Option<Node<T, B, C>>) -> usize {
-            child.as_ref().map_or(0, Node::len)
+        fn child_len<T, const B: usize, const C: usize>(
+            child: &MaybeUninit<Node<T, B, C>>,
+        ) -> usize {
+            unsafe { child.assume_init_ref().len() }
         }
 
         for child in self.children() {
             let len = child_len(child);
             match index.checked_sub(len) {
                 Some(r) => *index = r,
-                None => return unsafe { child.as_ref().unwrap_unchecked() },
+                None => return unsafe { child.assume_init_ref() },
             }
         }
 
         unsafe { unreachable_unchecked() };
     }
 
-    pub unsafe fn index_of_child_ptr(&self, elem_ptr: *const Option<Node<T, B, C>>) -> usize {
+    pub unsafe fn index_of_child_ptr(&self, elem_ptr: *const Node<T, B, C>) -> usize {
         let slice_ptr = unsafe { self.node.ptr.children.as_ptr() };
         #[allow(clippy::cast_sign_loss)]
         unsafe {
@@ -293,105 +287,92 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
 }
 
 pub struct InternalMut<'a, T, const B: usize, const C: usize> {
-    node: &'a mut Option<Node<T, B, C>>,
+    node: &'a mut Node<T, B, C>,
 }
 
 impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
-    const NONE: Option<Node<T, B, C>> = None;
-
     pub const UNDERFULL_LEN: usize = (B - 1) / 2;
 
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
-    pub unsafe fn new(node: &'a mut Option<Node<T, B, C>>) -> Self {
+    pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
         Self { node }
     }
 
-    pub unsafe fn from_ptr(ptr: *mut Option<Node<T, B, C>>) -> Self {
+    pub unsafe fn from_ptr(ptr: *mut Node<T, B, C>) -> Self {
         unsafe { Self::new(&mut *ptr) }
     }
 
-    fn node(&self) -> &Node<T, B, C> {
-        self.node.as_ref().unwrap()
-    }
-
-    fn node_mut(&mut self) -> &mut Node<T, B, C> {
-        self.node.as_mut().unwrap()
+    pub fn count_children(&self) -> usize {
+        self.children().len
     }
 
     fn is_full(&self) -> bool {
-        matches!(self.children().last(), Some(&Some(_)))
+        self.count_children() == B
     }
 
     pub fn is_underfull(&self) -> bool {
-        self.children()[Self::UNDERFULL_LEN].is_none()
+        self.count_children() <= Self::UNDERFULL_LEN
     }
 
     pub fn is_almost_underfull(&self) -> bool {
-        self.children()[Self::UNDERFULL_LEN + 1].is_none()
+        self.count_children() <= Self::UNDERFULL_LEN + 1
     }
 
     pub fn len(&self) -> usize {
-        self.node().len()
+        self.node.len()
     }
 
     pub fn set_len(&mut self, new_len: usize) {
         let new_len = NonZeroUsize::new(new_len).unwrap();
-        self.node_mut().length = new_len;
+        self.node.length = new_len;
     }
 
-    pub unsafe fn into_child_containing_index(
-        self,
-        index: &mut usize,
-    ) -> &'a mut Option<Node<T, B, C>> {
-        fn child_len<T, const B: usize, const C: usize>(child: &Option<Node<T, B, C>>) -> usize {
-            child.as_ref().map_or(0, Node::len)
-        }
-
-        for child in self.into_children_mut() {
-            let len = child_len(child);
+    pub unsafe fn into_child_containing_index(self, index: &mut usize) -> &'a mut Node<T, B, C> {
+        for child in self.into_children_mut().children_mut() {
+            // let child = unsafe { child.assume_init_mut() };
+            let len = child.len();
             match index.checked_sub(len) {
                 Some(r) => *index = r,
                 None => return child,
             }
         }
 
+        debug_assert!(false);
         unsafe { unreachable_unchecked() };
     }
 
-    pub unsafe fn index_of_child_ptr(&self, elem_ptr: *const Option<Node<T, B, C>>) -> usize {
-        let slice_ptr = unsafe { self.node().ptr.children.as_ptr() };
+    pub unsafe fn index_of_child_ptr(&self, elem_ptr: *const Node<T, B, C>) -> usize {
+        let slice_ptr = unsafe { self.node.ptr.children.as_ptr() };
         #[allow(clippy::cast_sign_loss)]
         unsafe {
             elem_ptr.offset_from(slice_ptr.cast()) as usize
         }
     }
 
-    pub fn children(&self) -> &[Option<Node<T, B, C>>; B] {
+    pub fn children(&self) -> &Children<T, B, C> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe { self.node().ptr.children.as_ref() }
+        unsafe { self.node.ptr.children.as_ref() }
     }
 
-    pub fn children_mut(&mut self) -> &mut [Option<Node<T, B, C>>; B] {
-        unsafe { self.node_mut().ptr.children.as_mut() }
+    pub fn children_mut(&mut self) -> &mut Children<T, B, C> {
+        unsafe { self.node.ptr.children.as_mut() }
     }
 
-    pub fn into_children_mut(mut self) -> &'a mut [Option<Node<T, B, C>>; B] {
-        unsafe { self.node_mut().ptr.children.as_mut() }
+    pub fn into_children_mut(self) -> &'a mut Children<T, B, C> {
+        unsafe { self.node.ptr.children.as_mut() }
     }
 
     pub fn free(mut self) {
-        debug_assert!(self.children().iter().all(Option::is_none));
         unsafe { Box::from_raw(self.children_mut()) };
-        *self.node = None;
     }
 
     pub unsafe fn children_range_mut(
         &mut self,
         range: impl RangeBounds<usize>,
-    ) -> &mut [Option<Node<T, B, C>>] {
+    ) -> &mut [MaybeUninit<Node<T, B, C>>] {
         let start = match range.start_bound() {
             core::ops::Bound::Included(i) => *i,
             core::ops::Bound::Excluded(i) => i + 1,
@@ -407,20 +388,18 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe {
             slice::from_raw_parts_mut(
                 self.node
-                    .as_mut()
-                    .unwrap()
                     .ptr
                     .children
                     .as_ptr()
-                    .cast::<Option<Node<T, B, C>>>()
+                    .cast::<MaybeUninit<Node<T, B, C>>>()
                     .add(start),
                 end - start,
             )
         }
     }
 
-    pub fn child_mut(&mut self, index: usize) -> &mut Option<Node<T, B, C>> {
-        unsafe { &mut (*self.node_mut().ptr.children.as_ptr())[index] }
+    pub fn child_mut(&mut self, index: usize) -> &mut Node<T, B, C> {
+        &mut self.children_mut().children_mut()[index]
     }
 
     pub unsafe fn insert_node(
@@ -451,27 +430,33 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
     fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
         debug_assert!(!self.is_full());
-        slice_shift_right(&mut self.children_mut()[index..], Some(node));
+        unsafe {
+            self.children_mut().insert(index, node);
+        }
+        // TODO: this logic is poor
         self.set_len(self.len() + 1);
     }
 
     unsafe fn split_and_insert_left(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
-        let mut new_box = Box::new([Self::NONE; B]);
-        let node_len = node.len();
+        // let node_len = node.len();
         let split_index = Self::UNDERFULL_LEN;
-        let tail_len = B - split_index;
+        let new_sibling;
 
-        let new_self_len = sum_lens(&self.children_mut()[..split_index]);
-        let new_nodes_len = self.len() - node_len - new_self_len;
+        unsafe {
+            new_sibling = self.children_mut().split(split_index);
+            self.children_mut().insert(index, node);
+        }
 
-        self.children_mut()[split_index..].swap_with_slice(&mut new_box[..tail_len]);
+        let new_self_len = self.children().sum_lens();
+        let new_node_len = self.len() - new_self_len + 1;
+        // let new_node_len = new_sibling.sum_lens();
 
-        slice_shift_right(&mut self.children_mut()[index..=split_index], Some(node));
 
-        debug_assert_eq!(new_self_len + node_len, sum_lens(self.children()));
-        debug_assert_eq!(new_nodes_len + 1, sum_lens(new_box.as_ref()));
-        self.set_len(new_self_len + node_len);
-        Node::from_children(new_nodes_len + 1, new_box)
+        // debug_assert_eq!(new_self_len + node_len, self.children().sum_lens());
+        // debug_assert_eq!(new_node_len + 1, new_sibling.sum_lens());
+
+        self.set_len(new_self_len);
+        Node::from_children(new_node_len, new_sibling)
     }
 
     unsafe fn split_and_insert_right(
@@ -479,24 +464,24 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         index: usize,
         node: Node<T, B, C>,
     ) -> Node<T, B, C> {
-        let mut new_box = Box::new([Self::NONE; B]);
-        let node_len = node.len();
+        // let node_len = node.len();
         let split_index = Self::UNDERFULL_LEN + 1;
-        let tail_len = B - split_index;
+        let mut new_sibling;
 
-        let tail_start_len = index - split_index;
+        unsafe {
+            new_sibling = self.children_mut().split(split_index);
+            new_sibling.insert(index - split_index, node);
+        }
 
-        let new_self_len = sum_lens(&self.children_mut()[..split_index]);
-        let new_nodes_len = self.len() - node_len - new_self_len;
+        let new_self_len = self.children().sum_lens();
+        let new_node_len = self.len() - new_self_len + 1;
+        // let new_node_len = new_sibling.sum_lens();
 
-        self.children_mut()[split_index..index].swap_with_slice(&mut new_box[..tail_start_len]);
-        self.children_mut()[index..].swap_with_slice(&mut new_box[tail_start_len + 1..=tail_len]);
-        new_box[tail_start_len] = Some(node);
+        // debug_assert_eq!(new_self_len + node_len, self.children().sum_lens());
+        // debug_assert_eq!(new_node_len + 1, new_sibling.sum_lens());
 
-        debug_assert_eq!(new_self_len, sum_lens(self.children()));
-        debug_assert_eq!(new_nodes_len + node_len + 1, sum_lens(new_box.as_ref()));
         self.set_len(new_self_len);
-        Node::from_children(new_nodes_len + node_len + 1, new_box)
+        Node::from_children(new_node_len, new_sibling)
     }
 
     pub fn reborrow(&mut self) -> InternalMut<'_, T, B, C> {
@@ -511,41 +496,37 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     ) {
         unsafe {
             self.children_range_mut(self_len..self_len + other_len)
-                .swap_with_slice(&mut other.children_mut()[..other_len]);
+                .swap_with_slice(
+                    &mut *(&mut other.children_mut().children_mut()[..other_len] as *mut _
+                        as *mut _),
+                );
         }
+
         self.set_len(self.len() + other.len());
-        debug_assert!(other.children().iter().all(Option::is_none));
         other.free();
     }
 
     pub unsafe fn rotate_from_next(&mut self, mut next: InternalMut<T, B, C>) {
-        let x = slice_shift_left(next.children_mut(), None).unwrap();
+        let x = unsafe { self.children_mut().pop_front() };
 
         next.set_len(next.len() - x.len());
         self.set_len(self.len() + x.len());
 
-        *self.child_mut(InternalMut::<T, B, C>::UNDERFULL_LEN) = Some(x);
+        unsafe {
+            self.children_mut().push_back(x);
+        }
     }
 
     pub unsafe fn rotate_from_previous(&mut self, mut prev: InternalMut<T, B, C>) {
-        for i in (0..B).rev() {
-            if let Some(x) = prev.child_mut(i).take() {
-                prev.set_len(prev.len() - x.len());
-                self.set_len(self.len() + x.len());
+        let x = unsafe { self.children_mut().pop_back() };
 
-                slice_shift_right(self.children_mut(), Some(x));
-                return;
-            }
+        prev.set_len(prev.len() - x.len());
+        self.set_len(self.len() + x.len());
+
+        unsafe {
+            self.children_mut().push_front(x);
         }
-        unreachable!();
     }
-}
-
-fn sum_lens<T, const B: usize, const C: usize>(children: &[Option<Node<T, B, C>>]) -> usize {
-    children
-        .iter()
-        .map(|n| n.as_ref().map_or(0, Node::len))
-        .sum()
 }
 
 pub enum InsertResult<T, const B: usize, const C: usize> {
