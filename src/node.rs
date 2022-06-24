@@ -1,6 +1,5 @@
 use core::{
     mem::MaybeUninit,
-    num::NonZeroUsize,
     ptr::{self, NonNull},
 };
 
@@ -24,21 +23,21 @@ pub struct Node<T, const B: usize, const C: usize> {
     // are `Some`, and the sum of their `len()`s is equal to `self.len()`.
     // Normal logic can assume that this assumption is upheld.
     // However, breaking this assumption must not cause Undefined Behavior.
-    length: NonZeroUsize,
-    pub ptr: NodePtr<T, B, C>,
+    length: usize,
+    ptr: NodePtr<T, B, C>,
 }
 
 // `Box`es cannot be used here because they would assert
 // unique ownership over the child node. We don't want that
 // because aliasing pointers are created when using `CursorMut`.
-pub union NodePtr<T, const B: usize, const C: usize> {
-    pub children: NonNull<Children<T, B, C>>,
+union NodePtr<T, const B: usize, const C: usize> {
+    children: NonNull<Children<T, B, C>>,
     values: NonNull<[MaybeUninit<T>; C]>,
 }
 
 pub struct Children<T, const B: usize, const C: usize> {
-    pub children: [MaybeUninit<Node<T, B, C>>; B],
-    len: usize,
+    children: [MaybeUninit<Node<T, B, C>>; B],
+    pub len: usize,
 }
 
 impl<T, const B: usize, const C: usize> Children<T, B, C> {
@@ -59,6 +58,7 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
 
     pub unsafe fn pop_front(&mut self) -> Node<T, B, C> {
         let old_len = self.len;
+        debug_assert_ne!(old_len, 0);
         self.len -= 1;
         unsafe {
             slice_shift_left(&mut self.children[..old_len], MaybeUninit::uninit()).assume_init()
@@ -66,27 +66,33 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
     }
 
     pub unsafe fn pop_back(&mut self) -> Node<T, B, C> {
+        debug_assert_ne!(self.len, 0);
         self.len -= 1;
         unsafe { self.children[self.len].assume_init_read() }
     }
 
     pub unsafe fn push_front(&mut self, value: Node<T, B, C>) {
+        debug_assert!(self.len < B);
         self.len += 1;
         slice_shift_right(&mut self.children[..self.len], MaybeUninit::new(value));
     }
 
     pub unsafe fn push_back(&mut self, value: Node<T, B, C>) {
+        debug_assert!(self.len < B);
         self.children[self.len].write(value);
         self.len += 1;
     }
 
     pub unsafe fn insert(&mut self, index: usize, value: Node<T, B, C>) {
+        debug_assert!(self.len < B);
         debug_assert!(index <= self.len);
         self.len += 1;
         slice_shift_right(&mut self.children[index..self.len], MaybeUninit::new(value));
     }
 
     pub unsafe fn remove(&mut self, index: usize) -> Node<T, B, C> {
+        debug_assert_ne!(self.len, 0);
+        debug_assert!(self.len <= B);
         self.len -= 1;
         unsafe {
             slice_shift_left(&mut self.children[index..=self.len], MaybeUninit::uninit())
@@ -95,6 +101,8 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
     }
 
     pub unsafe fn split(&mut self, index: usize) -> Box<Self> {
+        debug_assert!(self.len <= B);
+        debug_assert!(index <= self.len);
         let mut new_children = Box::new(Self::new());
         // use B insted of self.len
         // self.len should be B or B - 1
@@ -110,7 +118,8 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
         new_children
     }
 
-    pub unsafe fn merge_with_next(&mut self, next: Box<Self>) {
+    pub unsafe fn merge_with_next(&mut self, next: &mut Self) {
+        debug_assert!(self.len + next.len <= B);
         unsafe {
             ptr::copy_nonoverlapping(
                 next.children.as_ptr(),
@@ -119,6 +128,7 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
             );
         }
         self.len += next.len;
+        next.len = 0;
     }
 
     pub fn sum_lens(&self) -> usize {
@@ -132,13 +142,13 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
     #[inline]
     pub const fn len(&self) -> usize {
-        self.length.get()
+        self.length
     }
 
     fn from_children(length: usize, children: Box<Children<T, B, C>>) -> Self {
         debug_assert_eq!(children.sum_lens(), length);
         Self {
-            length: NonZeroUsize::new(length).unwrap(),
+            length,
             ptr: NodePtr {
                 children: NonNull::from(Box::leak(children)),
             },
@@ -170,7 +180,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         // SAFETY: `length <= C`, so we return a leaf node
         // which has the same safety invariants as this function
         Self {
-            length: NonZeroUsize::new(length).unwrap(),
+            length,
             ptr: NodePtr {
                 values: NonNull::from(Box::leak(values)),
             },

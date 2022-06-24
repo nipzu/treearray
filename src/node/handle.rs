@@ -1,6 +1,4 @@
-use core::{
-    hint::unreachable_unchecked, mem::MaybeUninit, num::NonZeroUsize, ops::RangeBounds, ptr, slice,
-};
+use core::{hint::unreachable_unchecked, mem::MaybeUninit, ops::RangeBounds, ptr, slice};
 
 use alloc::boxed::Box;
 
@@ -57,7 +55,6 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     /// `node` must be a leaf node i.e. `node.len() <= C`.
     pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
         debug_assert!(node.len() <= C);
-        debug_assert!(node.len() != 0);
 
         Self { node }
     }
@@ -68,11 +65,11 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     pub unsafe fn set_len(&mut self, new_len: usize) {
         debug_assert!(new_len <= C);
-        let new_len = NonZeroUsize::new(new_len).unwrap();
         self.node.length = new_len;
     }
 
     pub fn free(mut self) {
+        debug_assert_eq!(self.len(), 0);
         unsafe { Box::from_raw(self.values_maybe_uninit_mut()) };
     }
 
@@ -110,8 +107,9 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
         unsafe {
             ptr::copy_nonoverlapping(other_ptr, self_ptr, other_len);
-            other.free();
             self.set_len(self_len + other_len);
+            other.set_len(0);
+            other.free();
         }
     }
 
@@ -325,7 +323,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn set_len(&mut self, new_len: usize) {
-        let new_len = NonZeroUsize::new(new_len).unwrap();
         self.node.length = new_len;
     }
 
@@ -366,6 +363,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn free(mut self) {
+        debug_assert_eq!(self.children().children().len(), 0);
         unsafe { Box::from_raw(self.children_mut()) };
     }
 
@@ -451,7 +449,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         let new_node_len = self.len() - new_self_len + 1;
         // let new_node_len = new_sibling.sum_lens();
 
-
         // debug_assert_eq!(new_self_len + node_len, self.children().sum_lens());
         // debug_assert_eq!(new_node_len + 1, new_sibling.sum_lens());
 
@@ -488,18 +485,9 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         InternalMut { node: self.node }
     }
 
-    pub unsafe fn append_from(
-        &mut self,
-        mut other: InternalMut<T, B, C>,
-        self_len: usize,
-        other_len: usize,
-    ) {
+    pub unsafe fn append_from(&mut self, mut other: InternalMut<T, B, C>) {
         unsafe {
-            self.children_range_mut(self_len..self_len + other_len)
-                .swap_with_slice(
-                    &mut *(&mut other.children_mut().children_mut()[..other_len] as *mut _
-                        as *mut _),
-                );
+            self.children_mut().merge_with_next(other.children_mut());
         }
 
         self.set_len(self.len() + other.len());
@@ -507,7 +495,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub unsafe fn rotate_from_next(&mut self, mut next: InternalMut<T, B, C>) {
-        let x = unsafe { self.children_mut().pop_front() };
+        let x = unsafe { next.children_mut().pop_front() };
 
         next.set_len(next.len() - x.len());
         self.set_len(self.len() + x.len());
@@ -518,7 +506,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub unsafe fn rotate_from_previous(&mut self, mut prev: InternalMut<T, B, C>) {
-        let x = unsafe { self.children_mut().pop_back() };
+        let x = unsafe { prev.children_mut().pop_back() };
 
         prev.set_len(prev.len() - x.len());
         self.set_len(self.len() + x.len());

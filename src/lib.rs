@@ -192,7 +192,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
 impl<T, const B: usize, const C: usize> Drop for BTreeVec<T, B, C> {
     fn drop(&mut self) {
-        // self.clear();
+        self.clear();
     }
 }
 
@@ -251,7 +251,7 @@ mod tests {
 
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
-        let mut b = BTreeVec::<i32, 7, 5>::new();
+        let mut b = BTreeVec::<i32, 3, 3>::new();
         let mut v = Vec::new();
         for x in 0..1000 {
             if rng.gen() {
@@ -267,7 +267,7 @@ mod tests {
             let (x, y) = if rng.gen() {
                 (b.remove(b.len() - 1), v.pop().unwrap())
             } else {
-                (b.remove(0),v.remove(0))
+                (b.remove(0), v.remove(0))
             };
             assert_eq!(x, y);
             assert_eq!(b.len(), v.len());
@@ -306,25 +306,26 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        // let mut b_3_3 = BTreeVec::<i32, 3, 3>::new();
-        let mut b_5_1 = BTreeVec::<i32, 5, 2>::new();
+        let mut b_4_2 = BTreeVec::<i32, 4, 2>::new();
+        let mut b_5_1 = BTreeVec::<i32, 5, 1>::new();
 
         for x in 0..1000 {
             v.push(x);
-            // b_3_3.push_back(x);
+            b_4_2.push_back(x);
             b_5_1.push_back(x);
         }
 
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len());
             let v_rem = v.remove(index);
-            // b_3_3.remove(index);
+            b_4_2.remove(index);
             let b_5_1_rem = b_5_1.remove(index);
-            // assert_eq!(v.len(), b_3_3.len());
+            assert_eq!(v.len(), b_4_2.len());
             assert_eq!(v.len(), b_5_1.len());
             assert_eq!(v_rem, b_5_1_rem);
         }
 
+        assert!(b_4_2.is_empty());
         assert!(b_5_1.is_empty());
     }
 
