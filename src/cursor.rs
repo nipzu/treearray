@@ -208,7 +208,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         unsafe { InternalMut::from_ptr(self.path[height].assume_init()) }
     }
 
-    unsafe fn path_internal(&self, height: usize) -> Internal<'_, T, B, C> {
+    unsafe fn path_internal(&self, height: usize) -> Internal<T, B, C> {
         unsafe { Internal::new(&*self.path[height].assume_init()) }
     }
 
@@ -312,20 +312,20 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 parent.set_len(parent.len() - 1);
 
                 if cur_node.is_underfull() {
-                    let mut parent_index = parent.index_of_child_ptr(cur_ptr);
+                    let parent_index = parent.index_of_child_ptr(cur_ptr);
                     let combine_res;
 
                     let (prev, cur, next) =
                         slice_neighbors_of(parent.children_mut().children_mut(), parent_index);
                     let mut cur = InternalMut::new(cur);
-
+                    let child_index =
+                        cur.index_of_child_ptr(self.path[height - 1].assume_init());
+                    let vacant_index;
                     if let Some(prev) = prev {
-                        let child_index =
-                            cur.index_of_child_ptr(self.path[height - 1].assume_init());
                         let mut prev = InternalMut::new(prev);
                         combine_res =
                             combine_internals_snd_underfull(prev.reborrow(), cur.reborrow());
-
+                        vacant_index = parent_index;
                         let new_child_ptr: *mut _ = match combine_res {
                             CombineResult::Ok => cur.child_mut(child_index + 1),
                             CombineResult::Merged => prev
@@ -334,17 +334,20 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                         self.path[height - 1].write(new_child_ptr);
                     } else {
                         let next = InternalMut::new(next.unwrap());
-                        parent_index += 1;
-                        combine_res = combine_internals_fst_underfull(cur, next);
+                        vacant_index = parent_index + 1;
+                        combine_res = combine_internals_fst_underfull(cur.reborrow(), next);
+                        self.path[height - 1].write(cur.child_mut(child_index));
                     }
 
                     if let CombineResult::Merged = combine_res {
                         slice_shift_left(
-                            parent.children_range_mut(parent_index..),
+                            parent.children_range_mut(vacant_index..),
                             MaybeUninit::uninit(),
                         );
                         parent.children_mut().len -= 1;
-                        self.path[height].write(parent.child_mut(parent_index - 1));
+                        self.path[height].write(parent.child_mut(vacant_index - 1));
+                    } else {
+                        self.path[height].write(parent.child_mut(parent_index));
                     }
                 }
             }
@@ -356,8 +359,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 for height in 1..self.height() {
                     let (mut parent, parent_index) = self.path_node_and_index_of_child(height);
                     if parent_index + 1 < parent.count_children() {
-                        let n = parent.child_mut(parent_index + 1);
-                        let mut cur = n as *mut _;
+                        let mut cur: *mut _ = parent.child_mut(parent_index + 1);
                         for h in (0..height).rev() {
                             self.path[h].write(cur);
                             if h > 0 {

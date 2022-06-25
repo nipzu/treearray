@@ -481,7 +481,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         Node::from_children(new_node_len, new_sibling)
     }
 
-    pub fn reborrow(&mut self) -> InternalMut<'_, T, B, C> {
+    pub fn reborrow(&mut self) -> InternalMut<T, B, C> {
         InternalMut { node: self.node }
     }
 
