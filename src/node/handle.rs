@@ -1,4 +1,4 @@
-use core::{hint::unreachable_unchecked, mem::MaybeUninit, ops::RangeBounds, ptr, slice};
+use core::{hint::unreachable_unchecked, mem::MaybeUninit, ptr};
 
 use alloc::boxed::Box;
 
@@ -365,35 +365,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     pub fn free(mut self) {
         debug_assert_eq!(self.children().children().len(), 0);
         unsafe { Box::from_raw(self.children_mut()) };
-    }
-
-    pub unsafe fn children_range_mut(
-        &mut self,
-        range: impl RangeBounds<usize>,
-    ) -> &mut [MaybeUninit<Node<T, B, C>>] {
-        let start = match range.start_bound() {
-            core::ops::Bound::Included(i) => *i,
-            core::ops::Bound::Excluded(i) => i + 1,
-            core::ops::Bound::Unbounded => 0,
-        };
-
-        let end = match range.end_bound() {
-            core::ops::Bound::Included(i) => i + 1,
-            core::ops::Bound::Excluded(i) => *i,
-            core::ops::Bound::Unbounded => B,
-        };
-
-        unsafe {
-            slice::from_raw_parts_mut(
-                self.node
-                    .ptr
-                    .children
-                    .as_ptr()
-                    .cast::<MaybeUninit<Node<T, B, C>>>()
-                    .add(start),
-                end - start,
-            )
-        }
     }
 
     pub fn child_mut(&mut self, index: usize) -> &mut Node<T, B, C> {
