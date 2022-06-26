@@ -37,7 +37,7 @@ union NodePtr<T, const B: usize, const C: usize> {
 
 pub struct Children<T, const B: usize, const C: usize> {
     children: [MaybeUninit<Node<T, B, C>>; B],
-    pub len: usize,
+    len: usize,
 }
 
 impl<T, const B: usize, const C: usize> Children<T, B, C> {

@@ -248,38 +248,32 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     }
 
     pub fn is_singleton(&self) -> bool {
-        unsafe { self.children()[0].assume_init_ref().len() == self.node.len() }
+        self.children().children().len() == 1
     }
 
-    pub fn children(&self) -> &'a [MaybeUninit<Node<T, B, C>>; B] {
+    pub fn children(&self) -> &'a Children<T,B,C> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe { &self.node.ptr.children.as_ref().children }
+        unsafe { &self.node.ptr.children.as_ref() }
     }
 
     pub unsafe fn child_containing_index(&self, index: &mut usize) -> &'a Node<T, B, C> {
-        fn child_len<T, const B: usize, const C: usize>(
-            child: &MaybeUninit<Node<T, B, C>>,
-        ) -> usize {
-            unsafe { child.assume_init_ref().len() }
-        }
-
-        for child in self.children() {
-            let len = child_len(child);
+        for child in self.children().children() {
+            let len = child.len();
             match index.checked_sub(len) {
                 Some(r) => *index = r,
-                None => return unsafe { child.assume_init_ref() },
+                None => return child,
             }
         }
 
         unsafe { unreachable_unchecked() };
     }
 
-    pub unsafe fn index_of_child_ptr(&self, elem_ptr: *const Node<T, B, C>) -> usize {
+    pub unsafe fn index_of_child_ptr(&self, child_ptr: *const Node<T, B, C>) -> usize {
         let slice_ptr = unsafe { self.node.ptr.children.as_ptr() };
         #[allow(clippy::cast_sign_loss)]
         unsafe {
-            elem_ptr.offset_from(slice_ptr.cast()) as usize
+            child_ptr.offset_from(slice_ptr.cast()) as usize
         }
     }
 }

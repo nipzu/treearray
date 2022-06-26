@@ -196,8 +196,6 @@ impl<T, const B: usize, const C: usize> Drop for BTreeVec<T, B, C> {
     }
 }
 
-// TODO: this could maybe be derived in the future
-// if const bounds can be checked at compile time
 impl<T, const B: usize, const C: usize> Default for BTreeVec<T, B, C> {
     fn default() -> Self {
         Self::new()
