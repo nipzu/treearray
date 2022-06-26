@@ -1,17 +1,7 @@
-fn main() {
-    let _: &'static str = foo();
-}
+use btreevec::CursorMut;
 
-fn foo() -> &'static str {
-    let mut bvec = btreevec::BTreeVec::<&'static str>::new();
-    {
-        let local = String::from("hello");
-        let local_str: &str = &local;
-        let mut cursor = bvec.cursor_at_mut(0);
-        cursor.insert(local_str);
-    }
-    // This would be a 'static reference to `local`.
-    // However, local has already been dropped, so this
-    // would be Undefined Behavior
-    bvec.get(0).unwrap()
+fn main() {}
+
+pub fn bar<'c, 'a>(x: CursorMut<'c, &'static str, 3, 3>) -> CursorMut<'c, &'a str, 3, 3> {
+    x
 }
