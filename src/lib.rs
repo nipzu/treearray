@@ -154,6 +154,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         self.insert(self.len(), value);
     }
 
+    #[inline]
     pub fn clear(&mut self) {
         self.drain();
     }
@@ -446,6 +447,13 @@ mod tests {
             assert_eq!(x, *b_4_4.cursor_at_mut(i).get().unwrap());
             assert_eq!(y, *b_5_5.cursor_at_mut(i).get().unwrap());
         }
+    }
+
+    #[test]
+    fn test_empty_cursor() {
+        let mut bvec = BTreeVec::<i32, 4, 4>::new();
+        let cursor = bvec.cursor_at_mut(0);
+        assert!(cursor.get().is_none());
     }
 
     // #[test]

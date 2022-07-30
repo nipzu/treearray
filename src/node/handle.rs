@@ -24,6 +24,10 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
         self.node.len()
     }
 
+    pub fn value(&self, index: usize) -> Option<&'a T> {
+        (index < self.len()).then(|| unsafe { self.value_unchecked(index) })
+    }
+
     pub unsafe fn value_unchecked(&self, index: usize) -> &'a T {
         debug_assert!(self.len() <= C);
         debug_assert!(index < self.len());
@@ -251,10 +255,10 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
         self.children().children().len() == 1
     }
 
-    pub fn children(&self) -> &'a Children<T,B,C> {
+    pub fn children(&self) -> &'a Children<T, B, C> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe { &self.node.ptr.children.as_ref() }
+        unsafe { self.node.ptr.children.as_ref() }
     }
 
     pub unsafe fn child_containing_index(&self, index: &mut usize) -> &'a Node<T, B, C> {
@@ -290,10 +294,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     /// `node` must be a child node i.e. `node.len() > C`.
     pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
         Self { node }
-    }
-
-    pub unsafe fn from_ptr(ptr: *mut Node<T, B, C>) -> Self {
-        unsafe { Self::new(&mut *ptr) }
     }
 
     pub fn count_children(&self) -> usize {
@@ -401,7 +401,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     unsafe fn split_and_insert_left(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
-        // let node_len = node.len();
         let split_index = Self::UNDERFULL_LEN;
         let new_sibling;
 
@@ -412,10 +411,8 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
         let new_self_len = self.children().sum_lens();
         let new_node_len = self.len() - new_self_len + 1;
-        // let new_node_len = new_sibling.sum_lens();
 
-        // debug_assert_eq!(new_self_len + node_len, self.children().sum_lens());
-        // debug_assert_eq!(new_node_len + 1, new_sibling.sum_lens());
+        debug_assert_eq!(new_node_len, new_sibling.sum_lens());
 
         self.set_len(new_self_len);
         Node::from_children(new_node_len, new_sibling)
@@ -426,7 +423,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         index: usize,
         node: Node<T, B, C>,
     ) -> Node<T, B, C> {
-        // let node_len = node.len();
         let split_index = Self::UNDERFULL_LEN + 1;
         let mut new_sibling;
 
@@ -437,10 +433,8 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
         let new_self_len = self.children().sum_lens();
         let new_node_len = self.len() - new_self_len + 1;
-        // let new_node_len = new_sibling.sum_lens();
 
-        // debug_assert_eq!(new_self_len + node_len, self.children().sum_lens());
-        // debug_assert_eq!(new_node_len + 1, new_sibling.sum_lens());
+        debug_assert_eq!(new_node_len, new_sibling.sum_lens());
 
         self.set_len(new_self_len);
         Node::from_children(new_node_len, new_sibling)

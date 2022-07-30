@@ -126,11 +126,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
     #[must_use]
     pub fn get(&self) -> Option<&T> {
-        if self.leaf_index < unsafe { self.leaf().len() } {
-            unsafe { Some(self.leaf().value_unchecked(self.leaf_index)) }
-        } else {
-            None
-        }
+        self.leaf().and_then(|leaf| leaf.value(self.leaf_index))
     }
 
     // pub fn move_right(&mut self, offset: usize) {
@@ -191,8 +187,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         unsafe { LeafMut::new(&mut *self.path[0].assume_init()) }
     }
 
-    unsafe fn leaf(&self) -> Leaf<T, B, C> {
-        unsafe { Leaf::new(&*self.path[0].assume_init()) }
+    fn leaf(&self) -> Option<Leaf<T, B, C>> {
+        (self.height() > 0).then(|| unsafe { Leaf::new(&*self.path[0].assume_init()) })
     }
 
     fn height(&self) -> usize {
@@ -204,7 +200,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
     }
 
     unsafe fn path_internal_mut<'b>(&mut self, height: usize) -> InternalMut<'b, T, B, C> {
-        unsafe { InternalMut::from_ptr(self.path[height].assume_init()) }
+        unsafe { InternalMut::new(&mut *self.path[height].assume_init()) }
     }
 
     unsafe fn path_internal(&self, height: usize) -> Internal<T, B, C> {
@@ -305,7 +301,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             for height in 1..self.height() - 1 {
                 // TODO: make another loop after non-underfull?
                 let cur_ptr = self.path[height].assume_init();
-                let cur_node = InternalMut::from_ptr(cur_ptr);
+                let cur_node = InternalMut::new(&mut *cur_ptr);
 
                 let mut parent = self.path_internal_mut(height + 1);
                 parent.set_len(parent.len() - 1);
@@ -343,7 +339,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                         for h in (0..height).rev() {
                             self.path[h].write(cur);
                             if h > 0 {
-                                cur = InternalMut::from_ptr(cur).child_mut(0);
+                                cur = InternalMut::new(&mut *cur).child_mut(0);
                             }
                         }
                         self.leaf_index = 0;
@@ -451,10 +447,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
     child_index: &mut usize,
     self_index: &mut usize,
 ) {
-    let [prev, cur]: &mut [Node<T, B, C>; 2] = (&mut parent.children_mut().children_mut()
-        [*self_index - 1..=*self_index])
-        .try_into()
-        .unwrap();
+    let (prev, cur) = parent.children_mut().pair_at(*self_index - 1);
     let mut prev = unsafe { LeafMut::new(prev) };
     let mut cur = unsafe { LeafMut::new(cur) };
 
@@ -476,9 +469,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
 unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
     parent: &mut InternalMut<T, B, C>,
 ) {
-    let [cur, next]: &mut [Node<T, B, C>; 2] = (&mut parent.children_mut().children_mut()[..2])
-        .try_into()
-        .unwrap();
+    let (cur, next) = parent.children_mut().pair_at(0);
     let mut cur = unsafe { LeafMut::new(cur) };
     let mut next = unsafe { LeafMut::new(next) };
 
@@ -495,9 +486,7 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
 unsafe fn combine_internals_head_underfull<T, const B: usize, const C: usize>(
     mut parent: InternalMut<T, B, C>,
 ) {
-    let [cur, next]: &mut [Node<T, B, C>; 2] = (&mut parent.children_mut().children_mut()[..2])
-        .try_into()
-        .unwrap();
+    let (cur, next) = parent.children_mut().pair_at(0);
     let mut cur = unsafe { InternalMut::new(cur) };
     let next = unsafe { InternalMut::new(next) };
 
@@ -518,10 +507,7 @@ unsafe fn combine_internals_tail_underfull<T, const B: usize, const C: usize>(
     parent_index: usize,
     child_index: usize,
 ) -> (*mut Node<T, B, C>, *mut Node<T, B, C>) {
-    let [prev, cur]: &mut [Node<T, B, C>; 2] = (&mut parent.children_mut().children_mut()
-        [parent_index - 1..=parent_index])
-        .try_into()
-        .unwrap();
+    let (prev, cur) = parent.children_mut().pair_at(parent_index - 1);
     let prev = unsafe { InternalMut::new(prev) };
     let mut cur = unsafe { InternalMut::new(cur) };
 

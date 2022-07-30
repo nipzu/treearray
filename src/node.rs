@@ -65,6 +65,14 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
         }
     }
 
+    pub fn pair_at(&mut self, index: usize) -> (&mut Node<T, B, C>, &mut Node<T, B, C>) {
+        if let [ref mut fst, ref mut snd, ..] = self.children_mut()[index..] {
+            (fst, snd)
+        } else {
+            unreachable!()
+        }
+    }
+
     pub unsafe fn pop_back(&mut self) -> Node<T, B, C> {
         debug_assert_ne!(self.len, 0);
         self.len -= 1;
