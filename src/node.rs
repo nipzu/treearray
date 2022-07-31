@@ -5,7 +5,7 @@ use core::{
 
 use alloc::boxed::Box;
 
-use crate::utils::{slice_assume_init_mut, slice_shift_left, slice_shift_right};
+use crate::utils::{slice_assume_init_mut, slice_shift_left, slice_shift_right, slice_assume_init_ref};
 
 // use crate::panics::panic_length_overflow;
 
@@ -49,7 +49,7 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
     }
 
     pub fn children(&self) -> &[Node<T, B, C>] {
-        unsafe { &*(&self.children[..self.len] as *const _ as *const _) }
+        unsafe { slice_assume_init_ref(&self.children[..self.len]) }
     }
 
     pub fn children_mut(&mut self) -> &mut [Node<T, B, C>] {
