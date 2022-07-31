@@ -380,7 +380,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             let mut self_index = self.index_of_path_node(0);
             let mut leaf = self.leaf_mut();
 
-            let ret = leaf.remove_unchecked(leaf_index);
+            let ret = leaf.try_remove(leaf_index);
             let leaf_underfull = leaf.is_underfull();
 
             let mut parent = self.path_internal_mut(1);
@@ -388,9 +388,9 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
             if leaf_underfull {
                 if self_index > 0 {
-                    combine_leaves_tail(&mut parent, &mut leaf_index, &mut self_index);
+                    combine_leaves_tail(parent.reborrow(), &mut leaf_index, &mut self_index);
                 } else {
-                    combine_leaves_head(&mut parent);
+                    combine_leaves_head(parent.reborrow());
                 };
                 let new_leaf: *mut _ = parent.child_mut(self_index);
                 self.path[0].write(new_leaf);
@@ -444,7 +444,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 }
 
 unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
-    parent: &mut InternalMut<T, B, C>,
+    mut parent: InternalMut<T, B, C>,
     child_index: &mut usize,
     self_index: &mut usize,
 ) {
@@ -468,7 +468,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
 }
 
 unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
-    parent: &mut InternalMut<T, B, C>,
+    mut parent: InternalMut<T, B, C>,
 ) {
     let (cur, next) = parent.children_mut().pair_at(0);
     let mut cur = unsafe { LeafMut::new(cur) };

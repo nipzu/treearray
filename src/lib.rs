@@ -69,6 +69,14 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         }
     }
 
+    fn root_mut(&mut self) -> Option<&mut Node<T, B, C>> {
+        if self.is_empty() {
+            None
+        } else {
+            unsafe { Some(self.root.assume_init_mut()) }
+        }
+    }
+
     #[must_use]
     #[inline]
     pub const fn is_empty(&self) -> bool {
@@ -77,12 +85,11 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
     #[must_use]
     pub fn get(&self, mut index: usize) -> Option<&T> {
-        if index >= self.len() {
-            return None;
-        }
+        let mut cur_node = match self.root() {
+            Some(root) if index < root.len() => root,
+            _ => return None,
+        };
 
-        // the height of `cur_node` is `self.height - 1`
-        let mut cur_node = unsafe { self.root.assume_init_ref() };
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..self.height {
             let handle = unsafe { Internal::new(cur_node) };
@@ -97,14 +104,14 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
     #[must_use]
     pub fn get_mut(&mut self, mut index: usize) -> Option<&mut T> {
-        if index >= self.len() {
-            return None;
-        }
+        let height = self.height;
+        let mut cur_node = match self.root_mut() {
+            Some(root) if index < root.len() => root,
+            _ => return None,
+        };
 
-        // the height of `cur_node` is `self.height - 1`
-        let mut cur_node = unsafe { self.root.assume_init_mut() };
         // decrement the height of `cur_node` `self.height - 1` times
-        for _ in 1..self.height {
+        for _ in 1..height {
             let handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
@@ -357,6 +364,17 @@ mod tests {
 
         assert_eq!(v, b_7_3.iter().copied().collect::<Vec<_>>());
         assert_eq!(v, b_5_5.iter().copied().collect::<Vec<_>>());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_remove_past_end() {
+        let mut v = BTreeVec::<i32, 3, 3>::new();
+        for x in 0..10 {
+            v.push_back(x);
+        }
+        let mut c = v.cursor_at_mut(10);
+        c.remove();
     }
 
     #[test]

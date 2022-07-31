@@ -225,6 +225,11 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         }
     }
 
+    pub fn try_remove(&mut self, index: usize) -> T {
+        assert!(index < self.len());
+        unsafe { self.remove_unchecked(index) }
+    }
+
     pub unsafe fn remove_unchecked(&mut self, index: usize) -> T {
         debug_assert!(index < self.len());
 
