@@ -30,7 +30,6 @@ use node::{
 // - `C >= 1`
 pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
     root: MaybeUninit<Node<T, B, C>>,
-    // TODO: this is redundant when root is `None`
     // TODO: consider using a smaller type like u16
     height: usize,
     // TODO: is this even needed?
@@ -56,7 +55,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[must_use]
     #[inline]
     pub const fn len(&self) -> usize {
-        match self.root().as_ref() {
+        match self.root() {
             Some(root) => root.len(),
             None => 0,
         }
