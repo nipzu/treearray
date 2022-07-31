@@ -355,12 +355,9 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         // move the root one level lower if needed
         unsafe {
             let root_height = self.height();
-            // TODO: deduplicate
-            let root = Internal::new(self.tree().root.assume_init_ref());
+            let mut old_root = self.path_internal_mut(root_height - 1);
 
-            if root.is_singleton() {
-                let mut old_root = InternalMut::new(self.root_mut().assume_init_mut());
-                debug_assert!(old_root.children().children().len() == 1);
+            if old_root.is_singleton() {
                 let new_root = old_root.children_mut().pop_back();
                 // `old_root` points to the `root` field of `self` so it must be freed before assigning a new root
                 old_root.free();

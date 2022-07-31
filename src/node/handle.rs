@@ -251,10 +251,6 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
         Self { node }
     }
 
-    pub fn is_singleton(&self) -> bool {
-        self.children().children().len() == 1
-    }
-
     pub fn children(&self) -> &'a Children<T, B, C> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
@@ -298,6 +294,10 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
 
     pub fn count_children(&self) -> usize {
         self.children().len
+    }
+
+    pub fn is_singleton(&self) -> bool {
+        self.count_children() == 1
     }
 
     fn is_full(&self) -> bool {
