@@ -224,7 +224,10 @@ mod tests {
     fn test_bvec_size() {
         use core::mem::size_of;
 
-        assert_eq!(size_of::<BTreeVec<i32>>(), 3 * size_of::<usize>())
+        assert_eq!(
+            size_of::<BTreeVec<i32>>(),
+            2 * size_of::<usize>() + size_of::<*mut ()>()
+        )
     }
 
     #[test]

@@ -199,7 +199,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         self.tree().len()
     }
 
-    unsafe fn path_internal_mut<'b>(&mut self, height: usize) -> InternalMut<'b, T, B, C> {
+    unsafe fn path_internal_mut(&mut self, height: usize) -> InternalMut<T, B, C> {
         unsafe { InternalMut::new(&mut *self.path[height].assume_init()) }
     }
 
@@ -302,6 +302,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 // TODO: make another loop after non-underfull?
                 let cur_ptr = self.path[height].assume_init();
                 let cur_node = InternalMut::new(&mut *cur_ptr);
+                let child_ptr = self.path[height - 1].assume_init();
 
                 let mut parent = self.path_internal_mut(height + 1);
                 parent.set_len(parent.len() - 1);
@@ -310,7 +311,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     let parent_index = parent.index_of_child_ptr(cur_ptr);
 
                     let cur = InternalMut::new(parent.child_mut(parent_index));
-                    let child_index = cur.index_of_child_ptr(self.path[height - 1].assume_init());
+                    let child_index = cur.index_of_child_ptr(child_ptr);
                     if parent_index > 0 {
                         let (new_child_ptr, new_cur_ptr) = combine_internals_tail_underfull(
                             parent.reborrow(),
@@ -322,8 +323,10 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     } else {
                         combine_internals_head_underfull(parent.reborrow());
                         let mut cur = InternalMut::new(parent.child_mut(parent_index));
-                        self.path[height - 1].write(cur.child_mut(child_index));
-                        self.path[height].write(parent.child_mut(parent_index));
+                        let new_child_ptr: *mut _ = cur.child_mut(child_index);
+                        let new_cur_ptr: *mut _ = cur.into_node();
+                        self.path[height].write(new_cur_ptr);
+                        self.path[height - 1].write(new_child_ptr);
                     }
                 }
             }
@@ -376,24 +379,25 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
         unsafe {
             // root is internal
+            let mut leaf_index = self.leaf_index;
             let mut self_index = self.index_of_path_node(0);
-            let mut parent = self.path_internal_mut(1);
-            // let (mut parent, mut self_index) = self.path_node_and_index_of_child(1);
-
-            // Do this before because reasons?
-            parent.set_len(parent.len() - 1);
-            let leaf_index = self.leaf_index;
             let mut leaf = self.leaf_mut();
 
             let ret = leaf.remove_unchecked(leaf_index);
+            let leaf_underfull = leaf.is_underfull();
 
-            if leaf.is_underfull() {
+            let mut parent = self.path_internal_mut(1);
+            parent.set_len(parent.len() - 1);
+
+            if leaf_underfull {
                 if self_index > 0 {
-                    combine_leaves_tail(&mut parent, &mut self.leaf_index, &mut self_index);
+                    combine_leaves_tail(&mut parent, &mut leaf_index, &mut self_index);
                 } else {
                     combine_leaves_head(&mut parent);
                 };
-                self.path[0].write(parent.child_mut(self_index));
+                let new_leaf: *mut _ = parent.child_mut(self_index);
+                self.path[0].write(new_leaf);
+                self.leaf_index = leaf_index;
             }
 
             ret
@@ -430,8 +434,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         height: usize,
     ) -> (InternalMut<T, B, C>, usize) {
         unsafe {
-            let parent = self.path_internal_mut(height);
             let node_ptr = self.path[height - 1].assume_init();
+            let parent = self.path_internal_mut(height);
             let index = parent.index_of_child_ptr(node_ptr);
             (parent, index)
         }

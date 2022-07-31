@@ -356,6 +356,10 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe { self.node.ptr.children.as_mut() }
     }
 
+    pub fn into_node(self) -> &'a mut Node<T, B, C> {
+        self.node
+    }
+
     pub fn free(mut self) {
         debug_assert_eq!(self.children().children().len(), 0);
         unsafe { Box::from_raw(self.children_mut()) };
