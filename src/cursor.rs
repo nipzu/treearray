@@ -312,22 +312,19 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
                     let cur = InternalMut::new(parent.child_mut(parent_index));
                     let child_index = cur.index_of_child_ptr(child_ptr);
-                    if parent_index > 0 {
-                        let (new_child_ptr, new_cur_ptr) = combine_internals_tail_underfull(
+                    let (new_child_ptr, new_cur_ptr) = if parent_index > 0 {
+                        combine_internals_tail_underfull(
                             parent.reborrow(),
                             parent_index,
                             child_index,
-                        );
-                        self.path[height - 1].write(new_child_ptr);
-                        self.path[height].write(new_cur_ptr);
+                        )
                     } else {
                         combine_internals_head_underfull(parent.reborrow());
-                        let mut cur = InternalMut::new(parent.child_mut(parent_index));
-                        let new_child_ptr: *mut _ = cur.child_mut(child_index);
-                        let new_cur_ptr: *mut _ = cur.into_node();
-                        self.path[height].write(new_cur_ptr);
-                        self.path[height - 1].write(new_child_ptr);
-                    }
+                        let mut cur = InternalMut::new(parent.child_mut(0));
+                        (cur.child_mut(child_index) as _, cur.into_node() as _)
+                    };
+                    self.path[height - 1].write(new_child_ptr);
+                    self.path[height].write(new_cur_ptr);
                 }
             }
         }
@@ -405,7 +402,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         unsafe {
             debug_assert_eq!(self.leaf_index, self.index);
             let index = self.leaf_index;
-            let mut leaf = LeafMut::new(self.root_mut().assume_init_mut());
+            let mut leaf = self.leaf_mut();
 
             // TODO: better
             assert!(index < leaf.len(), "out of bounds");
@@ -467,9 +464,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
     }
 }
 
-unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(
-    mut parent: InternalMut<T, B, C>,
-) {
+unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(mut parent: InternalMut<T, B, C>) {
     let (cur, next) = parent.children_mut().pair_at(0);
     let mut cur = unsafe { LeafMut::new(cur) };
     let mut next = unsafe { LeafMut::new(next) };

@@ -378,6 +378,17 @@ mod tests {
     }
 
     #[test]
+    #[should_panic]
+    fn test_remove_past_end_root() {
+        let mut v = BTreeVec::<i32, 32, 32>::new();
+        for x in 0..10 {
+            v.push_back(x);
+        }
+        let mut c = v.cursor_at_mut(10);
+        c.remove();
+    }
+
+    #[test]
     fn test_random_removals2() {
         use alloc::vec::Vec;
         use rand::{Rng, SeedableRng};

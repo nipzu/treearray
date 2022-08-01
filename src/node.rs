@@ -5,7 +5,9 @@ use core::{
 
 use alloc::boxed::Box;
 
-use crate::utils::{slice_assume_init_mut, slice_shift_left, slice_shift_right, slice_assume_init_ref};
+use crate::utils::{
+    slice_assume_init_mut, slice_assume_init_ref, slice_shift_left, slice_shift_right,
+};
 
 // use crate::panics::panic_length_overflow;
 
@@ -41,9 +43,11 @@ pub struct Children<T, const B: usize, const C: usize> {
 }
 
 impl<T, const B: usize, const C: usize> Children<T, B, C> {
+    const UNINIT_NODE: MaybeUninit<Node<T, B, C>> = MaybeUninit::uninit();
+
     pub const fn new() -> Self {
         Self {
-            children: unsafe { MaybeUninit::uninit().assume_init() },
+            children: [Self::UNINIT_NODE; B],
             len: 0,
         }
     }
