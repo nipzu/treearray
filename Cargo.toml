@@ -13,5 +13,5 @@ im = "15.0"
 debug = true
 
 [[bench]]
-name = "get"
+name = "criterion"
 harness = false

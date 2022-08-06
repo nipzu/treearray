@@ -4,7 +4,7 @@ use alloc::boxed::Box;
 
 use crate::{
     node::{Children, Node},
-    utils::{slice_assume_init_mut, slice_shift_left, slice_shift_right},
+    utils::{slice_assume_init_mut, slice_shift_right, ArrayVecMut},
 };
 
 pub struct Leaf<'a, T, const B: usize, const C: usize> {
@@ -77,28 +77,26 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         unsafe { Box::from_raw(self.values_maybe_uninit_mut()) };
     }
 
-    pub unsafe fn pop_back(&mut self) -> T {
-        debug_assert!(self.len() > 0);
-        unsafe { self.remove_unchecked(self.len() - 1) }
-    }
-
-    pub unsafe fn pop_front(&mut self) -> T {
-        debug_assert!(self.len() > 0);
-        unsafe { self.remove_unchecked(0) }
-    }
-
-    pub unsafe fn push_front(&mut self, value: T) {
-        debug_assert!(!self.is_full());
-        self.insert_fitting(0, value);
-    }
-
-    pub unsafe fn push_back(&mut self, value: T) {
-        debug_assert!(!self.is_full());
+    pub fn values_mut(&mut self) -> ArrayVecMut<T, C> {
         unsafe {
-            let len = self.len();
-            self.values_maybe_uninit_mut()[len].write(value);
-            self.set_len(len + 1);
-        }
+            ArrayVecMut::new(self.node.ptr.values.as_mut(), &mut self.node.length)
+        } 
+    }
+
+    pub fn pop_back(&mut self) -> T {
+        self.values_mut().pop_back()
+    }
+
+    pub fn pop_front(&mut self) -> T {
+        self.values_mut().pop_front()
+    }
+
+    pub fn push_front(&mut self, value: T) {
+        self.values_mut().push_front(value);
+    }
+
+    pub fn push_back(&mut self, value: T) {
+        self.values_mut().push_back(value);
     }
 
     pub unsafe fn append_from(&mut self, mut other: Self) {
@@ -117,7 +115,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         }
     }
 
-    pub fn values_mut(&mut self) -> &mut [T] {
+    pub fn raw_values_mut(&mut self) -> &mut [T] {
         let len = self.len();
         debug_assert!(len <= C);
         unsafe { slice_assume_init_mut(self.values_maybe_uninit_mut().get_unchecked_mut(..len)) }
@@ -171,15 +169,11 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 
     fn insert_fitting(&mut self, index: usize, value: T) {
-        assert!(!self.is_full());
-        unsafe {
-            let old_len = self.len();
-            slice_shift_right(
-                &mut self.values_maybe_uninit_mut()[index..=old_len],
-                MaybeUninit::new(value),
-            );
-            self.set_len(old_len + 1);
-        }
+        self.values_mut().insert(index, value);
+    }
+
+    pub fn remove(&mut self, index: usize) -> T {
+        self.values_mut().remove(index)
     }
 
     unsafe fn split_and_insert_left(&mut self, index: usize, value: T) -> Node<T, B, C> {
@@ -188,7 +182,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         let tail_len = C - split_index;
 
         unsafe {
-            let split_ptr = self.values_mut().as_mut_ptr().add(split_index);
+            let split_ptr = self.raw_values_mut().as_mut_ptr().add(split_index);
             let box_ptr = new_box.as_mut_ptr();
             ptr::copy_nonoverlapping(split_ptr, box_ptr.cast::<T>(), tail_len);
             slice_shift_right(
@@ -210,7 +204,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         let tail_end_len = tail_len - tail_start_len;
 
         unsafe {
-            let split_ptr = self.values_mut().as_mut_ptr().add(split_index);
+            let split_ptr = self.raw_values_mut().as_mut_ptr().add(split_index);
             let box_ptr = new_box.as_mut_ptr();
             ptr::copy_nonoverlapping(split_ptr, box_ptr.cast::<T>(), tail_start_len);
             ptr::write(box_ptr.add(tail_start_len).cast::<T>(), value);
@@ -222,24 +216,6 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
             self.set_len(split_index);
             Node::from_values(tail_len + 1, new_box)
-        }
-    }
-
-    pub fn try_remove(&mut self, index: usize) -> T {
-        assert!(index < self.len());
-        unsafe { self.remove_unchecked(index) }
-    }
-
-    pub unsafe fn remove_unchecked(&mut self, index: usize) -> T {
-        debug_assert!(index < self.len());
-
-        unsafe {
-            let old_len = self.len();
-            self.set_len(old_len - 1);
-            let slice = self
-                .values_maybe_uninit_mut()
-                .get_unchecked_mut(index..old_len);
-            slice_shift_left(slice, MaybeUninit::uninit()).assume_init()
         }
     }
 }
@@ -353,7 +329,12 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         unsafe { self.node.ptr.children.as_ref() }
     }
 
-    pub fn children_mut(&mut self) -> &mut Children<T, B, C> {
+    pub fn children_mut(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {
+        let Children { children, len } = unsafe { self.node.ptr.children.as_mut() };
+        unsafe { ArrayVecMut::new(children, len) }
+    }
+
+    pub fn raw_children_mut(&mut self) -> &mut Children<T, B, C> {
         unsafe { self.node.ptr.children.as_mut() }
     }
 
@@ -365,13 +346,13 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         self.node
     }
 
-    pub fn free(mut self) {
+    pub fn free(self) {
         debug_assert_eq!(self.children().children().len(), 0);
-        unsafe { Box::from_raw(self.children_mut()) };
+        unsafe { Box::from_raw(self.into_children_mut()) };
     }
 
     pub fn child_mut(&mut self, index: usize) -> &mut Node<T, B, C> {
-        &mut self.children_mut().children_mut()[index]
+        &mut self.raw_children_mut().children_mut()[index]
     }
 
     pub unsafe fn insert_node(
@@ -400,23 +381,19 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         }
     }
 
-    fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
+    unsafe fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
         debug_assert!(!self.is_full());
-        unsafe {
-            self.children_mut().insert(index, node);
-        }
+        self.children_mut().insert(index, node);
+
         // TODO: this logic is poor
         self.set_len(self.len() + 1);
     }
 
     unsafe fn split_and_insert_left(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
         let split_index = Self::UNDERFULL_LEN;
-        let new_sibling;
 
-        unsafe {
-            new_sibling = self.children_mut().split(split_index);
-            self.children_mut().insert(index, node);
-        }
+        let new_sibling = self.raw_children_mut().split(split_index);
+        self.children_mut().insert(index, node);
 
         let new_self_len = self.children().sum_lens();
         let new_node_len = self.len() - new_self_len + 1;
@@ -435,10 +412,8 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         let split_index = Self::UNDERFULL_LEN + 1;
         let mut new_sibling;
 
-        unsafe {
-            new_sibling = self.children_mut().split(split_index);
-            new_sibling.insert(index - split_index, node);
-        }
+        new_sibling = self.raw_children_mut().split(split_index);
+        new_sibling.insert(index - split_index, node);
 
         let new_self_len = self.children().sum_lens();
         let new_node_len = self.len() - new_self_len + 1;
@@ -454,34 +429,29 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub unsafe fn append_from(&mut self, mut other: InternalMut<T, B, C>) {
-        unsafe {
-            self.children_mut().merge_with_next(other.children_mut());
-        }
+        self.raw_children_mut()
+            .merge_with_next(other.raw_children_mut());
 
         self.set_len(self.len() + other.len());
         other.free();
     }
 
     pub unsafe fn rotate_from_next(&mut self, mut next: InternalMut<T, B, C>) {
-        let x = unsafe { next.children_mut().pop_front() };
+        let x = next.children_mut().pop_front();
 
         next.set_len(next.len() - x.len());
         self.set_len(self.len() + x.len());
 
-        unsafe {
-            self.children_mut().push_back(x);
-        }
+        self.children_mut().push_back(x);
     }
 
     pub unsafe fn rotate_from_previous(&mut self, mut prev: InternalMut<T, B, C>) {
-        let x = unsafe { prev.children_mut().pop_back() };
+        let x = prev.children_mut().pop_back();
 
         prev.set_len(prev.len() - x.len());
         self.set_len(self.len() + x.len());
 
-        unsafe {
-            self.children_mut().push_front(x);
-        }
+        self.children_mut().push_front(x);
     }
 }
 

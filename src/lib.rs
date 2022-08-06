@@ -28,7 +28,7 @@ use node::{
 // CONST INVARIANTS:
 // - `B >= 3`
 // - `C >= 1`
-pub struct BTreeVec<T, const B: usize = 63, const C: usize = 63> {
+pub struct BTreeVec<T, const B: usize = 31, const C: usize = 63> {
     root: MaybeUninit<Node<T, B, C>>,
     // TODO: consider using a smaller type like u16
     height: usize,

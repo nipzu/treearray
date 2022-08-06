@@ -6,7 +6,7 @@ use core::{
 use alloc::boxed::Box;
 
 use crate::utils::{
-    slice_assume_init_mut, slice_assume_init_ref, slice_shift_left, slice_shift_right,
+    slice_assume_init_mut, slice_assume_init_ref, slice_shift_right,
 };
 
 // use crate::panics::panic_length_overflow;
@@ -53,20 +53,11 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
     }
 
     pub fn children(&self) -> &[Node<T, B, C>] {
-        unsafe { slice_assume_init_ref(&self.children[..self.len]) }
+        unsafe { slice_assume_init_ref(self.children.get_unchecked(..self.len)) }
     }
 
     pub fn children_mut(&mut self) -> &mut [Node<T, B, C>] {
-        unsafe { slice_assume_init_mut(&mut self.children[..self.len]) }
-    }
-
-    pub unsafe fn pop_front(&mut self) -> Node<T, B, C> {
-        let old_len = self.len;
-        debug_assert_ne!(old_len, 0);
-        self.len -= 1;
-        unsafe {
-            slice_shift_left(&mut self.children[..old_len], MaybeUninit::uninit()).assume_init()
-        }
+        unsafe { slice_assume_init_mut(self.children.get_unchecked_mut(..self.len)) }
     }
 
     pub fn pair_at(&mut self, index: usize) -> (&mut Node<T, B, C>, &mut Node<T, B, C>) {
@@ -77,44 +68,16 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
         }
     }
 
-    pub unsafe fn pop_back(&mut self) -> Node<T, B, C> {
-        debug_assert_ne!(self.len, 0);
-        self.len -= 1;
-        unsafe { self.children[self.len].assume_init_read() }
-    }
-
-    pub unsafe fn push_front(&mut self, value: Node<T, B, C>) {
-        debug_assert!(self.len < B);
-        self.len += 1;
-        slice_shift_right(&mut self.children[..self.len], MaybeUninit::new(value));
-    }
-
-    pub unsafe fn push_back(&mut self, value: Node<T, B, C>) {
-        debug_assert!(self.len < B);
-        self.children[self.len].write(value);
-        self.len += 1;
-    }
-
-    pub unsafe fn insert(&mut self, index: usize, value: Node<T, B, C>) {
-        debug_assert!(self.len < B);
-        debug_assert!(index <= self.len);
+    pub fn insert(&mut self, index: usize, value: Node<T, B, C>) {
+        assert!(self.len < B);
+        assert!(index <= self.len);
         self.len += 1;
         slice_shift_right(&mut self.children[index..self.len], MaybeUninit::new(value));
     }
 
-    pub unsafe fn remove(&mut self, index: usize) -> Node<T, B, C> {
-        debug_assert_ne!(self.len, 0);
-        debug_assert!(self.len <= B);
-        self.len -= 1;
-        unsafe {
-            slice_shift_left(&mut self.children[index..=self.len], MaybeUninit::uninit())
-                .assume_init()
-        }
-    }
-
-    pub unsafe fn split(&mut self, index: usize) -> Box<Self> {
-        debug_assert!(self.len <= B);
-        debug_assert!(index <= self.len);
+    pub fn split(&mut self, index: usize) -> Box<Self> {
+        assert!(self.len <= B);
+        assert!(index <= self.len);
         let mut new_children = Box::new(Self::new());
         // use B insted of self.len
         // self.len should be B or B - 1
@@ -130,8 +93,8 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
         new_children
     }
 
-    pub unsafe fn merge_with_next(&mut self, next: &mut Self) {
-        debug_assert!(self.len + next.len <= B);
+    pub fn merge_with_next(&mut self, next: &mut Self) {
+        assert!(self.len + next.len <= B);
         unsafe {
             ptr::copy_nonoverlapping(
                 next.children.as_ptr(),
