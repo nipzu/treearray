@@ -78,25 +78,15 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 
     pub fn values_mut(&mut self) -> ArrayVecMut<T, C> {
-        unsafe {
-            ArrayVecMut::new(self.node.ptr.values.as_mut(), &mut self.node.length)
-        } 
+        unsafe { ArrayVecMut::new(self.node.ptr.values.as_mut(), &mut self.node.length) }
     }
 
-    pub fn pop_back(&mut self) -> T {
-        self.values_mut().pop_back()
+    pub fn rotate_from_previous(&mut self, mut prev: LeafMut<T, B, C>) {
+        self.values_mut().push_front(prev.values_mut().pop_back());
     }
 
-    pub fn pop_front(&mut self) -> T {
-        self.values_mut().pop_front()
-    }
-
-    pub fn push_front(&mut self, value: T) {
-        self.values_mut().push_front(value);
-    }
-
-    pub fn push_back(&mut self, value: T) {
-        self.values_mut().push_back(value);
+    pub fn rotate_from_next(&mut self, mut next: LeafMut<T, B, C>) {
+        self.values_mut().push_back(next.values_mut().pop_front());
     }
 
     pub unsafe fn append_from(&mut self, mut other: Self) {

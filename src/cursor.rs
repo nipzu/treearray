@@ -237,12 +237,12 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         let old_root = unsafe { self.root_mut().assume_init_read() };
         let old_height = self.height();
         let new_root = self
-        .root_mut()
-        .write(Node::from_child_array([old_root, new_node]));
-        
+            .root_mut()
+            .write(Node::from_child_array([old_root, new_node]));
+
         let child_ptr: *mut _ = unsafe { InternalMut::new(new_root).child_mut(root_path_index) };
         let root_ptr: *mut _ = new_root;
-        
+
         self.path_mut()[old_height - 1] = child_ptr;
         self.path_mut().push_back(root_ptr);
     }
@@ -294,6 +294,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         }
     }
 
+    /// # Panics
+    /// panics if pointing past the end
     pub fn remove(&mut self) -> T {
         // TODO: what about past-the-end cursors?
         if self.tree().is_empty() {
@@ -460,7 +462,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
     self_index: &mut usize,
 ) {
     let (prev, cur) = parent.raw_children_mut().pair_at(*self_index - 1);
-    let mut prev = unsafe { LeafMut::new(prev) };
+    let prev = unsafe { LeafMut::new(prev) };
     let mut cur = unsafe { LeafMut::new(cur) };
 
     if prev.is_almost_underfull() {
@@ -473,7 +475,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
         *self_index -= 1;
         *child_index += prev_len;
     } else {
-        cur.push_front(prev.pop_back());
+        cur.rotate_from_previous(prev);
         *child_index += 1;
     }
 }
@@ -481,7 +483,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
 unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(mut parent: InternalMut<T, B, C>) {
     let (cur, next) = parent.raw_children_mut().pair_at(0);
     let mut cur = unsafe { LeafMut::new(cur) };
-    let mut next = unsafe { LeafMut::new(next) };
+    let next = unsafe { LeafMut::new(next) };
 
     if next.is_almost_underfull() {
         let mut next = parent.children_mut().remove(1);
@@ -489,7 +491,7 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(mut parent: Int
         let mut cur = unsafe { LeafMut::new(parent.child_mut(0)) };
         unsafe { cur.append_from(next) }
     } else {
-        cur.push_back(next.pop_front());
+        cur.rotate_from_next(next);
     }
 }
 
@@ -501,12 +503,10 @@ unsafe fn combine_internals_head_underfull<T, const B: usize, const C: usize>(
     let next = unsafe { InternalMut::new(next) };
 
     if next.is_almost_underfull() {
-        unsafe {
-            let mut next = parent.children_mut().remove(1);
-            let next = InternalMut::new(&mut next);
-            let mut cur = InternalMut::new(parent.child_mut(0));
-            cur.append_from(next);
-        }
+        let mut next = parent.children_mut().remove(1);
+        let next = unsafe { InternalMut::new(&mut next) };
+        let mut cur = unsafe { InternalMut::new(parent.child_mut(0)) };
+        unsafe { cur.append_from(next) }
     } else {
         unsafe { cur.rotate_from_next(next) }
     }

@@ -36,7 +36,7 @@ pub fn slice_shift_right<T>(slice: &mut [T], new_start: T) -> T {
 /// really are in an initialized state.
 /// Calling this when the content is not yet fully initialized causes undefined behavior.
 #[inline]
-pub unsafe fn slice_assume_init_ref<T>(slice: &[MaybeUninit<T>]) -> &[T] {
+pub const unsafe fn slice_assume_init_ref<T>(slice: &[MaybeUninit<T>]) -> &[T] {
     // SAFETY: similar to safety notes for `slice_get_ref`, but we have a
     // mutable reference which is also guaranteed to be valid for writes.
     unsafe { &*(slice as *const [MaybeUninit<T>] as *const [T]) }

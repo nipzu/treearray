@@ -5,9 +5,7 @@ use core::{
 
 use alloc::boxed::Box;
 
-use crate::utils::{
-    slice_assume_init_mut, slice_assume_init_ref, slice_shift_right,
-};
+use crate::utils::{slice_assume_init_mut, slice_assume_init_ref, slice_shift_right};
 
 // use crate::panics::panic_length_overflow;
 
