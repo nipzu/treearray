@@ -393,7 +393,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             let mut leaf = self.leaf_mut();
 
             assert!(leaf_index < leaf.len(), "out of bounds");
-            let ret = leaf.remove(leaf_index);
+            let ret = leaf.values_mut().remove(leaf_index);
             let leaf_underfull = leaf.is_underfull();
 
             let mut parent = self.path_internal_mut(1);
@@ -422,7 +422,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
             // TODO: better
             assert!(index < leaf.len(), "out of bounds");
-            let ret = leaf.remove(index);
+            let ret = leaf.values_mut().remove(index);
             if leaf.len() == 0 {
                 leaf.free();
                 self.path_mut().pop_back();
@@ -471,7 +471,7 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
         let cur = unsafe { LeafMut::new(&mut cur) };
         let mut prev = unsafe { LeafMut::new(parent.child_mut(*self_index - 1)) };
 
-        unsafe { prev.append_from(cur) }
+        prev.append_from(cur);
         *self_index -= 1;
         *child_index += prev_len;
     } else {
@@ -489,7 +489,7 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(mut parent: Int
         let mut next = parent.children_mut().remove(1);
         let next = unsafe { LeafMut::new(&mut next) };
         let mut cur = unsafe { LeafMut::new(parent.child_mut(0)) };
-        unsafe { cur.append_from(next) }
+        cur.append_from(next);
     } else {
         cur.rotate_from_next(next);
     }

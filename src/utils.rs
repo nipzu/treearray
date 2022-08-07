@@ -4,28 +4,6 @@ use core::{
     ptr,
 };
 
-pub fn slice_shift_left<T>(slice: &mut [T], new_end: T) -> T {
-    assert!(!slice.is_empty());
-    unsafe {
-        let slice_ptr = slice.as_mut_ptr();
-        let first = slice_ptr.read();
-        ptr::copy(slice_ptr.add(1), slice_ptr, slice.len() - 1);
-        slice_ptr.add(slice.len() - 1).write(new_end);
-        first
-    }
-}
-
-pub fn slice_shift_right<T>(slice: &mut [T], new_start: T) -> T {
-    assert!(!slice.is_empty());
-    unsafe {
-        let slice_ptr = slice.as_mut_ptr();
-        let last = slice_ptr.add(slice.len() - 1).read();
-        ptr::copy(slice_ptr, slice_ptr.add(1), slice.len() - 1);
-        slice_ptr.write(new_start);
-        last
-    }
-}
-
 // TODO: use functions from core when https://github.com/rust-lang/rust/issues/63569 stabilises
 
 /// Assuming all the elements are initialized, get a mutable slice to them.
@@ -68,18 +46,22 @@ impl<'a, T, const N: usize> ArrayVecMut<'a, T, N> {
     }
 
     pub fn insert(&mut self, index: usize, value: T) {
-        assert!(index <= *self.len);
+        assert!(*self.len < N);
         *self.len += 1;
-        slice_shift_right(&mut self.array[index..*self.len], MaybeUninit::new(value));
+        let tail = &mut self.array[index..*self.len];
+        let tail_ptr = tail.as_mut_ptr().cast::<T>();
+        unsafe { ptr::copy(tail_ptr, tail_ptr.add(1), tail.len() - 1) };
+        unsafe { tail_ptr.write(value) };
     }
 
     pub fn remove(&mut self, index: usize) -> T {
         assert_ne!(*self.len, 0);
         *self.len -= 1;
-        unsafe {
-            slice_shift_left(&mut self.array[index..=*self.len], MaybeUninit::uninit())
-                .assume_init()
-        }
+        let tail = &mut self.array[index..=*self.len];
+        let tail_ptr = tail.as_mut_ptr().cast::<T>();
+        let ret = unsafe { tail_ptr.read() };
+        unsafe { ptr::copy(tail_ptr.add(1), tail_ptr, tail.len() - 1) };
+        ret
     }
 
     pub fn push_front(&mut self, value: T) {
@@ -96,6 +78,25 @@ impl<'a, T, const N: usize> ArrayVecMut<'a, T, N> {
 
     pub fn pop_back(&mut self) -> T {
         self.remove(*self.len - 1)
+    }
+
+    pub fn split(&mut self, index: usize, other: ArrayVecMut<T, N>) {
+        assert!(index <= *self.len);
+        let tail_len = *self.len - index;
+        let src = unsafe { self.array.as_ptr().add(index) };
+        let dst = other.array.as_mut_ptr();
+        unsafe { ptr::copy_nonoverlapping(src, dst, tail_len) };
+        *self.len = index;
+        *other.len = tail_len;
+    }
+
+    pub fn append(&mut self, other: ArrayVecMut<T, N>) {
+        assert!(*self.len + *other.len <= N);
+        let src = other.array.as_ptr();
+        let dst = unsafe { self.array.as_mut_ptr().add(*self.len) };
+        unsafe { ptr::copy_nonoverlapping(src, dst, *other.len) };
+        *self.len += *other.len;
+        *other.len = 0;
     }
 }
 

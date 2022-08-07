@@ -123,5 +123,9 @@ fn bench_insert(c: &mut Criterion) {
     }
 }
 
-criterion_group!(benches, bench_get, bench_insert);
+criterion_group!(
+    name = benches;
+    config = Criterion::default().sample_size(500);
+    targets = bench_get, bench_insert
+);
 criterion_main!(benches);

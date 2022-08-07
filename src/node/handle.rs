@@ -1,10 +1,10 @@
-use core::{hint::unreachable_unchecked, mem::MaybeUninit, ptr};
+use core::{hint::unreachable_unchecked, mem::MaybeUninit};
 
 use alloc::boxed::Box;
 
 use crate::{
     node::{Children, Node},
-    utils::{slice_assume_init_mut, slice_shift_right, ArrayVecMut},
+    utils::ArrayVecMut,
 };
 
 pub struct Leaf<'a, T, const B: usize, const C: usize> {
@@ -52,8 +52,6 @@ pub struct LeafMut<'a, T, const B: usize, const C: usize> {
 }
 
 impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
-    const UNINIT: MaybeUninit<T> = MaybeUninit::uninit();
-
     /// # Safety:
     ///
     /// `node` must be a leaf node i.e. `node.len() <= C`.
@@ -65,11 +63,6 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     pub fn len(&self) -> usize {
         self.node.len()
-    }
-
-    pub unsafe fn set_len(&mut self, new_len: usize) {
-        debug_assert!(new_len <= C);
-        self.node.length = new_len;
     }
 
     pub fn free(mut self) {
@@ -89,26 +82,9 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         self.values_mut().push_back(next.values_mut().pop_front());
     }
 
-    pub unsafe fn append_from(&mut self, mut other: Self) {
-        // TODO: debug_asserts
-        let self_len = self.len();
-        let other_len = other.len();
-        debug_assert!(self_len + other_len <= C);
-        let self_ptr = unsafe { self.values_maybe_uninit_mut().as_mut_ptr().add(self_len) };
-        let other_ptr = other.values_maybe_uninit_mut().as_ptr();
-
-        unsafe {
-            ptr::copy_nonoverlapping(other_ptr, self_ptr, other_len);
-            self.set_len(self_len + other_len);
-            other.set_len(0);
-            other.free();
-        }
-    }
-
-    pub fn raw_values_mut(&mut self) -> &mut [T] {
-        let len = self.len();
-        debug_assert!(len <= C);
-        unsafe { slice_assume_init_mut(self.values_maybe_uninit_mut().get_unchecked_mut(..len)) }
+    pub fn append_from(&mut self, mut other: Self) {
+        self.values_mut().append(other.values_mut());
+        other.free();
     }
 
     pub fn values_maybe_uninit_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
@@ -152,61 +128,29 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
                     SplitResult::Right(self.split_and_insert_right(index, value))
                 })
             } else {
-                self.insert_fitting(index, value);
+                self.values_mut().insert(index, value);
                 InsertResult::Fit
             }
         }
     }
 
-    fn insert_fitting(&mut self, index: usize, value: T) {
-        self.values_mut().insert(index, value);
-    }
-
-    pub fn remove(&mut self, index: usize) -> T {
-        self.values_mut().remove(index)
-    }
-
     unsafe fn split_and_insert_left(&mut self, index: usize, value: T) -> Node<T, B, C> {
-        let mut new_box = Box::new([Self::UNINIT; C]);
         let split_index = C / 2;
-        let tail_len = C - split_index;
-
-        unsafe {
-            let split_ptr = self.raw_values_mut().as_mut_ptr().add(split_index);
-            let box_ptr = new_box.as_mut_ptr();
-            ptr::copy_nonoverlapping(split_ptr, box_ptr.cast::<T>(), tail_len);
-            slice_shift_right(
-                &mut self.values_maybe_uninit_mut()[index..=split_index],
-                MaybeUninit::new(value),
-            );
-
-            self.set_len(split_index + 1);
-            Node::from_values(tail_len, new_box)
-        }
+        let mut new_node = Node::empty_leaf();
+        let mut new_leaf = unsafe { LeafMut::new(&mut new_node) };
+        let mut values = self.values_mut();
+        values.split(split_index, new_leaf.values_mut());
+        values.insert(index, value);
+        new_node
     }
 
     unsafe fn split_and_insert_right(&mut self, index: usize, value: T) -> Node<T, B, C> {
-        let mut new_box = Box::new([Self::UNINIT; C]);
         let split_index = (C - 1) / 2 + 1;
-        let tail_len = C - split_index;
-
-        let tail_start_len = index - split_index;
-        let tail_end_len = tail_len - tail_start_len;
-
-        unsafe {
-            let split_ptr = self.raw_values_mut().as_mut_ptr().add(split_index);
-            let box_ptr = new_box.as_mut_ptr();
-            ptr::copy_nonoverlapping(split_ptr, box_ptr.cast::<T>(), tail_start_len);
-            ptr::write(box_ptr.add(tail_start_len).cast::<T>(), value);
-            ptr::copy_nonoverlapping(
-                split_ptr.add(tail_start_len),
-                box_ptr.cast::<T>().add(tail_start_len + 1),
-                tail_end_len,
-            );
-
-            self.set_len(split_index);
-            Node::from_values(tail_len + 1, new_box)
-        }
+        let mut new_node = Node::empty_leaf();
+        let mut new_leaf = unsafe { LeafMut::new(&mut new_node) };
+        self.values_mut().split(split_index, new_leaf.values_mut());
+        new_leaf.values_mut().insert(index - self.len(), value);
+        new_node
     }
 }
 
@@ -320,8 +264,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn children_mut(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {
-        let Children { children, len } = unsafe { self.node.ptr.children.as_mut() };
-        unsafe { ArrayVecMut::new(children, len) }
+        self.raw_children_mut().as_array_vec()
     }
 
     pub fn raw_children_mut(&mut self) -> &mut Children<T, B, C> {
@@ -403,7 +346,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         let mut new_sibling;
 
         new_sibling = self.raw_children_mut().split(split_index);
-        new_sibling.insert(index - split_index, node);
+        new_sibling.as_array_vec().insert(index - split_index, node);
 
         let new_self_len = self.children().sum_lens();
         let new_node_len = self.len() - new_self_len + 1;
@@ -419,8 +362,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub unsafe fn append_from(&mut self, mut other: InternalMut<T, B, C>) {
-        self.raw_children_mut()
-            .merge_with_next(other.raw_children_mut());
+        self.children_mut().append(other.children_mut());
 
         self.set_len(self.len() + other.len());
         other.free();

@@ -1,11 +1,8 @@
-use core::{
-    mem::MaybeUninit,
-    ptr::{self, NonNull},
-};
+use core::{mem::MaybeUninit, ptr::NonNull};
 
 use alloc::boxed::Box;
 
-use crate::utils::{slice_assume_init_mut, slice_assume_init_ref, slice_shift_right};
+use crate::utils::{slice_assume_init_mut, slice_assume_init_ref, ArrayVecMut};
 
 // use crate::panics::panic_length_overflow;
 
@@ -58,6 +55,10 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
         unsafe { slice_assume_init_mut(self.children.get_unchecked_mut(..self.len)) }
     }
 
+    pub fn as_array_vec(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {
+        unsafe { ArrayVecMut::new(&mut self.children, &mut self.len) }
+    }
+
     pub fn pair_at(&mut self, index: usize) -> (&mut Node<T, B, C>, &mut Node<T, B, C>) {
         if let [ref mut fst, ref mut snd, ..] = self.children_mut()[index..] {
             (fst, snd)
@@ -66,42 +67,11 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
         }
     }
 
-    pub fn insert(&mut self, index: usize, value: Node<T, B, C>) {
-        assert!(self.len < B);
-        assert!(index <= self.len);
-        self.len += 1;
-        slice_shift_right(&mut self.children[index..self.len], MaybeUninit::new(value));
-    }
-
     pub fn split(&mut self, index: usize) -> Box<Self> {
-        assert!(self.len <= B);
-        assert!(index <= self.len);
         let mut new_children = Box::new(Self::new());
-        // use B insted of self.len
-        // self.len should be B or B - 1
-        new_children.len = self.len - index;
-        self.len = index;
-        unsafe {
-            ptr::copy_nonoverlapping(
-                self.children.as_ptr().add(index),
-                new_children.children.as_mut_ptr(),
-                B - index,
-            );
-        }
+        self.as_array_vec()
+            .split(index, new_children.as_array_vec());
         new_children
-    }
-
-    pub fn merge_with_next(&mut self, next: &mut Self) {
-        assert!(self.len + next.len <= B);
-        unsafe {
-            ptr::copy_nonoverlapping(
-                next.children.as_ptr(),
-                self.children.as_mut_ptr().add(self.len),
-                next.len,
-            );
-        }
-        self.len += next.len;
-        next.len = 0;
     }
 
     pub fn sum_lens(&self) -> usize {
@@ -141,6 +111,10 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         }
 
         Self::from_children(length, boxed_children)
+    }
+
+    fn empty_leaf() -> Self {
+        unsafe { Self::from_values(0, Box::new([Self::UNINIT_T; C])) }
     }
 
     /// # Safety
