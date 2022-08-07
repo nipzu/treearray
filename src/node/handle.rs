@@ -65,7 +65,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         self.node.len()
     }
 
-    pub fn free(mut self) {
+    pub unsafe fn free(mut self) {
         debug_assert_eq!(self.len(), 0);
         unsafe { Box::from_raw(self.values_maybe_uninit_mut()) };
     }
@@ -80,11 +80,6 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     pub fn rotate_from_next(&mut self, mut next: LeafMut<T, B, C>) {
         self.values_mut().push_back(next.values_mut().pop_front());
-    }
-
-    pub fn append_from(&mut self, mut other: Self) {
-        self.values_mut().append(other.values_mut());
-        other.free();
     }
 
     pub fn values_maybe_uninit_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
@@ -277,7 +272,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         self.node
     }
 
-    pub fn free(self) {
+    pub unsafe fn free(self) {
         debug_assert_eq!(self.children().children().len(), 0);
         unsafe { Box::from_raw(self.into_children_mut()) };
     }
@@ -363,7 +358,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
         self.children_mut().append(other.children_mut());
 
         self.set_len(self.len() + other.len());
-        other.free();
+        unsafe { other.free() };
     }
 
     pub unsafe fn rotate_from_next(&mut self, mut next: InternalMut<T, B, C>) {

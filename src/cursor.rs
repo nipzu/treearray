@@ -468,10 +468,11 @@ unsafe fn combine_leaves_tail<T, const B: usize, const C: usize>(
     if prev.is_almost_underfull() {
         let prev_len = prev.len();
         let mut cur = parent.children_mut().remove(*self_index);
-        let cur = unsafe { LeafMut::new(&mut cur) };
+        let mut cur = unsafe { LeafMut::new(&mut cur) };
         let mut prev = unsafe { LeafMut::new(parent.child_mut(*self_index - 1)) };
 
-        prev.append_from(cur);
+        prev.values_mut().append(cur.values_mut());
+        unsafe { cur.free() };
         *self_index -= 1;
         *child_index += prev_len;
     } else {
@@ -487,9 +488,10 @@ unsafe fn combine_leaves_head<T, const B: usize, const C: usize>(mut parent: Int
 
     if next.is_almost_underfull() {
         let mut next = parent.children_mut().remove(1);
-        let next = unsafe { LeafMut::new(&mut next) };
+        let mut next = unsafe { LeafMut::new(&mut next) };
         let mut cur = unsafe { LeafMut::new(parent.child_mut(0)) };
-        cur.append_from(next);
+        cur.values_mut().append(next.values_mut());
+        unsafe { next.free() };
     } else {
         cur.rotate_from_next(next);
     }
