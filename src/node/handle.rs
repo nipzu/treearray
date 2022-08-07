@@ -205,19 +205,19 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 
     pub fn is_singleton(&self) -> bool {
-        self.count_children() == 1
+        self.children().len == 1
     }
 
     fn is_full(&self) -> bool {
-        self.count_children() == B
+        self.children().len == B
     }
 
     pub fn is_underfull(&self) -> bool {
-        self.count_children() <= Self::UNDERFULL_LEN
+        self.children().len <= Self::UNDERFULL_LEN
     }
 
     pub fn is_almost_underfull(&self) -> bool {
-        self.count_children() <= Self::UNDERFULL_LEN + 1
+        self.children().len <= Self::UNDERFULL_LEN + 1
     }
 
     pub fn len(&self) -> usize {
