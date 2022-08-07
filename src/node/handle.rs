@@ -120,21 +120,19 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     pub fn insert_value(&mut self, index: usize, value: T) -> InsertResult<T, B, C> {
         assert!(index <= self.len());
 
-        unsafe {
-            if self.is_full() {
-                InsertResult::Split(if index <= C / 2 {
-                    SplitResult::Left(self.split_and_insert_left(index, value))
-                } else {
-                    SplitResult::Right(self.split_and_insert_right(index, value))
-                })
+        if self.is_full() {
+            InsertResult::Split(if index <= C / 2 {
+                SplitResult::Left(self.split_and_insert_left(index, value))
             } else {
-                self.values_mut().insert(index, value);
-                InsertResult::Fit
-            }
+                SplitResult::Right(self.split_and_insert_right(index, value))
+            })
+        } else {
+            self.values_mut().insert(index, value);
+            InsertResult::Fit
         }
     }
 
-    unsafe fn split_and_insert_left(&mut self, index: usize, value: T) -> Node<T, B, C> {
+    fn split_and_insert_left(&mut self, index: usize, value: T) -> Node<T, B, C> {
         let split_index = C / 2;
         let mut new_node = Node::empty_leaf();
         let mut new_leaf = unsafe { LeafMut::new(&mut new_node) };
@@ -144,7 +142,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         new_node
     }
 
-    unsafe fn split_and_insert_right(&mut self, index: usize, value: T) -> Node<T, B, C> {
+    fn split_and_insert_right(&mut self, index: usize, value: T) -> Node<T, B, C> {
         let split_index = (C - 1) / 2 + 1;
         let mut new_node = Node::empty_leaf();
         let mut new_leaf = unsafe { LeafMut::new(&mut new_node) };
