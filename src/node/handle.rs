@@ -117,33 +117,23 @@ pub mod height {
     unsafe impl Internal for One {}
     unsafe impl Internal for TwoOrMore {}
 
-    // pub unsafe trait Exact {
-    //     type Child;
-    // }
-    // unsafe impl Exact for One {
-    //     type Child = Zero;
-    // }
-    // unsafe impl<'id> Exact for BrandedTwoOrMore<'id> {
-    //     type Child = ChildOf<Self>;
-    // }
-
-    pub unsafe trait ExactOneOrMore: Internal + Sized {
+    pub unsafe trait ExactInternal: Internal + Sized {
         type ChildHeight;
         unsafe fn make_child_height(&self) -> Self::ChildHeight;
     }
-    unsafe impl<'id> ExactOneOrMore for BrandedTwoOrMore<'id> {
+    unsafe impl<'id> ExactInternal for BrandedTwoOrMore<'id> {
         type ChildHeight = ChildOf<Self>;
         unsafe fn make_child_height(&self) -> Self::ChildHeight {
             ChildOf(PhantomData)
         }
     }
-    unsafe impl<'id> ExactOneOrMore for ChildOf<BrandedTwoOrMore<'id>> {
+    unsafe impl<'id> ExactInternal for ChildOf<BrandedTwoOrMore<'id>> {
         type ChildHeight = ChildOf<Self>;
         unsafe fn make_child_height(&self) -> Self::ChildHeight {
             ChildOf(PhantomData)
         }
     }
-    unsafe impl ExactOneOrMore for One {
+    unsafe impl ExactInternal for One {
         type ChildHeight = Zero;
         unsafe fn make_child_height(&self) -> Self::ChildHeight {
             Zero
@@ -384,7 +374,7 @@ unsafe impl<'a, T, const B: usize, const C: usize> ExactHeightNode
 
 unsafe impl<'a, H, T, const B: usize, const C: usize> ExactHeightNode for NodeMut<'a, H, T, B, C>
 where
-    H: height::ExactOneOrMore,
+    H: height::ExactInternal,
 {
     type Child = OwnedNode<H::ChildHeight, T, B, C>;
     const UNDERFULL_LEN: usize = (B - 1) / 2;
@@ -413,7 +403,7 @@ where
 
 impl<'a, H, T, const B: usize, const C: usize> NodeMut<'a, H, T, B, C>
 where
-    H: height::ExactOneOrMore,
+    H: height::ExactInternal,
 {
     pub fn child_pair_at(&mut self, index: usize) -> [NodeMut<H::ChildHeight, T, B, C>; 2] {
         let (h1, h2) = unsafe {
