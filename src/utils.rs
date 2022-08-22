@@ -64,16 +64,8 @@ impl<'a, T, const N: usize> ArrayVecMut<'a, T, N> {
         ret
     }
 
-    pub fn push_front(&mut self, value: T) {
-        self.insert(0, value);
-    }
-
     pub fn push_back(&mut self, value: T) {
         self.insert(*self.len, value);
-    }
-
-    pub fn pop_front(&mut self) -> T {
-        self.remove(0)
     }
 
     pub fn pop_back(&mut self) -> T {

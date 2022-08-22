@@ -88,7 +88,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         self.length
     }
 
-    fn from_children(length: usize, children: Box<Children<T, B, C>>) -> Self {
+    unsafe fn from_children(length: usize, children: Box<Children<T, B, C>>) -> Self {
         debug_assert_eq!(children.sum_lens(), length);
         Self {
             length,
@@ -110,7 +110,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
             boxed_children.children[i].write(child);
         }
 
-        Self::from_children(length, boxed_children)
+        unsafe { Self::from_children(length, boxed_children) }
     }
 
     fn empty_leaf() -> Self {
