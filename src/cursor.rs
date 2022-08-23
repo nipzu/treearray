@@ -313,8 +313,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         assert!(leaf_index < leaf.len(), "out of bounds");
         let ret = leaf.remove_child(leaf_index);
 
-        let leaf_index_past_end_of_leaf = leaf.len() == leaf_index;
-
         if height == 1 {
             if leaf.len() == 0 {
                 unsafe { OwnedNode::new_leaf(self.path_mut().pop_back().read()).free() };
@@ -370,14 +368,14 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                         cur_node = parent.child_mut(cur_index);
                         self.path_mut()[height - 1] = cur_node.raw_child_mut(child_index);
                     }
-                    self.path_mut()[height] = cur_node.into_node();
+                    self.path_mut()[height] = cur_node.into_node_ptr();
                 });
             }
         }
 
         // move cursor to start of next leaf if pointing past the end of the current leaf
         unsafe {
-            if leaf_index_past_end_of_leaf {
+            if self.leaf().unwrap().len() == leaf_index {
                 for height in 1..self.height() {
                     let (mut parent, parent_index) = self.path_node_and_index_of_child(height);
                     if parent_index + 1 < parent.count_children() {
