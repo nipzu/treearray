@@ -220,7 +220,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
     fn path_internal_mut(&mut self, height: usize) -> InternalMut<T, B, C> {
         assert_ne!(0, height);
-        unsafe { InternalMut::new(&mut *self.path()[height]) }
+        unsafe { InternalMut::new(self.path()[height]) }
     }
 
     fn path_internal(&self, height: usize) -> Internal<T, B, C> {
@@ -327,7 +327,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             let leaf_underfull = leaf.is_underfull();
             let mut self_index = self.index_of_path_node(0);
 
-            let mut parent = NodeMut::new_parent_of_leaf(&mut *self.path()[1]);
+            let mut parent = NodeMut::new_parent_of_leaf(self.path()[1]);
             parent.set_len(parent.len() - 1);
 
             if leaf_underfull {
@@ -336,7 +336,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 } else {
                     parent.handle_underfull_child_head();
                 }
-                self.path_mut()[0] = parent.raw_child_mut(self_index);
+                self.path_mut()[0] = parent.child_mut(self_index).into_node_ptr();
                 self.leaf_index = leaf_index;
             }
         }
@@ -349,7 +349,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 let cur_ptr = self.path()[height];
                 let child_ptr = self.path()[height - 1];
 
-                let mut parent = NodeMut::new_parent_of_internal(&mut *self.path()[height + 1]);
+                let mut parent = NodeMut::new_parent_of_internal(self.path()[height + 1]);
                 let mut cur_index = parent.index_of_child_ptr(cur_ptr);
                 parent.set_len(parent.len() - 1);
 
@@ -366,7 +366,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                             parent.handle_underfull_child_head();
                         }
                         cur_node = parent.child_mut(cur_index);
-                        self.path_mut()[height - 1] = cur_node.raw_child_mut(child_index);
+                        self.path_mut()[height - 1] = cur_node.child_mut(child_index).into_node_ptr();
                     }
                     self.path_mut()[height] = cur_node.into_node_ptr();
                 });
@@ -383,7 +383,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                         for h in (0..height).rev() {
                             self.path_mut()[h] = cur;
                             if h > 0 {
-                                cur = InternalMut::new(&mut *cur).raw_child_mut(0);
+                                cur = InternalMut::new(cur).raw_child_mut(0);
                             }
                         }
                         self.leaf_index = 0;

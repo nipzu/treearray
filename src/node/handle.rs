@@ -206,8 +206,8 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a leaf node i.e. `node.len() <= C`.
-    pub unsafe fn new_leaf(node: &'a mut Node<T, B, C>) -> NodeMut<'a, height::Zero, T, B, C> {
-        debug_assert!(node.len() <= C);
+    pub unsafe fn new_leaf(node: *mut Node<T, B, C>) -> NodeMut<'a, height::Zero, T, B, C> {
+        debug_assert!(unsafe { (*node).len() <= C });
 
         NodeMut {
             node,
@@ -278,7 +278,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 }
 
 impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::One, T, B, C> {
-    pub unsafe fn new_parent_of_leaf(node: &'a mut Node<T, B, C>) -> Self {
+    pub unsafe fn new_parent_of_leaf(node: *mut Node<T, B, C>) -> Self {
         Self {
             node,
             height: height::One,
@@ -288,7 +288,7 @@ impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::One, T, B, C> {
 }
 
 impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::TwoOrMore, T, B, C> {
-    pub unsafe fn new_parent_of_internal(node: &'a mut Node<T, B, C>) -> Self {
+    pub unsafe fn new_parent_of_internal(node: *mut Node<T, B, C>) -> Self {
         Self {
             node,
             height: height::TwoOrMore,
@@ -481,7 +481,7 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
-    pub unsafe fn new(node: &'a mut Node<T, B, C>) -> Self {
+    pub unsafe fn new(node: *mut Node<T, B, C>) -> Self {
         Self {
             node,
             height: height::Positive,
