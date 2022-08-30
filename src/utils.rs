@@ -2,6 +2,7 @@ use core::{
     mem::MaybeUninit,
     ops::{Index, IndexMut},
     ptr,
+    slice,
 };
 
 // TODO: use functions from core when https://github.com/rust-lang/rust/issues/63569 stabilises
@@ -34,79 +35,108 @@ pub unsafe fn slice_assume_init_mut<T>(slice: &mut [MaybeUninit<T>]) -> &mut [T]
     unsafe { &mut *(slice as *mut [MaybeUninit<T>] as *mut [T]) }
 }
 
-pub struct ArrayVecMut<'a, T, const N: usize> {
-    array: &'a mut [MaybeUninit<T>; N],
-    len: &'a mut usize,
+pub struct ArrayVecMut<T, const N: usize> {
+    array: *mut T,
+    len: *mut usize,
 }
 
-impl<'a, T, const N: usize> ArrayVecMut<'a, T, N> {
-    pub unsafe fn new(array: &'a mut [MaybeUninit<T>; N], len: &'a mut usize) -> Self {
-        debug_assert!(*len <= N);
-        Self { array, len }
+impl<T, const N: usize> ArrayVecMut<T, N> {
+    pub unsafe fn new(array: *mut [MaybeUninit<T>; N], len: *mut usize) -> Self {
+        debug_assert!(unsafe { *len <= N });
+        Self { array: array.cast(), len }
     }
 
     pub fn insert(&mut self, index: usize, value: T) {
-        assert!(*self.len < N);
-        *self.len += 1;
-        let tail = &mut self.array[index..*self.len];
-        let tail_ptr = tail.as_mut_ptr().cast::<T>();
-        unsafe { ptr::copy(tail_ptr, tail_ptr.add(1), tail.len() - 1) };
-        unsafe { tail_ptr.write(value) };
+        let len = unsafe { *self.len };
+        assert!(len < N);
+        assert!(index <= len);
+        unsafe {
+            let tail_ptr = self.array.add(index);
+            ptr::copy(tail_ptr, tail_ptr.add(1), len - index);
+            tail_ptr.write(value);
+            *self.len += 1;
+        }
     }
 
     pub fn remove(&mut self, index: usize) -> T {
-        assert_ne!(*self.len, 0);
-        *self.len -= 1;
-        let tail = &mut self.array[index..=*self.len];
-        let tail_ptr = tail.as_mut_ptr().cast::<T>();
-        let ret = unsafe { tail_ptr.read() };
-        unsafe { ptr::copy(tail_ptr.add(1), tail_ptr, tail.len() - 1) };
-        ret
+        let len = unsafe { *self.len };
+        assert_ne!(len, 0);
+        assert!(index < len);
+        unsafe {
+            let tail_ptr = self.array.add(index);
+            let ret = tail_ptr.read();
+            ptr::copy(tail_ptr.add(1), tail_ptr, len - index - 1);
+            *self.len -= 1;
+            ret
+        }
     }
 
     pub fn push_back(&mut self, value: T) {
-        self.insert(*self.len, value);
+        self.insert(unsafe { *self.len }, value);
     }
 
     pub fn pop_back(&mut self) -> T {
-        self.remove(*self.len - 1)
+        self.remove(unsafe { *self.len  - 1 })
     }
 
     pub fn split(&mut self, index: usize, other: ArrayVecMut<T, N>) {
-        assert!(index <= *self.len);
-        let tail_len = *self.len - index;
-        let src = unsafe { self.array.as_ptr().add(index) };
-        let dst = other.array.as_mut_ptr();
+        let len = unsafe {*self.len};
+        assert!(index <= len);
+        let tail_len = len - index;
+        let src = unsafe { self.array.add(index) };
+        let dst = other.array;
         unsafe { ptr::copy_nonoverlapping(src, dst, tail_len) };
-        *self.len = index;
-        *other.len = tail_len;
+        unsafe {
+            *self.len = index;
+            *other.len = tail_len;
+        }
     }
 
     pub fn append(&mut self, other: ArrayVecMut<T, N>) {
-        assert!(*self.len + *other.len <= N);
-        let src = other.array.as_ptr();
-        let dst = unsafe { self.array.as_mut_ptr().add(*self.len) };
+        assert!(unsafe {*self.len + *other.len <= N});
+        let src = other.array;
+        let dst = unsafe { self.array.add(*self.len) };
         unsafe { ptr::copy_nonoverlapping(src, dst, *other.len) };
-        *self.len += *other.len;
-        *other.len = 0;
+        unsafe {
+            *self.len += *other.len;
+            *other.len = 0;
+        }
     }
 }
 
-impl<'a, T, const N: usize, I> Index<I> for ArrayVecMut<'a, T, N>
+impl<T, const N: usize, I> Index<I> for ArrayVecMut<T, N>
 where
     [T]: Index<I>,
 {
     type Output = <[T] as Index<I>>::Output;
     fn index(&self, index: I) -> &Self::Output {
-        unsafe { slice_assume_init_ref(&self.array[..*self.len]).index(index) }
+        unsafe { slice::from_raw_parts(self.array, *self.len).index(index) }
     }
 }
 
-impl<'a, T, const N: usize, I> IndexMut<I> for ArrayVecMut<'a, T, N>
+impl<T, const N: usize, I> IndexMut<I> for ArrayVecMut<T, N>
 where
     [T]: IndexMut<I>,
 {
     fn index_mut(&mut self, index: I) -> &mut Self::Output {
-        unsafe { slice_assume_init_mut(&mut self.array[..*self.len]).index_mut(index) }
+        unsafe { slice::from_raw_parts_mut(self.array, *self.len).index_mut(index) }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_array_vec_insert_front() {
+        let mut a: [MaybeUninit<usize>; 100] = [MaybeUninit::uninit(); 100];
+        let mut len = 0;
+        let mut r = unsafe { ArrayVecMut::new(&mut a, &mut len) };
+        
+        for x in 0..50 {
+            r.insert(0, x);
+        }
+
+        assert_eq!(&(core::array::from_fn(|i| 49 - i) as [usize; 50]), &r[..])
     }
 }

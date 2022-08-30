@@ -503,6 +503,9 @@ mod tests {
     #[test]
     fn test_bvec_covariant() {
         fn foo<'a>(_x: BTreeVec<&'a i32>, _y: &'a i32) {}
+        fn _assert_covariant<'b, 'a: 'b>(x: BTreeVec<&'a i32>) -> BTreeVec<&'b i32> {
+            x
+        }
 
         let x = BTreeVec::<&'static i32>::new();
         let v = 123;

@@ -35,6 +35,9 @@ union NodePtr<T, const B: usize, const C: usize> {
 pub struct Children<T, const B: usize, const C: usize> {
     children: [MaybeUninit<Node<T, B, C>>; B],
     len: usize,
+    parent_children_cache: MaybeUninit<NonNull<Self>>,
+    // TODO: no pub
+    pub owning_node_cache: MaybeUninit<NonNull<Node<T, B, C>>>,
 }
 
 impl<T, const B: usize, const C: usize> Children<T, B, C> {
@@ -44,6 +47,8 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
         Self {
             children: [Self::UNINIT_NODE; B],
             len: 0,
+            parent_children_cache: MaybeUninit::uninit(),
+            owning_node_cache: MaybeUninit::uninit(),
         }
     }
 
@@ -57,14 +62,6 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
 
     pub fn as_array_vec(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {
         unsafe { ArrayVecMut::new(&mut self.children, &mut self.len) }
-    }
-
-    pub fn pair_at(&mut self, index: usize) -> (&mut Node<T, B, C>, &mut Node<T, B, C>) {
-        if let [ref mut fst, ref mut snd, ..] = self.children_mut()[index..] {
-            (fst, snd)
-        } else {
-            unreachable!()
-        }
     }
 
     pub fn split(&mut self, index: usize) -> Box<Self> {
@@ -81,7 +78,6 @@ impl<T, const B: usize, const C: usize> Children<T, B, C> {
 
 impl<T, const B: usize, const C: usize> Node<T, B, C> {
     const UNINIT_T: MaybeUninit<T> = MaybeUninit::uninit();
-    const UNINIT_SELF: MaybeUninit<Self> = MaybeUninit::uninit();
 
     #[inline]
     pub const fn len(&self) -> usize {
@@ -99,45 +95,29 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     pub fn from_child_array<const N: usize>(children: [Self; N]) -> Self {
-        let mut boxed_children = Box::new(Children {
-            children: [Self::UNINIT_SELF; B],
-            len: 0,
-        });
+        let mut boxed_children = Box::new(Children::new());
         let mut length = 0;
-        for (i, child) in children.into_iter().enumerate() {
+        for child in children {
             length += child.len();
-            boxed_children.len += 1;
-            boxed_children.children[i].write(child);
+            boxed_children.as_array_vec().push_back(child);
         }
 
         unsafe { Self::from_children(length, boxed_children) }
     }
 
     fn empty_leaf() -> Self {
-        unsafe { Self::from_values(0, Box::new([Self::UNINIT_T; C])) }
-    }
-
-    /// # Safety
-    ///
-    /// The first `length` elements of `values` must be initialized and safe to use.
-    /// Note that this implies that `length <= C`.
-    unsafe fn from_values(length: usize, values: Box<[MaybeUninit<T>; C]>) -> Self {
-        assert!(length <= C);
-
-        // SAFETY: `length <= C`, so we return a leaf node
-        // which has the same safety invariants as this function
+        let values = NonNull::from(Box::leak(Box::new([Self::UNINIT_T; C])));
         Self {
-            length,
-            ptr: NodePtr {
-                values: NonNull::from(Box::leak(values)),
-            },
+            length: 0,
+            ptr: NodePtr { values },
         }
     }
 
     pub fn from_value(value: T) -> Self {
-        let mut boxed_values = Box::new([Self::UNINIT_T; C]);
-        boxed_values[0].write(value);
-        unsafe { Self::from_values(1, boxed_values) }
+        let mut leaf = Self::empty_leaf();
+        leaf.length = 1;
+        unsafe { leaf.ptr.values.as_mut()[0].write(value) };
+        leaf
     }
 }
 
