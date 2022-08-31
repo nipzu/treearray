@@ -194,7 +194,7 @@ impl<'a, T, const B: usize, const C: usize, H> NodeMut<'a, H, T, B, C> {
         unsafe { (*self.node).length = new_len };
     }
 
-    pub fn node_ptr(&self) -> *mut Node<T, B, C> {
+    pub const fn node_ptr(&self) -> *mut Node<T, B, C> {
         self.node
     }
 }
@@ -214,7 +214,12 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 
     pub fn values_mut(&mut self) -> ArrayVecMut<T, C> {
-        unsafe { ArrayVecMut::new((*self.node).ptr.values.as_ptr(), addr_of_mut!((*self.node).length)) }
+        unsafe {
+            ArrayVecMut::new(
+                (*self.node).ptr.values.as_ptr(),
+                addr_of_mut!((*self.node).length),
+            )
+        }
     }
 
     pub fn values_maybe_uninit_mut(&mut self) -> &mut [MaybeUninit<T>; C] {
@@ -592,10 +597,14 @@ where
         unsafe { (*self.node).ptr.children.as_ref() }
     }
 
-    pub fn children_mut(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {unsafe{
-        let children = (*self.node).ptr.children.as_ptr();
-        ArrayVecMut::new(addr_of_mut!((*children).children), addr_of_mut!((*children).len))
-    }
+    pub fn children_mut(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {
+        unsafe {
+            let children = (*self.node).ptr.children.as_ptr();
+            ArrayVecMut::new(
+                addr_of_mut!((*children).children),
+                addr_of_mut!((*children).len),
+            )
+        }
     }
 
     pub fn raw_children_mut(&mut self) -> &mut Children<T, B, C> {
@@ -697,10 +706,9 @@ pub enum SplitResult<T, const B: usize, const C: usize> {
 }
 
 impl<T, const B: usize, const C: usize> SplitResult<T, B, C> {
-    pub fn node_len(&self) -> usize {
+    pub const fn node_len(&self) -> usize {
         match self {
-            Self::Left(n) => n.len(),
-            Self::Right(n) => n.len(),
+            Self::Left(n) | Self::Right(n) => n.len(),
         }
     }
 }

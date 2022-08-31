@@ -314,21 +314,18 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
                 parent.set_len(parent.len() + 1 - split_res.node_len());
                 to_insert = parent.insert_node(child_index + 1, split_res);
-                match to_insert {
-                    InsertResult::Split(SplitResult::Right(ref mut n)) => {
-                        let mut new_node = NodeMut::new_parent_of_leaf(n);
-                        let children = new_node.raw_children_mut();
-                        self.leaf.write(
-                            &mut children.children_mut()
-                                [path_index - InternalMut::<T, B, C>::UNDERFULL_LEN - 1],
-                        );
-                        self.parent.write(children);
-                    }
-                    _ => {
-                        let children = parent.raw_children_mut();
-                        self.leaf.write(&mut children.children_mut()[path_index]);
-                        self.parent.write(children);
-                    }
+                if let InsertResult::Split(SplitResult::Right(ref mut n)) = to_insert {
+                    let mut new_node = NodeMut::new_parent_of_leaf(n);
+                    let children = new_node.raw_children_mut();
+                    self.leaf.write(
+                        &mut children.children_mut()
+                            [path_index - InternalMut::<T, B, C>::UNDERFULL_LEN - 1],
+                    );
+                    self.parent.write(children);
+                } else {
+                    let children = parent.raw_children_mut();
+                    self.leaf.write(&mut children.children_mut()[path_index]);
+                    self.parent.write(children);
                 }
             }
         } else {
@@ -365,7 +362,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                         new_node.with_brand(|mut new_node| {
                             new_node.set_child_parent_cache(
                                 path_index - InternalMut::<T, B, C>::UNDERFULL_LEN - 1,
-                            )
+                            );
                         });
                     }
                     _ => parent.with_brand(|mut parent| parent.set_child_parent_cache(path_index)),
@@ -469,7 +466,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                                     parent.child_mut(cur_index).node_ptr(),
                                 )
                                 .with_brand(|mut parent| {
-                                    parent.set_child_parent_cache(child_index)
+                                    parent.set_child_parent_cache(child_index);
                                 });
                             }
                         } else {

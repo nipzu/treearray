@@ -1,8 +1,7 @@
 use core::{
     mem::MaybeUninit,
     ops::{Index, IndexMut},
-    ptr,
-    slice,
+    ptr, slice,
 };
 
 // TODO: use functions from core when https://github.com/rust-lang/rust/issues/63569 stabilises
@@ -43,7 +42,10 @@ pub struct ArrayVecMut<T, const N: usize> {
 impl<T, const N: usize> ArrayVecMut<T, N> {
     pub unsafe fn new(array: *mut [MaybeUninit<T>; N], len: *mut usize) -> Self {
         debug_assert!(unsafe { *len <= N });
-        Self { array: array.cast(), len }
+        Self {
+            array: array.cast(),
+            len,
+        }
     }
 
     pub fn insert(&mut self, index: usize, value: T) {
@@ -76,11 +78,11 @@ impl<T, const N: usize> ArrayVecMut<T, N> {
     }
 
     pub fn pop_back(&mut self) -> T {
-        self.remove(unsafe { *self.len  - 1 })
+        self.remove(unsafe { *self.len - 1 })
     }
 
     pub fn split(&mut self, index: usize, other: ArrayVecMut<T, N>) {
-        let len = unsafe {*self.len};
+        let len = unsafe { *self.len };
         assert!(index <= len);
         let tail_len = len - index;
         let src = unsafe { self.array.add(index) };
@@ -93,7 +95,7 @@ impl<T, const N: usize> ArrayVecMut<T, N> {
     }
 
     pub fn append(&mut self, other: ArrayVecMut<T, N>) {
-        assert!(unsafe {*self.len + *other.len <= N});
+        assert!(unsafe { *self.len + *other.len <= N });
         let src = other.array;
         let dst = unsafe { self.array.add(*self.len) };
         unsafe { ptr::copy_nonoverlapping(src, dst, *other.len) };
@@ -132,7 +134,7 @@ mod tests {
         let mut a: [MaybeUninit<usize>; 100] = [MaybeUninit::uninit(); 100];
         let mut len = 0;
         let mut r = unsafe { ArrayVecMut::new(&mut a, &mut len) };
-        
+
         for x in 0..50 {
             r.insert(0, x);
         }
