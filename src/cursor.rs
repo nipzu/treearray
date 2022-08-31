@@ -270,7 +270,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         new_root.set_partial_parent_cache();
         self.leaf
             .write(new_root.child_mut(root_path_index).node_ptr());
-        self.parent.write(new_root.raw_children_mut());
+        self.parent.write(new_root.raw_children_ptr());
     }
 
     pub fn insert(&mut self, value: T) {
@@ -316,15 +316,24 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 to_insert = parent.insert_node(child_index + 1, split_res);
                 if let InsertResult::Split(SplitResult::Right(ref mut n)) = to_insert {
                     let mut new_node = NodeMut::new_parent_of_leaf(n);
-                    let children = new_node.raw_children_mut();
+                    let children = new_node.raw_children_ptr();
                     self.leaf.write(
-                        &mut children.children_mut()
-                            [path_index - InternalMut::<T, B, C>::UNDERFULL_LEN - 1],
+                        (*children)
+                            .children
+                            .as_mut_ptr()
+                            .cast::<Node<T, B, C>>()
+                            .add(path_index - InternalMut::<T, B, C>::UNDERFULL_LEN - 1),
                     );
                     self.parent.write(children);
                 } else {
-                    let children = parent.raw_children_mut();
-                    self.leaf.write(&mut children.children_mut()[path_index]);
+                    let children = parent.raw_children_ptr();
+                    self.leaf.write(
+                        (*children)
+                            .children
+                            .as_mut_ptr()
+                            .cast::<Node<T, B, C>>()
+                            .add(path_index),
+                    );
                     self.parent.write(children);
                 }
             }
@@ -423,10 +432,10 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             if leaf_underfull {
                 if self_index > 0 {
                     parent.handle_underfull_child_tail(&mut self_index, &mut leaf_index);
-                    self.leaf.write(parent.child_mut(self_index).node_ptr());
                 } else {
                     parent.handle_underfull_child_head();
                 }
+                self.leaf.write(parent.child_mut(self_index).node_ptr());
                 self.leaf_index = leaf_index;
             }
         }
@@ -451,26 +460,24 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     if is_underfull {
                         if cur_index > 0 {
                             parent.handle_underfull_child_tail(&mut cur_index, &mut child_index);
-                            parent.set_child_parent_cache(cur_index);
-                            if h == 1 {
-                                self.parent
-                                    .write(parent.child_mut(cur_index).raw_children_ptr());
-                                self.leaf.write(
-                                    parent
-                                        .child_mut(cur_index)
-                                        .child_mut(child_index)
-                                        .node_ptr(),
-                                );
-                            } else {
-                                NodeMut::new_parent_of_internal(
-                                    parent.child_mut(cur_index).node_ptr(),
-                                )
+                        } else {
+                            parent.handle_underfull_child_head();
+                        }
+                        parent.set_child_parent_cache(cur_index);
+                        if h == 1 {
+                            self.parent
+                                .write(parent.child_mut(cur_index).raw_children_ptr());
+                            self.leaf.write(
+                                parent
+                                    .child_mut(cur_index)
+                                    .child_mut(child_index)
+                                    .node_ptr(),
+                            );
+                        } else {
+                            NodeMut::new_parent_of_internal(parent.child_mut(cur_index).node_ptr())
                                 .with_brand(|mut parent| {
                                     parent.set_child_parent_cache(child_index);
                                 });
-                            }
-                        } else {
-                            parent.handle_underfull_child_head();
                         }
                     }
                 });

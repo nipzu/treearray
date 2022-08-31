@@ -316,7 +316,7 @@ impl<'a, 'id, T, const B: usize, const C: usize>
     NodeMut<'a, height::BrandedTwoOrMore<'id>, T, B, C>
 {
     pub fn set_child_parent_cache(&mut self, index: usize) {
-        let children = NonNull::from(self.raw_children_mut());
+        let children = unsafe { NonNull::new_unchecked(self.raw_children_ptr()) };
         let mut child = self.child_mut(index);
         child.set_full_parent_cache(children);
     }
@@ -523,12 +523,19 @@ where
 
     pub fn set_full_parent_cache(&mut self, parent: NonNull<Children<T, B, C>>) {
         self.set_partial_parent_cache();
-        self.raw_children_mut().parent_children_cache = MaybeUninit::new(parent);
+        unsafe {
+            (*self.raw_children_ptr())
+                .parent_children_cache
+                .write(parent);
+        }
     }
 
     pub fn set_partial_parent_cache(&mut self) {
-        self.raw_children_mut().owning_node_cache =
-            MaybeUninit::new(unsafe { NonNull::new_unchecked(self.node) });
+        unsafe {
+            (*self.raw_children_ptr())
+                .owning_node_cache
+                .write(NonNull::new_unchecked(self.node));
+        }
     }
 
     pub unsafe fn into_parent(self) -> NodeMut<'a, height::TwoOrMore, T, B, C> {
@@ -567,15 +574,23 @@ where
     }
 
     pub unsafe fn into_child_containing_index_with_parent(
-        self,
+        mut self,
         index: &mut usize,
     ) -> (*mut Node<T, B, C>, NonNull<Children<T, B, C>>) {
-        let children = self.into_children_mut();
-        for child in children.children_mut() {
-            let len = child.len();
-            match index.checked_sub(len) {
-                Some(r) => *index = r,
-                None => return (child, unsafe { NonNull::new_unchecked(children as *mut _) }),
+        let children = self.raw_children_ptr();
+        // for child in children.children_mut() {
+        for i in 0.. {
+            unsafe {
+                let child = (*children)
+                    .children
+                    .as_mut_ptr()
+                    .cast::<Node<T, B, C>>()
+                    .add(i);
+                let len = (*child).len();
+                match index.checked_sub(len) {
+                    Some(r) => *index = r,
+                    None => return (child, NonNull::new_unchecked(children as *mut _)),
+                }
             }
         }
 

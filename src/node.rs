@@ -33,7 +33,7 @@ union NodePtr<T, const B: usize, const C: usize> {
 }
 
 pub struct Children<T, const B: usize, const C: usize> {
-    children: [MaybeUninit<Node<T, B, C>>; B],
+    pub children: [MaybeUninit<Node<T, B, C>>; B],
     len: usize,
     parent_children_cache: MaybeUninit<NonNull<Self>>,
     // TODO: no pub
