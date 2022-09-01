@@ -81,7 +81,7 @@ impl<T, const N: usize> ArrayVecMut<T, N> {
         self.remove(unsafe { *self.len - 1 })
     }
 
-    pub fn split(&mut self, index: usize, other: ArrayVecMut<T, N>) {
+    pub fn split(&mut self, index: usize, other: Self) {
         let len = unsafe { *self.len };
         assert!(index <= len);
         let tail_len = len - index;
@@ -94,7 +94,7 @@ impl<T, const N: usize> ArrayVecMut<T, N> {
         }
     }
 
-    pub fn append(&mut self, other: ArrayVecMut<T, N>) {
+    pub fn append(&mut self, other: Self) {
         assert!(unsafe { *self.len + *other.len <= N });
         let src = other.array;
         let dst = unsafe { self.array.add(*self.len) };

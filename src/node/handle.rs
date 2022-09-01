@@ -172,6 +172,14 @@ impl<T, const B: usize, const C: usize> OwnedNode<height::Zero, T, B, C> {
             height: height::Zero,
         }
     }
+
+    pub fn new_empty_leaf() -> Self {
+        let node = Node::empty_leaf();
+        Self {
+            node,
+            height: height::Zero,
+        }
+    }
 }
 
 pub struct NodeMut<'a, H, T, const B: usize, const C: usize> {
@@ -261,21 +269,21 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     fn split_and_insert_left(&mut self, index: usize, value: T) -> Node<T, B, C> {
         let split_index = C / 2;
-        let mut new_node = Node::empty_leaf();
-        let mut new_leaf = unsafe { NodeMut::new_leaf(&mut new_node) };
+        let mut new_node = OwnedNode::new_empty_leaf();
+        let mut new_leaf = new_node.as_mut();
         let mut values = self.values_mut();
         values.split(split_index, new_leaf.values_mut());
         values.insert(index, value);
-        new_node
+        new_node.node
     }
 
     fn split_and_insert_right(&mut self, index: usize, value: T) -> Node<T, B, C> {
         let split_index = (C - 1) / 2 + 1;
-        let mut new_node = Node::empty_leaf();
-        let mut new_leaf = unsafe { NodeMut::new_leaf(&mut new_node) };
+        let mut new_node = OwnedNode::new_empty_leaf();
+        let mut new_leaf = new_node.as_mut();
         self.values_mut().split(split_index, new_leaf.values_mut());
         new_leaf.values_mut().insert(index - self.len(), value);
-        new_node
+        new_node.node
     }
 }
 
@@ -322,18 +330,18 @@ impl<'a, 'id, T, const B: usize, const C: usize>
     }
 }
 
-pub trait ApproximateHeightNode {
+pub trait FreeableNode {
     fn free(self);
 }
 
-impl<T, const B: usize, const C: usize> ApproximateHeightNode for OwnedNode<height::Zero, T, B, C> {
+impl<T, const B: usize, const C: usize> FreeableNode for OwnedNode<height::Zero, T, B, C> {
     fn free(mut self) {
         debug_assert_eq!(self.as_mut().len(), 0);
         unsafe { Box::from_raw(self.as_mut().values_maybe_uninit_mut()) };
     }
 }
 
-impl<H, T, const B: usize, const C: usize> ApproximateHeightNode for OwnedNode<H, T, B, C>
+impl<H, T, const B: usize, const C: usize> FreeableNode for OwnedNode<H, T, B, C>
 where
     H: height::Internal + Copy,
 {
@@ -458,7 +466,7 @@ where
     pub fn handle_underfull_child_head(&mut self)
     where
         for<'b> NodeMut<'b, H::ChildHeight, T, B, C>: ExactHeightNode,
-        OwnedNode<H::ChildHeight, T, B, C>: ApproximateHeightNode,
+        OwnedNode<H::ChildHeight, T, B, C>: FreeableNode,
     {
         let [mut cur, mut next] = self.child_pair_at(0);
 
@@ -473,7 +481,7 @@ where
     pub fn handle_underfull_child_tail(&mut self, index: &mut usize, child_index: &mut usize)
     where
         for<'b> NodeMut<'b, H::ChildHeight, T, B, C>: ExactHeightNode,
-        OwnedNode<H::ChildHeight, T, B, C>: ApproximateHeightNode,
+        OwnedNode<H::ChildHeight, T, B, C>: FreeableNode,
     {
         let [mut prev, mut cur] = self.child_pair_at(*index - 1);
 
@@ -538,10 +546,10 @@ where
         }
     }
 
-    pub unsafe fn into_parent(self) -> NodeMut<'a, height::TwoOrMore, T, B, C> {
+    pub unsafe fn into_parent(mut self) -> NodeMut<'a, height::TwoOrMore, T, B, C> {
         unsafe {
             NodeMut::new_parent_of_internal(
-                (*(*(*self.node).ptr.children.as_ptr())
+                (*(*self.raw_children_ptr())
                     .parent_children_cache
                     .assume_init()
                     .as_ptr())
@@ -578,7 +586,6 @@ where
         index: &mut usize,
     ) -> (*mut Node<T, B, C>, NonNull<Children<T, B, C>>) {
         let children = self.raw_children_ptr();
-        // for child in children.children_mut() {
         for i in 0.. {
             unsafe {
                 let child = (*children)
@@ -589,7 +596,7 @@ where
                 let len = (*child).len();
                 match index.checked_sub(len) {
                     Some(r) => *index = r,
-                    None => return (child, NonNull::new_unchecked(children as *mut _)),
+                    None => return (child, NonNull::new_unchecked(children)),
                 }
             }
         }
