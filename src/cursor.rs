@@ -374,9 +374,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         }
 
         for _ in height..self.height() {
-            let mut parent = unsafe { cur_node.into_parent() };
-            unsafe { parent.set_len(parent.len() + 1) };
-            cur_node = parent.into_internal();
+            cur_node = unsafe { cur_node.into_parent().into_internal() };
+            unsafe { cur_node.set_len(cur_node.len() + 1) };
         }
     }
 
