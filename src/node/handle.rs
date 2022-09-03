@@ -71,6 +71,8 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     }
 
     pub unsafe fn child_containing_index(&self, index: &mut usize) -> &'a Node<T, B, C> {
+        debug_assert!(*index < self.node.len());
+
         for child in self.children().children() {
             let len = child.len();
             match index.checked_sub(len) {
@@ -336,7 +338,7 @@ pub trait FreeableNode {
 
 impl<T, const B: usize, const C: usize> FreeableNode for OwnedNode<height::Zero, T, B, C> {
     fn free(mut self) {
-        debug_assert_eq!(self.as_mut().len(), 0);
+        debug_assert_eq!(self.node.len(), 0);
         unsafe { Box::from_raw(self.as_mut().values_maybe_uninit_mut()) };
     }
 }
@@ -346,7 +348,8 @@ where
     H: height::Internal + Copy,
 {
     fn free(mut self) {
-        debug_assert_eq!(self.as_mut().children().children().len(), 0);
+        debug_assert_eq!(unsafe { (*self.node.ptr.children.as_ptr()).len }, 0);
+        debug_assert_eq!(self.node.len(), 0);
         unsafe { Box::from_raw(self.as_mut().into_children_mut()) };
     }
 }
@@ -438,7 +441,7 @@ where
                 self.height.make_child_height(),
             )
         };
-        let ptr = unsafe { addr_of_mut!((*(*self.node).ptr.children.as_ptr()).children) };
+        let ptr = unsafe { addr_of_mut!((*self.raw_children_ptr()).children) };
         [
             NodeMut {
                 node: unsafe { ptr.cast::<Node<T, B, C>>().add(index) },
@@ -455,7 +458,7 @@ where
 
     pub fn child_mut(&mut self, index: usize) -> NodeMut<H::ChildHeight, T, B, C> {
         let height = unsafe { self.height.make_child_height() };
-        let ptr = unsafe { addr_of_mut!((*(*self.node).ptr.children.as_ptr()).children) };
+        let ptr = unsafe { addr_of_mut!((*self.raw_children_ptr()).children) };
         NodeMut {
             node: unsafe { ptr.cast::<Node<T, B, C>>().add(index) },
             height,
@@ -569,6 +572,8 @@ where
     }
 
     pub unsafe fn into_child_containing_index(self, index: &mut usize) -> &'a mut Node<T, B, C> {
+        debug_assert!(*index < self.len());
+
         for child in self.into_children_mut().children_mut() {
             let len = child.len();
             match index.checked_sub(len) {
@@ -585,6 +590,8 @@ where
         mut self,
         index: &mut usize,
     ) -> (*mut Node<T, B, C>, NonNull<Children<T, B, C>>) {
+        debug_assert!(*index < self.len());
+
         let children = self.raw_children_ptr();
         for i in 0.. {
             unsafe {
@@ -621,7 +628,7 @@ where
 
     pub fn children_mut(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {
         unsafe {
-            let children = (*self.node).ptr.children.as_ptr();
+            let children = self.raw_children_ptr();
             ArrayVecMut::new(
                 addr_of_mut!((*children).children),
                 addr_of_mut!((*children).len),
