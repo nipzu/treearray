@@ -8,7 +8,7 @@ use core::{
 use alloc::boxed::Box;
 
 use crate::{
-    node::{Children, Node},
+    node::{InternalNode, Node},
     utils::ArrayVecMut,
 };
 
@@ -64,7 +64,7 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
         Self { node }
     }
 
-    pub fn children(&self) -> &'a Children<T, B, C> {
+    pub fn children(&self) -> &'a InternalNode<T, B, C> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
         unsafe { self.node.ptr.children.as_ref() }
@@ -197,7 +197,7 @@ pub type InternalMut<'a, T, const B: usize, const C: usize> =
 
 impl<'a, T, const B: usize, const C: usize, H> NodeMut<'a, H, T, B, C> {
     pub fn len(&self) -> usize {
-        unsafe { (*self.node).length }
+        unsafe { (*self.node).len() }
     }
 
     pub unsafe fn set_len(&mut self, new_len: usize) {
@@ -532,7 +532,7 @@ where
         self.children().len == B
     }
 
-    pub fn set_full_parent_cache(&mut self, parent: NonNull<Children<T, B, C>>) {
+    pub fn set_full_parent_cache(&mut self, parent: NonNull<InternalNode<T, B, C>>) {
         self.set_partial_parent_cache();
         unsafe {
             (*self.raw_children_ptr())
@@ -589,7 +589,7 @@ where
     pub unsafe fn into_child_containing_index_with_parent(
         mut self,
         index: &mut usize,
-    ) -> (*mut Node<T, B, C>, NonNull<Children<T, B, C>>) {
+    ) -> (*mut Node<T, B, C>, NonNull<InternalNode<T, B, C>>) {
         debug_assert!(*index < self.len());
 
         let children = self.raw_children_ptr();
@@ -620,7 +620,7 @@ where
         }
     }
 
-    pub fn children(&self) -> &Children<T, B, C> {
+    pub fn children(&self) -> &InternalNode<T, B, C> {
         // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
         // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
         unsafe { (*self.node).ptr.children.as_ref() }
@@ -636,15 +636,15 @@ where
         }
     }
 
-    pub fn raw_children_mut(&mut self) -> &mut Children<T, B, C> {
+    pub fn raw_children_mut(&mut self) -> &mut InternalNode<T, B, C> {
         unsafe { (*self.node).ptr.children.as_mut() }
     }
 
-    pub fn raw_children_ptr(&mut self) -> *mut Children<T, B, C> {
+    pub fn raw_children_ptr(&mut self) -> *mut InternalNode<T, B, C> {
         unsafe { (*self.node).ptr.children.as_ptr() }
     }
 
-    pub fn into_children_mut(self) -> &'a mut Children<T, B, C> {
+    pub fn into_children_mut(self) -> &'a mut InternalNode<T, B, C> {
         unsafe { (*self.node).ptr.children.as_mut() }
     }
 

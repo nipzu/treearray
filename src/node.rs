@@ -9,17 +9,6 @@ use crate::utils::{slice_assume_init_mut, slice_assume_init_ref, ArrayVecMut};
 pub mod handle;
 
 pub struct Node<T, const B: usize, const C: usize> {
-    // INVARIANT: `length` is the number of values that this node eventually has as children
-    //
-    // If `self.length <= C`, this node is a leaf node with
-    // exactly `size` initialized values held in `self.ptr.values`.
-    // TODO: > C/2 when not root
-    //
-    // If `self.length > C`, this node is an internal node. Under normal
-    // conditions, there should be some n such that the first n children
-    // are `Some`, and the sum of their `len()`s is equal to `self.len()`.
-    // Normal logic can assume that this assumption is upheld.
-    // However, breaking this assumption must not cause Undefined Behavior.
     length: usize,
     ptr: NodePtr<T, B, C>,
 }
@@ -28,11 +17,11 @@ pub struct Node<T, const B: usize, const C: usize> {
 // unique ownership over the child node. We don't want that
 // because aliasing pointers are created when using `CursorMut`.
 union NodePtr<T, const B: usize, const C: usize> {
-    children: NonNull<Children<T, B, C>>,
+    children: NonNull<InternalNode<T, B, C>>,
     values: NonNull<[MaybeUninit<T>; C]>,
 }
 
-pub struct Children<T, const B: usize, const C: usize> {
+pub struct InternalNode<T, const B: usize, const C: usize> {
     pub children: [MaybeUninit<Node<T, B, C>>; B],
     len: usize,
     parent_children_cache: MaybeUninit<NonNull<Self>>,
@@ -40,7 +29,7 @@ pub struct Children<T, const B: usize, const C: usize> {
     pub owning_node_cache: MaybeUninit<NonNull<Node<T, B, C>>>,
 }
 
-impl<T, const B: usize, const C: usize> Children<T, B, C> {
+impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
     const UNINIT_NODE: MaybeUninit<Node<T, B, C>> = MaybeUninit::uninit();
 
     pub const fn new() -> Self {
@@ -84,7 +73,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
         self.length
     }
 
-    unsafe fn from_children(length: usize, children: Box<Children<T, B, C>>) -> Self {
+    unsafe fn from_children(length: usize, children: Box<InternalNode<T, B, C>>) -> Self {
         debug_assert_eq!(children.sum_lens(), length);
         Self {
             length,
@@ -95,7 +84,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     pub fn from_child_array<const N: usize>(children: [Self; N]) -> Self {
-        let mut boxed_children = Box::new(Children::new());
+        let mut boxed_children = Box::new(InternalNode::new());
         let mut length = 0;
         for child in children {
             length += child.len();

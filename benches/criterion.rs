@@ -1,11 +1,11 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 
-use rand::{thread_rng, Rng};
+use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use btreevec::BTreeVec;
 
 fn bench_get_bvec(c: &mut Criterion) {
-    let mut rng = thread_rng();
+    let mut rng = StdRng::from_seed([0; 32]);
 
     for size in [1_000, 10_000, 100_000, 1_000_000, 10_000_000] {
         let mut bvec = BTreeVec::<i32>::new();
@@ -59,7 +59,7 @@ fn bench_get_bvec(c: &mut Criterion) {
 }
 
 fn bench_get_vec(c: &mut Criterion) {
-    let mut rng = thread_rng();
+    let mut rng = StdRng::from_seed([0; 32]);
 
     for size in [1_000, 10_000, 100_000, 1_000_000] {
         let mut vec = Vec::new();
@@ -83,7 +83,7 @@ fn bench_get_vec(c: &mut Criterion) {
 }
 
 fn bench_get_im_vec(c: &mut Criterion) {
-    let mut rng = thread_rng();
+    let mut rng = StdRng::from_seed([0; 32]);
 
     for size in [1_000, 10_000, 100_000] {
         let mut im_vec = im::Vector::new();
@@ -108,7 +108,7 @@ fn bench_get_im_vec(c: &mut Criterion) {
 }
 
 fn bench_insert(c: &mut Criterion) {
-    let mut rng = thread_rng();
+    let mut rng = StdRng::from_seed([0; 32]);
 
     for size in [1_000, 10_000, 100_000, 1_000_000] {
         let mut bvec = BTreeVec::<i32>::new();
@@ -128,8 +128,9 @@ fn bench_insert(c: &mut Criterion) {
                 b.iter_batched(
                     || rng.gen_range(0..=s),
                     |i| {
-                        bvec.insert(i, 0);
-                        bvec.remove(i);
+                        let mut cursor = bvec.cursor_at_mut(i);
+                        cursor.insert(0);
+                        cursor.remove();
                     },
                     BatchSize::SmallInput,
                 )

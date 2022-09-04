@@ -9,7 +9,7 @@ use crate::{
         ExactHeightNode, FreeableNode, InsertResult, InternalMut, Leaf, LeafMut, NodeMut,
         OwnedNode, SplitResult,
     },
-    node::{Children, Node},
+    node::{InternalNode, Node},
     BTreeVec,
 };
 
@@ -79,7 +79,7 @@ pub struct CursorMut<'a, T, const B: usize, const C: usize> {
     // TODO: maybe just use `*mut`?
     tree: NonNull<BTreeVec<T, B, C>>,
     leaf: MaybeUninit<*mut Node<T, B, C>>,
-    parent: MaybeUninit<*mut Children<T, B, C>>,
+    parent: MaybeUninit<*mut InternalNode<T, B, C>>,
     _marker: PhantomData<&'a mut BTreeVec<T, B, C>>,
 }
 
@@ -445,9 +445,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
                 cur_parent.with_brand(|mut parent| {
                     let cur_node = parent.child_mut(cur_index);
-                    let is_underfull = cur_node.is_underfull();
 
-                    if is_underfull {
+                    if cur_node.is_underfull() {
                         if cur_index > 0 {
                             parent.handle_underfull_child_tail(&mut cur_index, &mut child_index);
                         } else {
