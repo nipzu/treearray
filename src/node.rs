@@ -2,31 +2,30 @@ use core::{mem::MaybeUninit, ptr::NonNull};
 
 use alloc::boxed::Box;
 
-use crate::utils::{slice_assume_init_mut, slice_assume_init_ref, ArrayVecMut};
+use crate::utils::{slice_assume_init_ref, ArrayVecMut};
 
 // use crate::panics::panic_length_overflow;
 
 pub mod handle;
 
 pub struct Node<T, const B: usize, const C: usize> {
-    length: usize,
-    ptr: NodePtr<T, B, C>,
+    pub length: usize,
+    pub ptr: NodePtr<T, B, C>,
 }
 
 // `Box`es cannot be used here because they would assert
 // unique ownership over the child node. We don't want that
 // because aliasing pointers are created when using `CursorMut`.
-union NodePtr<T, const B: usize, const C: usize> {
-    children: NonNull<InternalNode<T, B, C>>,
+pub union NodePtr<T, const B: usize, const C: usize> {
+    pub children: NonNull<InternalNode<T, B, C>>,
     values: NonNull<[MaybeUninit<T>; C]>,
 }
 
 pub struct InternalNode<T, const B: usize, const C: usize> {
     pub children: [MaybeUninit<Node<T, B, C>>; B],
     len: usize,
-    parent_children_cache: MaybeUninit<NonNull<Self>>,
-    // TODO: no pub
-    pub owning_node_cache: MaybeUninit<NonNull<Node<T, B, C>>>,
+    parent_node: Option<NonNull<Self>>,
+    parent_index: MaybeUninit<usize>,
 }
 
 impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
@@ -36,8 +35,8 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
         Self {
             children: [Self::UNINIT_NODE; B],
             len: 0,
-            parent_children_cache: MaybeUninit::uninit(),
-            owning_node_cache: MaybeUninit::uninit(),
+            parent_node: None,
+            parent_index: MaybeUninit::uninit(),
         }
     }
 
@@ -45,19 +44,8 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
         unsafe { slice_assume_init_ref(self.children.get_unchecked(..self.len)) }
     }
 
-    pub fn children_mut(&mut self) -> &mut [Node<T, B, C>] {
-        unsafe { slice_assume_init_mut(self.children.get_unchecked_mut(..self.len)) }
-    }
-
-    pub fn as_array_vec(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {
+    pub fn as_array_vec(&mut self) -> ArrayVecMut<Node<T, B, C>, usize, B> {
         unsafe { ArrayVecMut::new(&mut self.children, &mut self.len) }
-    }
-
-    pub fn split(&mut self, index: usize) -> Box<Self> {
-        let mut new_children = Box::new(Self::new());
-        self.as_array_vec()
-            .split(index, new_children.as_array_vec());
-        new_children
     }
 
     pub fn sum_lens(&self) -> usize {

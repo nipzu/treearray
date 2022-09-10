@@ -17,7 +17,7 @@ pub use cursor::CursorMut;
 
 use iter::{Drain, Iter};
 use node::{
-    handle::{Internal, InternalMut, Leaf, NodeMut},
+    handle::{Internal, InternalMut, Leaf, LeafMut},
     Node,
 };
 
@@ -112,12 +112,12 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..height {
-            let handle = unsafe { InternalMut::new(cur_node) };
+            let handle = unsafe { InternalMut::new(cur_node.ptr.children) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
-        let leaf = unsafe { NodeMut::new_leaf(cur_node) };
+        let leaf = unsafe { LeafMut::new_leaf(cur_node) };
         // SAFETY: from `into_child_containing_index` we know that index < leaf.len()
         unsafe { Some(leaf.into_value_unchecked_mut(index)) }
     }

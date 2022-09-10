@@ -2,7 +2,7 @@ use core::{
     hint::unreachable_unchecked,
     marker::PhantomData,
     mem::MaybeUninit,
-    ptr::{addr_of_mut, NonNull},
+    ptr::{addr_of_mut, NonNull}, ops::Range,
 };
 
 use alloc::boxed::Box;
@@ -140,28 +140,26 @@ pub mod height {
     }
 }
 
+use height::ExactInternal;
+
 pub struct OwnedNode<H, T, const B: usize, const C: usize> {
     node: Node<T, B, C>,
-    height: H,
+    _height: H,
 }
 
 impl<T, const B: usize, const C: usize> OwnedNode<height::Positive, T, B, C> {
     pub const unsafe fn new_internal(node: Node<T, B, C>) -> Self {
         Self {
             node,
-            height: height::Positive,
+            _height: height::Positive,
         }
     }
 }
 
-impl<H, T, const B: usize, const C: usize> OwnedNode<H, T, B, C> {
-    pub fn as_mut(&mut self) -> NodeMut<H, T, B, C>
-    where
-        H: Copy,
-    {
-        NodeMut {
+impl<T, const B: usize, const C: usize> OwnedNode<height::Zero, T, B, C> {
+    pub fn as_mut(&mut self) -> LeafMut<T, B, C> {
+        LeafMut {
             node: &mut self.node,
-            height: self.height,
             lifetime: PhantomData,
         }
     }
@@ -171,7 +169,7 @@ impl<T, const B: usize, const C: usize> OwnedNode<height::Zero, T, B, C> {
     pub const unsafe fn new_leaf(node: Node<T, B, C>) -> Self {
         Self {
             node,
-            height: height::Zero,
+            _height: height::Zero,
         }
     }
 
@@ -179,51 +177,44 @@ impl<T, const B: usize, const C: usize> OwnedNode<height::Zero, T, B, C> {
         let node = Node::empty_leaf();
         Self {
             node,
-            height: height::Zero,
+            _height: height::Zero,
         }
     }
 }
 
-pub struct NodeMut<'a, H, T, const B: usize, const C: usize> {
+pub struct LeafMut<'a, T, const B: usize, const C: usize> {
     node: *mut Node<T, B, C>,
+    lifetime: PhantomData<&'a mut Node<T, B, C>>,
+}
+
+pub struct InternalMut<'a, H, T, const B: usize, const C: usize> {
+    pub node: NonNull<InternalNode<T, B, C>>,
     height: H,
     lifetime: PhantomData<&'a mut Node<T, B, C>>,
 }
 
-pub type LeafMut<'a, T, const B: usize, const C: usize> = NodeMut<'a, height::Zero, T, B, C>;
-
-pub type InternalMut<'a, T, const B: usize, const C: usize> =
-    NodeMut<'a, height::Positive, T, B, C>;
-
-impl<'a, T, const B: usize, const C: usize, H> NodeMut<'a, H, T, B, C> {
+impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     pub fn len(&self) -> usize {
         unsafe { (*self.node).len() }
-    }
-
-    pub unsafe fn set_len(&mut self, new_len: usize) {
-        unsafe { (*self.node).length = new_len };
     }
 
     pub const fn node_ptr(&self) -> *mut Node<T, B, C> {
         self.node
     }
-}
 
-impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a leaf node i.e. `node.len() <= C`.
-    pub unsafe fn new_leaf(node: *mut Node<T, B, C>) -> NodeMut<'a, height::Zero, T, B, C> {
+    pub unsafe fn new_leaf(node: *mut Node<T, B, C>) -> LeafMut<'a, T, B, C> {
         debug_assert!(unsafe { (*node).len() <= C });
 
-        NodeMut {
+        Self {
             node,
-            height: height::Zero,
             lifetime: PhantomData,
         }
     }
 
-    pub fn values_mut(&mut self) -> ArrayVecMut<T, C> {
+    pub fn values_mut(&mut self) -> ArrayVecMut<T, usize, C> {
         unsafe {
             ArrayVecMut::new(
                 (*self.node).ptr.values.as_ptr(),
@@ -289,18 +280,70 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 }
 
-impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::One, T, B, C> {
-    pub unsafe fn new_parent_of_leaf(node: *mut Node<T, B, C>) -> Self {
+impl<'a, T, const B: usize, const C: usize> InternalMut<'a, height::One, T, B, C> {
+    pub unsafe fn new_parent_of_leaf(node: NonNull<InternalNode<T, B, C>>) -> Self {
         Self {
             node,
             height: height::One,
             lifetime: PhantomData,
         }
     }
+
+    pub fn child_mut(&mut self, index: usize) -> LeafMut<T, B, C> {
+        let ptr = unsafe { (*self.node.as_ptr()).children.as_mut_ptr() };
+        LeafMut {
+            node: unsafe { ptr.cast::<Node<T, B, C>>().add(index) },
+            lifetime: PhantomData,
+        }
+    }
+
+    pub fn child_pair_at(&mut self, index: usize) -> [LeafMut<T, B, C>; 2] {
+        let ptr = unsafe { (*self.node.as_ptr()).children.as_mut_ptr() };
+        [
+            LeafMut {
+                node: unsafe { ptr.cast::<Node<T, B, C>>().add(index) },
+                lifetime: PhantomData,
+            },
+            LeafMut {
+                node: unsafe { ptr.cast::<Node<T, B, C>>().add(index + 1) },
+                lifetime: PhantomData,
+            },
+        ]
+    }
+
+    pub fn handle_underfull_leaf_child_head(&mut self) {
+        let [mut cur, mut next] = self.child_pair_at(0);
+
+        if next.is_almost_underfull() {
+            cur.append_children(next);
+            unsafe {
+                OwnedNode::new_internal(self.as_array_vec().remove(1)).free();
+            }
+        } else {
+            cur.push_back_child(next.pop_front_child());
+        }
+    }
+
+    pub fn handle_underfull_leaf_child_tail(&mut self, index: &mut usize, child_index: &mut usize) {
+        let [mut prev, mut cur] = self.child_pair_at(*index - 1);
+
+        if prev.is_almost_underfull() {
+            let prev_len = prev.len_children();
+            prev.append_children(cur);
+            unsafe {
+                OwnedNode::new_internal(self.as_array_vec().remove(*index)).free();
+            }
+            *index -= 1;
+            *child_index += prev_len;
+        } else {
+            cur.push_front_child(prev.pop_back_child());
+            *child_index += 1;
+        }
+    }
 }
 
-impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::TwoOrMore, T, B, C> {
-    pub unsafe fn new_parent_of_internal(node: *mut Node<T, B, C>) -> Self {
+impl<'a, T, const B: usize, const C: usize> InternalMut<'a, height::TwoOrMore, T, B, C> {
+    pub unsafe fn new_parent_of_internal(node: NonNull<InternalNode<T, B, C>>) -> Self {
         Self {
             node,
             height: height::TwoOrMore,
@@ -310,9 +353,9 @@ impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::TwoOrMore, T, B,
 
     pub fn with_brand<F, R>(&mut self, f: F) -> R
     where
-        F: for<'new_id> FnOnce(NodeMut<height::BrandedTwoOrMore<'new_id>, T, B, C>) -> R,
+        F: for<'new_id> FnOnce(InternalMut<height::BrandedTwoOrMore<'new_id>, T, B, C>) -> R,
     {
-        let parent = NodeMut {
+        let parent = InternalMut {
             node: self.node,
             height: height::BrandedTwoOrMore::new(),
             lifetime: PhantomData,
@@ -323,12 +366,93 @@ impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::TwoOrMore, T, B,
 }
 
 impl<'a, 'id, T, const B: usize, const C: usize>
-    NodeMut<'a, height::BrandedTwoOrMore<'id>, T, B, C>
+    InternalMut<'a, height::BrandedTwoOrMore<'id>, T, B, C>
 {
     pub fn set_child_parent_cache(&mut self, index: usize) {
-        let children = unsafe { NonNull::new_unchecked(self.raw_children_ptr()) };
-        let mut child = self.child_mut(index);
-        child.set_full_parent_cache(children);
+        let self_node = self.node;
+        self.child_mut(index)
+            .set_parent_node_and_index(self_node, index);
+    }
+
+    pub fn child_mut(
+        &mut self,
+        index: usize,
+    ) -> InternalMut<height::ChildOf<height::BrandedTwoOrMore<'id>>, T, B, C> {
+        let height = unsafe { self.height.make_child_height() };
+        let ptr = unsafe { (*self.node.as_ptr()).children.as_mut_ptr() };
+        InternalMut {
+            node: unsafe { (*ptr.cast::<Node<T, B, C>>().add(index)).ptr.children },
+            height,
+            lifetime: PhantomData,
+        }
+    }
+
+    pub fn child_pair_at(
+        &mut self,
+        index: usize,
+    ) -> [InternalMut<height::ChildOf<height::BrandedTwoOrMore<'id>>, T, B, C>; 2] {
+        let (h1, h2) = unsafe {
+            (
+                self.height.make_child_height(),
+                self.height.make_child_height(),
+            )
+        };
+        let ptr = unsafe { (*self.node.as_ptr()).children.as_mut_ptr() };
+        [
+            InternalMut {
+                node: unsafe { (*ptr.cast::<Node<T, B, C>>().add(index)).ptr.children },
+                height: h1,
+                lifetime: PhantomData,
+            },
+            InternalMut {
+                node: unsafe { (*ptr.cast::<Node<T, B, C>>().add(index + 1)).ptr.children },
+                height: h2,
+                lifetime: PhantomData,
+            },
+        ]
+    }
+
+    pub fn handle_underfull_internal_child_head(&mut self) {
+        let [mut cur, mut next] = self.child_pair_at(0);
+
+        if next.is_almost_underfull() {
+            cur.append_children(next);
+            unsafe {
+                OwnedNode::new_internal(self.as_array_vec().remove(1)).free();
+            }
+        } else {
+            cur.push_back_child(next.pop_front_child());
+        }
+    }
+
+    pub fn handle_underfull_internal_child_tail(
+        &mut self,
+        index: &mut usize,
+        child_index: &mut usize,
+    ) {
+        let [mut prev, mut cur] = self.child_pair_at(*index - 1);
+
+        if prev.is_almost_underfull() {
+            let prev_len = prev.len_children();
+            prev.append_children(cur);
+            unsafe {
+                OwnedNode::new_internal(self.as_array_vec().remove(*index)).free();
+            }
+            *index -= 1;
+            *child_index += prev_len;
+        } else {
+            cur.push_front_child(prev.pop_back_child());
+            *child_index += 1;
+        }
+    }
+
+    fn set_parent_links(&mut self, range: Range<usize>) {
+        for (i, n) in self.as_array_vec()[range.clone()].iter_mut().enumerate() {
+            unsafe {
+                (*n.ptr.children.as_ptr()).parent_node = Some(self.node);
+                (*n.ptr.children.as_ptr()).parent_index.write(i + range.start);
+            }
+        }
     }
 }
 
@@ -347,10 +471,10 @@ impl<H, T, const B: usize, const C: usize> FreeableNode for OwnedNode<H, T, B, C
 where
     H: height::Internal + Copy,
 {
-    fn free(mut self) {
+    fn free(self) {
         debug_assert_eq!(unsafe { (*self.node.ptr.children.as_ptr()).len }, 0);
         debug_assert_eq!(self.node.len(), 0);
-        unsafe { Box::from_raw(self.as_mut().into_children_mut()) };
+        unsafe { Box::from_raw(self.node.ptr.children.as_ptr()) };
     }
 }
 
@@ -382,9 +506,7 @@ pub unsafe trait ExactHeightNode {
     }
 }
 
-unsafe impl<'a, T, const B: usize, const C: usize> ExactHeightNode
-    for NodeMut<'a, height::Zero, T, B, C>
-{
+unsafe impl<'a, T, const B: usize, const C: usize> ExactHeightNode for LeafMut<'a, T, B, C> {
     type Child = T;
     const UNDERFULL_LEN: usize = (C - 1) / 2;
     fn len_children(&self) -> usize {
@@ -401,111 +523,41 @@ unsafe impl<'a, T, const B: usize, const C: usize> ExactHeightNode
     }
 }
 
-unsafe impl<'a, H, T, const B: usize, const C: usize> ExactHeightNode for NodeMut<'a, H, T, B, C>
+unsafe impl<'a, H, T, const B: usize, const C: usize> ExactHeightNode
+    for InternalMut<'a, H, T, B, C>
 where
     H: height::ExactInternal,
 {
     type Child = OwnedNode<H::ChildHeight, T, B, C>;
     const UNDERFULL_LEN: usize = (B - 1) / 2;
     fn len_children(&self) -> usize {
-        self.count_children()
+        self.len_children()
     }
     fn insert_child(&mut self, index: usize, child: Self::Child) {
-        unsafe { self.set_len(self.len() + child.node.len()) };
-        self.children_mut().insert(index, child.node);
+        // unsafe { self.set_len(self.len() + child.node.len()) };
+        self.as_array_vec().insert(index, child.node);
     }
     fn remove_child(&mut self, index: usize) -> Self::Child {
-        let node = self.children_mut().remove(index);
-        unsafe { self.set_len(self.len() - node.len()) };
+        let node = self.as_array_vec().remove(index);
+        // unsafe { self.set_len(self.len() - node.len()) };
         OwnedNode {
             node,
-            height: unsafe { self.height.make_child_height() },
+            _height: unsafe { self.height.make_child_height() },
         }
     }
     fn append_children(&mut self, mut other: Self) {
-        self.children_mut().append(other.children_mut());
+        self.as_array_vec().append(other.as_array_vec());
 
-        unsafe { self.set_len(self.len() + other.len()) };
-        unsafe { other.set_len(0) };
+        // unsafe { self.set_len(self.len() + other.len()) };
+        // unsafe { other.set_len(0) };
     }
 }
 
-impl<'a, H, T, const B: usize, const C: usize> NodeMut<'a, H, T, B, C>
-where
-    H: height::ExactInternal,
-{
-    pub fn child_pair_at(&mut self, index: usize) -> [NodeMut<H::ChildHeight, T, B, C>; 2] {
-        let (h1, h2) = unsafe {
-            (
-                self.height.make_child_height(),
-                self.height.make_child_height(),
-            )
-        };
-        let ptr = unsafe { addr_of_mut!((*self.raw_children_ptr()).children) };
-        [
-            NodeMut {
-                node: unsafe { ptr.cast::<Node<T, B, C>>().add(index) },
-                height: h1,
-                lifetime: PhantomData,
-            },
-            NodeMut {
-                node: unsafe { ptr.cast::<Node<T, B, C>>().add(index + 1) },
-                height: h2,
-                lifetime: PhantomData,
-            },
-        ]
-    }
-
-    pub fn child_mut(&mut self, index: usize) -> NodeMut<H::ChildHeight, T, B, C> {
-        let height = unsafe { self.height.make_child_height() };
-        let ptr = unsafe { addr_of_mut!((*self.raw_children_ptr()).children) };
-        NodeMut {
-            node: unsafe { ptr.cast::<Node<T, B, C>>().add(index) },
-            height,
-            lifetime: PhantomData,
-        }
-    }
-
-    pub fn handle_underfull_child_head(&mut self)
-    where
-        for<'b> NodeMut<'b, H::ChildHeight, T, B, C>: ExactHeightNode,
-        OwnedNode<H::ChildHeight, T, B, C>: FreeableNode,
-    {
-        let [mut cur, mut next] = self.child_pair_at(0);
-
-        if next.is_almost_underfull() {
-            cur.append_children(next);
-            self.remove_child(1).free();
-        } else {
-            cur.push_back_child(next.pop_front_child());
-        }
-    }
-
-    pub fn handle_underfull_child_tail(&mut self, index: &mut usize, child_index: &mut usize)
-    where
-        for<'b> NodeMut<'b, H::ChildHeight, T, B, C>: ExactHeightNode,
-        OwnedNode<H::ChildHeight, T, B, C>: FreeableNode,
-    {
-        let [mut prev, mut cur] = self.child_pair_at(*index - 1);
-
-        if prev.is_almost_underfull() {
-            let prev_len = prev.len_children();
-            prev.append_children(cur);
-            self.remove_child(*index).free();
-            *index -= 1;
-            *child_index += prev_len;
-        } else {
-            cur.push_front_child(prev.pop_back_child());
-            *child_index += 1;
-        }
-    }
-}
-
-impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
+impl<'a, T, const B: usize, const C: usize> InternalMut<'a, height::Positive, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
-    pub unsafe fn new(node: *mut Node<T, B, C>) -> Self {
+    pub unsafe fn new(node: NonNull<InternalNode<T, B, C>>) -> Self {
         Self {
             node,
             height: height::Positive,
@@ -514,56 +566,62 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, T, B, C> {
     }
 }
 
-impl<'a, H, T, const B: usize, const C: usize> NodeMut<'a, H, T, B, C>
+impl<'a, H, T, const B: usize, const C: usize> InternalMut<'a, H, T, B, C>
 where
     H: height::Internal,
 {
     pub const UNDERFULL_LEN: usize = (B - 1) / 2;
 
-    pub fn count_children(&self) -> usize {
-        self.children().len
+    pub fn len_children(&self) -> usize {
+        unsafe { (*self.node.as_ptr()).len }
     }
 
     pub fn is_singleton(&self) -> bool {
-        self.children().len == 1
+        self.len_children() == 1
     }
 
     fn is_full(&self) -> bool {
-        self.children().len == B
+        self.len_children() == B
     }
 
-    pub fn set_full_parent_cache(&mut self, parent: NonNull<InternalNode<T, B, C>>) {
-        self.set_partial_parent_cache();
+    pub fn is_underfull(&self) -> bool {
+        self.len_children() <= Self::UNDERFULL_LEN
+    }
+
+    pub fn set_parent_node_and_index(
+        &mut self,
+        parent: NonNull<InternalNode<T, B, C>>,
+        index: usize,
+    ) {
+        self.set_parent_index(index);
+        unsafe { (*self.node.as_ptr()).parent_node = Some(parent) }
+    }
+
+    pub fn set_parent_index(&mut self, index: usize) {
         unsafe {
-            (*self.raw_children_ptr())
-                .parent_children_cache
-                .write(parent);
+            (*self.node.as_ptr()).parent_index.write(index);
         }
     }
 
-    pub fn set_partial_parent_cache(&mut self) {
+    pub fn as_array_vec(&mut self) -> ArrayVecMut<Node<T, B, C>, usize, B> {
         unsafe {
-            (*self.raw_children_ptr())
-                .owning_node_cache
-                .write(NonNull::new_unchecked(self.node));
-        }
-    }
-
-    pub unsafe fn into_parent(mut self) -> NodeMut<'a, height::TwoOrMore, T, B, C> {
-        unsafe {
-            NodeMut::new_parent_of_internal(
-                (*(*self.raw_children_ptr())
-                    .parent_children_cache
-                    .assume_init()
-                    .as_ptr())
-                .owning_node_cache
-                .assume_init()
-                .as_ptr(),
+            ArrayVecMut::new(
+                addr_of_mut!((*self.node.as_ptr()).children),
+                addr_of_mut!((*self.node.as_ptr()).len),
             )
         }
     }
 
-    pub fn into_internal(self) -> InternalMut<'a, T, B, C> {
+    pub unsafe fn into_parent_and_index(
+        self,
+    ) -> Option<(InternalMut<'a, height::TwoOrMore, T, B, C>, usize)> {
+        unsafe {
+            let parent = InternalMut::new_parent_of_internal((*self.node.as_ptr()).parent_node?);
+            Some((parent, (*self.node.as_ptr()).parent_index.assume_init()))
+        }
+    }
+
+    pub fn into_internal(self) -> InternalMut<'a, height::Positive, T, B, C> {
         InternalMut {
             node: self.node,
             height: height::Positive,
@@ -572,13 +630,14 @@ where
     }
 
     pub unsafe fn into_child_containing_index(self, index: &mut usize) -> &'a mut Node<T, B, C> {
-        debug_assert!(*index < self.len());
-
-        for child in self.into_children_mut().children_mut() {
-            let len = child.len();
-            match index.checked_sub(len) {
-                Some(r) => *index = r,
-                None => return child,
+        // debug_assert!(*index < self.len());
+        unsafe {
+            for child in &mut (*self.node.as_ptr()).children {
+                let len = child.assume_init_mut().len();
+                match index.checked_sub(len) {
+                    Some(r) => *index = r,
+                    None => return child.assume_init_mut(),
+                }
             }
         }
 
@@ -587,15 +646,14 @@ where
     }
 
     pub unsafe fn into_child_containing_index_with_parent(
-        mut self,
+        self,
         index: &mut usize,
     ) -> (*mut Node<T, B, C>, NonNull<InternalNode<T, B, C>>) {
-        debug_assert!(*index < self.len());
+        // debug_assert!(*index < self.len());
 
-        let children = self.raw_children_ptr();
         for i in 0.. {
             unsafe {
-                let child = (*children)
+                let child = (*self.node.as_ptr())
                     .children
                     .as_mut_ptr()
                     .cast::<Node<T, B, C>>()
@@ -603,7 +661,7 @@ where
                 let len = (*child).len();
                 match index.checked_sub(len) {
                     Some(r) => *index = r,
-                    None => return (child, NonNull::new_unchecked(children)),
+                    None => return (child, self.node),
                 }
             }
         }
@@ -613,39 +671,13 @@ where
     }
 
     pub unsafe fn index_of_child_ptr(&self, elem_ptr: *const Node<T, B, C>) -> usize {
-        let slice_ptr = unsafe { (*self.node).ptr.children.as_ptr() };
+        let slice_ptr = unsafe { (*self.node.as_ptr()).children.as_ptr() };
         #[allow(clippy::cast_sign_loss)]
         unsafe {
-            elem_ptr.offset_from(slice_ptr.cast()) as usize
+            elem_ptr
+                .cast::<MaybeUninit<Node<T, B, C>>>()
+                .offset_from(slice_ptr) as usize
         }
-    }
-
-    pub fn children(&self) -> &InternalNode<T, B, C> {
-        // SAFETY: `self.node` is guaranteed to be a child node by the safety invariants of
-        // `Self::new`, so the `children` field of the `self.node.ptr` union can be read.
-        unsafe { (*self.node).ptr.children.as_ref() }
-    }
-
-    pub fn children_mut(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {
-        unsafe {
-            let children = self.raw_children_ptr();
-            ArrayVecMut::new(
-                addr_of_mut!((*children).children),
-                addr_of_mut!((*children).len),
-            )
-        }
-    }
-
-    pub fn raw_children_mut(&mut self) -> &mut InternalNode<T, B, C> {
-        unsafe { (*self.node).ptr.children.as_mut() }
-    }
-
-    pub fn raw_children_ptr(&mut self) -> *mut InternalNode<T, B, C> {
-        unsafe { (*self.node).ptr.children.as_ptr() }
-    }
-
-    pub fn into_children_mut(self) -> &'a mut InternalNode<T, B, C> {
-        unsafe { (*self.node).ptr.children.as_mut() }
     }
 
     pub unsafe fn insert_node(
@@ -653,8 +685,6 @@ where
         index: usize,
         prev_split_res: SplitResult<T, B, C>,
     ) -> InsertResult<T, B, C> {
-        debug_assert_eq!(self.len(), self.children().sum_lens());
-
         let (path_through_self, node) = match prev_split_res {
             SplitResult::Right(n) => (false, n),
             SplitResult::Left(n) => (true, n),
@@ -679,27 +709,20 @@ where
 
     unsafe fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
         debug_assert!(!self.is_full());
-        let node_len = node.len();
-        self.children_mut().insert(index, node);
-        unsafe { self.set_len(self.len() + node_len) };
-        debug_assert_eq!(self.len(), self.children().sum_lens());
+        self.as_array_vec().insert(index, node);
     }
 
     unsafe fn split_and_insert_left(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
-        debug_assert_eq!(self.len(), self.children().sum_lens());
         let split_index = Self::UNDERFULL_LEN;
-        let node_len = node.len();
 
-        let new_sibling = self.raw_children_mut().split(split_index);
-        self.children_mut().insert(index, node);
+        let new_sibling_node = Node::from_child_array([]);
+        let mut new_sibling = unsafe { InternalMut::new(new_sibling_node.ptr.children) };
 
-        let new_self_len = self.children().sum_lens();
-        let new_node_len = self.len() + node_len - new_self_len;
+        self.as_array_vec()
+            .split(split_index, new_sibling.as_array_vec());
+        unsafe { self.insert_fitting(index, node) };
 
-        debug_assert_eq!(new_node_len, new_sibling.sum_lens());
-
-        unsafe { self.set_len(new_self_len) };
-        unsafe { Node::from_children(new_node_len, new_sibling) }
+        new_sibling_node
     }
 
     unsafe fn split_and_insert_right(
@@ -707,20 +730,16 @@ where
         index: usize,
         node: Node<T, B, C>,
     ) -> Node<T, B, C> {
-        debug_assert_eq!(self.len(), self.children().sum_lens());
         let split_index = Self::UNDERFULL_LEN + 1;
-        let node_len = node.len();
 
-        let mut new_sibling = self.raw_children_mut().split(split_index);
+        let new_sibling_node = Node::from_child_array([]);
+        let mut new_sibling = unsafe { InternalMut::new(new_sibling_node.ptr.children) };
+
+        self.as_array_vec()
+            .split(split_index, new_sibling.as_array_vec());
         new_sibling.as_array_vec().insert(index - split_index, node);
 
-        let new_self_len = self.children().sum_lens();
-        let new_node_len = self.len() + node_len - new_self_len;
-
-        debug_assert_eq!(new_node_len, new_sibling.sum_lens());
-
-        unsafe { self.set_len(new_self_len) };
-        unsafe { Node::from_children(new_node_len, new_sibling) }
+        new_sibling_node
     }
 }
 
@@ -732,12 +751,4 @@ pub enum InsertResult<T, const B: usize, const C: usize> {
 pub enum SplitResult<T, const B: usize, const C: usize> {
     Left(Node<T, B, C>),
     Right(Node<T, B, C>),
-}
-
-impl<T, const B: usize, const C: usize> SplitResult<T, B, C> {
-    pub const fn node_len(&self) -> usize {
-        match self {
-            Self::Left(n) | Self::Right(n) => n.len(),
-        }
-    }
 }
