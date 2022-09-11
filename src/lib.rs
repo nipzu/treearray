@@ -18,7 +18,7 @@ pub use cursor::CursorMut;
 use iter::{Drain, Iter};
 use node::{
     handle::{Internal, InternalMut, Leaf, LeafMut},
-    Node,
+    LeafNode, Node,
 };
 
 // pub fn foo(b: &BTreeVec<i32, 32, 64>, x: usize) -> Option<&i32> {
@@ -92,12 +92,12 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..self.height {
-            let handle = unsafe { Internal::new(cur_node) };
+            let handle = unsafe { Internal::new(cur_node.ptr.cast().as_ref()) };
             cur_node = unsafe { handle.child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
-        let leaf = unsafe { Leaf::new(cur_node) };
+        let leaf = unsafe { Leaf::new(cur_node.ptr.cast::<LeafNode<T, B, C>>().as_ref()) };
         // SAFETY: from `get_child_containing_index` we know that index < leaf.len()
         unsafe { Some(leaf.value_unchecked(index)) }
     }
@@ -112,12 +112,12 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..height {
-            let handle = unsafe { InternalMut::new(cur_node.ptr.children) };
+            let handle = unsafe { InternalMut::new(cur_node.ptr) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
-        let leaf = unsafe { LeafMut::new_leaf(cur_node) };
+        let leaf = unsafe { LeafMut::new_leaf(cur_node.ptr.cast::<LeafNode<T, B, C>>()) };
         // SAFETY: from `into_child_containing_index` we know that index < leaf.len()
         unsafe { Some(leaf.into_value_unchecked_mut(index)) }
     }
@@ -199,7 +199,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
 impl<T, const B: usize, const C: usize> Drop for BTreeVec<T, B, C> {
     fn drop(&mut self) {
-        self.clear();
+        // self.clear();
     }
 }
 
@@ -239,12 +239,17 @@ mod tests {
     #[test]
     fn test_push_front_back() {
         let mut b = BTreeVec::<i32, 7, 5>::new();
+        let mut l = 0;
         for x in 0..500 {
             b.push_back(x);
+            l += 1;
+            assert_eq!(l, b.len());
         }
 
         for x in (-500..0).rev() {
-            b.push_front(x)
+            b.push_front(x);
+            l += 1;
+            assert_eq!(l, b.len());
         }
 
         for (a, b) in b.iter().zip(-500..) {

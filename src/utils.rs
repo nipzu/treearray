@@ -1,6 +1,6 @@
 use core::{
     mem::MaybeUninit,
-    ops::{AddAssign, Index, IndexMut, SubAssign},
+    ops::{Index, IndexMut},
     ptr, slice,
 };
 
@@ -20,21 +20,22 @@ pub const unsafe fn slice_assume_init_ref<T>(slice: &[MaybeUninit<T>]) -> &[T] {
     unsafe { &*(slice as *const [MaybeUninit<T>] as *const [T]) }
 }
 
-pub struct ArrayVecMut<T, L, const N: usize> {
+pub struct ArrayVecMut<T, const N: usize> {
     array: *mut T,
-    len: *mut L,
+    len: *mut u16,
 }
 
-impl<T, L, const N: usize> ArrayVecMut<T, L, N>
-where
-    L: Copy + Into<usize> + From<u16> + AddAssign + SubAssign,
-{
-    pub unsafe fn new(array: *mut [MaybeUninit<T>; N], len: *mut L) -> Self {
-        debug_assert!(unsafe { (*len).into() <= N });
+impl<T, const N: usize> ArrayVecMut<T, N> {
+    pub unsafe fn new(array: *mut [MaybeUninit<T>; N], len: *mut u16) -> Self {
+        debug_assert!(unsafe { usize::from(*len) <= N });
         Self {
             array: array.cast(),
             len,
         }
+    }
+
+    pub fn len(&self) -> usize {
+        unsafe { usize::from(*self.len) }
     }
 
     pub fn insert(&mut self, index: usize, value: T) {
@@ -45,7 +46,7 @@ where
             let tail_ptr = self.array.add(index);
             ptr::copy(tail_ptr, tail_ptr.add(1), len - index);
             tail_ptr.write(value);
-            *self.len += L::from(1);
+            *self.len += 1;
         }
     }
 
@@ -57,49 +58,48 @@ where
             let tail_ptr = self.array.add(index);
             let ret = tail_ptr.read();
             ptr::copy(tail_ptr.add(1), tail_ptr, len - index - 1);
-            *self.len -= L::from(1);
+            *self.len -= 1;
             ret
         }
     }
 
     pub fn push_back(&mut self, value: T) {
-        self.insert(unsafe { *self.len }.into(), value);
+        self.insert(self.len(), value);
     }
 
     pub fn pop_back(&mut self) -> T {
-        self.remove(unsafe { (*self.len).into() - 1 })
+        self.remove(self.len() - 1)
     }
 
-    pub fn split(&mut self, index: L, other: Self) {
-        let len = unsafe { *self.len };
-        assert!(index.into() <= len.into());
+    pub fn split(&mut self, index: usize, other: Self) {
+        let len = self.len();
+        assert!(index <= len);
         let mut tail_len = len;
         tail_len -= index;
-        let src = unsafe { self.array.add(index.into()) };
+        let src = unsafe { self.array.add(index) };
         let dst = other.array;
-        unsafe { ptr::copy_nonoverlapping(src, dst, tail_len.into()) };
+        unsafe { ptr::copy_nonoverlapping(src, dst, tail_len) };
         unsafe {
-            *self.len = index;
-            *other.len = tail_len;
+            *self.len = index as u16;
+            *other.len = tail_len as u16;
         }
     }
 
     pub fn append(&mut self, other: Self) {
-        assert!(unsafe { (*self.len).into() + (*other.len).into() <= N });
+        assert!(self.len() + other.len() <= N);
         let src = other.array;
         let dst = unsafe { self.array.add((*self.len).into()) };
         unsafe { ptr::copy_nonoverlapping(src, dst, (*other.len).into()) };
         unsafe {
             *self.len += *other.len;
-            *other.len = L::from(0);
+            *other.len = 0;
         }
     }
 }
 
-impl<T, L, const N: usize, I> Index<I> for ArrayVecMut<T, L, N>
+impl<T, const N: usize, I> Index<I> for ArrayVecMut<T, N>
 where
     [T]: Index<I>,
-    L: Copy + Into<usize>,
 {
     type Output = <[T] as Index<I>>::Output;
     fn index(&self, index: I) -> &Self::Output {
@@ -107,10 +107,9 @@ where
     }
 }
 
-impl<T, L, const N: usize, I> IndexMut<I> for ArrayVecMut<T, L, N>
+impl<T, const N: usize, I> IndexMut<I> for ArrayVecMut<T, N>
 where
     [T]: IndexMut<I>,
-    L: Copy + Into<usize>,
 {
     fn index_mut(&mut self, index: I) -> &mut Self::Output {
         unsafe { slice::from_raw_parts_mut(self.array, (*self.len).into()).index_mut(index) }
@@ -124,7 +123,7 @@ mod tests {
     #[test]
     fn test_array_vec_insert_front() {
         let mut a: [MaybeUninit<usize>; 100] = [MaybeUninit::uninit(); 100];
-        let mut len = 0_usize;
+        let mut len = 0_u16;
         let mut r = unsafe { ArrayVecMut::new(&mut a, &mut len) };
 
         for x in 0..50 {
