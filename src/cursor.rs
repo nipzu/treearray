@@ -489,7 +489,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
             if old_root.is_singleton() {
                 *self.height_mut() -= 1;
-                let new_root = old_root.as_array_vec().pop_back();
+                let mut new_root = old_root.as_array_vec().pop_back();
+                new_root.ptr.as_mut().parent = None;
                 // `old_root` points to the `root` field of `self` so it must be freed before assigning a new root
                 OwnedNode::new_internal(self.root_mut().assume_init_read()).free();
                 let new_root: *mut _ = self.root_mut().write(new_root);

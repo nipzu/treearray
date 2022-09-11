@@ -331,11 +331,12 @@ mod tests {
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len());
             let v_rem = v.remove(index);
-            b_4_2.remove(index);
+            let b_4_2_rem = b_4_2.remove(index);
             let b_5_1_rem = b_5_1.remove(index);
             assert_eq!(v.len(), b_4_2.len());
             assert_eq!(v.len(), b_5_1.len());
             assert_eq!(v_rem, b_5_1_rem);
+            assert_eq!(v_rem, b_4_2_rem);
         }
 
         assert!(b_4_2.is_empty());

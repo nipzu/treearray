@@ -302,14 +302,20 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, height::One, T, B, C
 
     pub fn handle_underfull_leaf_child_head(&mut self) {
         let [mut cur, mut next] = self.child_pair_at(0);
-
+        
         if next.is_almost_underfull() {
             cur.append_children(next);
+            let next_len = unsafe { (*self.node.as_ptr()).children[1].assume_init_ref().length };
             unsafe {
-                OwnedNode::new_internal(self.as_array_vec().remove(1)).free();
+                (*self.node.as_ptr()).children[0].assume_init_mut().length += next_len;
+                self.remove_child(1).free();
             }
         } else {
             cur.push_back_child(next.pop_front_child());
+            unsafe {
+                (*self.node.as_ptr()).children[0].assume_init_mut().length += 1;
+                (*self.node.as_ptr()).children[1].assume_init_mut().length -= 1;
+            }
         }
     }
 
@@ -317,15 +323,21 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, height::One, T, B, C
         let [mut prev, mut cur] = self.child_pair_at(*index - 1);
 
         if prev.is_almost_underfull() {
-            let prev_len = prev.len_children();
+            let prev_children_len = prev.len_children();
             prev.append_children(cur);
+            let cur_len = unsafe { (*self.node.as_ptr()).children[*index].assume_init_ref().length };
             unsafe {
-                OwnedNode::new_internal(self.as_array_vec().remove(*index)).free();
+                (*self.node.as_ptr()).children[*index - 1].assume_init_mut().length += cur_len;
+                self.remove_child(*index).free();
             }
             *index -= 1;
-            *child_index += prev_len;
+            *child_index += prev_children_len;
         } else {
             cur.push_front_child(prev.pop_back_child());
+            unsafe {
+                (*self.node.as_ptr()).children[*index - 1].assume_init_mut().length -= 1;
+                (*self.node.as_ptr()).children[*index].assume_init_mut().length += 1;
+            }
             *child_index += 1;
         }
     }
@@ -406,11 +418,19 @@ impl<'a, 'id, T, const B: usize, const C: usize>
 
         if next.is_almost_underfull() {
             cur.append_children(next);
+            let next_len = unsafe { (*self.node.as_ptr()).children[1].assume_init_ref().length };
             unsafe {
-                OwnedNode::new_internal(self.as_array_vec().remove(1)).free();
+                (*self.node.as_ptr()).children[0].assume_init_mut().length += next_len;
+                self.remove_child(1).free();
             }
         } else {
-            cur.push_back_child(next.pop_front_child());
+            let x = next.pop_front_child();
+            let x_len = x.node.length;
+            cur.push_back_child(x);
+            unsafe {
+                (*self.node.as_ptr()).children[0].assume_init_mut().length += x_len;
+                (*self.node.as_ptr()).children[1].assume_init_mut().length -= x_len;
+            }
         }
     }
 
@@ -422,15 +442,23 @@ impl<'a, 'id, T, const B: usize, const C: usize>
         let [mut prev, mut cur] = self.child_pair_at(*index - 1);
 
         if prev.is_almost_underfull() {
-            let prev_len = prev.len_children();
+            let prev_len_children = prev.len_children();
             prev.append_children(cur);
+            let cur_len = unsafe { (*self.node.as_ptr()).children[*index].assume_init_ref().length };
             unsafe {
-                OwnedNode::new_internal(self.as_array_vec().remove(*index)).free();
+                (*self.node.as_ptr()).children[*index - 1].assume_init_mut().length += cur_len;
+                self.remove_child(*index).free();
             }
             *index -= 1;
-            *child_index += prev_len;
+            *child_index += prev_len_children;
         } else {
-            cur.push_front_child(prev.pop_back_child());
+            let x = prev.pop_back_child();
+            let x_len = x.node.length;
+            cur.push_front_child(x);
+            unsafe {
+                (*self.node.as_ptr()).children[*index - 1].assume_init_mut().length -= x_len;
+                (*self.node.as_ptr()).children[*index].assume_init_mut().length += x_len;
+            }
             *child_index += 1;
         }
     }
@@ -442,7 +470,7 @@ pub trait FreeableNode {
 
 impl<T, const B: usize, const C: usize> FreeableNode for OwnedNode<height::Zero, T, B, C> {
     fn free(self) {
-        debug_assert_eq!(self.node.len(), 0);
+        debug_assert_eq!(unsafe { (*self.node.ptr.as_ptr()).children_len.assume_init() }, 0);
         unsafe { Box::from_raw(self.node.ptr.as_ptr().cast::<LeafNode<T, B, C>>()) };
     }
 }
@@ -452,8 +480,8 @@ where
     H: height::Internal + Copy,
 {
     fn free(self) {
-        // debug_assert_eq!(unsafe { (*self.node.ptr.children.as_ptr()).base.children_len.assume_init() }, 0);
-        debug_assert_eq!(self.node.len(), 0);
+        debug_assert_eq!(unsafe { (*self.node.ptr.as_ptr()).children_len.assume_init() }, 0);
+        // debug_assert_eq!(self.node.len(), 0);
         unsafe { Box::from_raw(self.node.ptr.as_ptr().cast::<InternalNode<T, B, C>>()) };
     }
 }
@@ -516,17 +544,21 @@ where
     fn insert_child(&mut self, index: usize, child: Self::Child) {
         // unsafe { self.set_len(self.len() + child.node.len()) };
         self.as_array_vec().insert(index, child.node);
+        self.set_parent_links(index..self.len_children());
     }
     fn remove_child(&mut self, index: usize) -> Self::Child {
-        let node = self.as_array_vec().remove(index);
         // unsafe { self.set_len(self.len() - node.len()) };
+        let node = self.as_array_vec().remove(index);
+        self.set_parent_links(index..self.len_children());
         OwnedNode {
             node,
             _height: unsafe { self.height.make_child_height() },
         }
     }
     fn append_children(&mut self, mut other: Self) {
+        let self_old_len = self.len_children();
         self.as_array_vec().append(other.as_array_vec());
+        self.set_parent_links(self_old_len..self.len_children());
 
         // unsafe { self.set_len(self.len() + other.len()) };
         // unsafe { other.set_len(0) };
