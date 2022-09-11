@@ -199,7 +199,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
 impl<T, const B: usize, const C: usize> Drop for BTreeVec<T, B, C> {
     fn drop(&mut self) {
-        // self.clear();
+        self.clear();
     }
 }
 

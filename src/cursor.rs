@@ -6,7 +6,7 @@ use crate::{
             height, ExactHeightNode, FreeableNode, InsertResult, InternalMut, Leaf, LeafMut,
             OwnedNode, SplitResult,
         },
-        LeafNode,
+        LeafNode, NodeBase,
     },
     node::{InternalNode, Node},
     BTreeVec,
@@ -210,14 +210,13 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
     unsafe fn update_path_lengths<F: Fn(usize) -> usize>(&mut self, f: F) {
         if self.height() > 0 {
             unsafe {
-                // TODO
-                // FIXME
-                // HACK
-                let mut cur_node = InternalMut::new(self.leaf.assume_init().cast());
-                while let Some((mut parent, index)) = cur_node.into_parent_and_index() {
+                let mut cur_node = self.leaf.assume_init().cast::<NodeBase<T, B, C>>();
+                while let Some(parent) = (*cur_node.as_ptr()).parent {
+                    let index = (*cur_node.as_ptr()).parent_index.assume_init();
+                    let mut parent = InternalMut::new(parent.cast());
                     let mut child: &mut Node<T, B, C> = &mut parent.as_array_vec()[index as usize];
                     child.length = f(child.length);
-                    cur_node = parent.into_internal();
+                    cur_node = parent.node.cast();
                 }
                 let mut root = self.root_mut().assume_init_mut();
                 root.length = f(root.length);
@@ -375,6 +374,10 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
     /// # Panics
     /// panics if pointing past the end
     pub fn remove(&mut self) -> T {
+        if self.index >= self.tree.len() {
+            panic!("index out of bounds");
+        }
+
         unsafe {
             self.update_path_lengths(|len| len - 1);
         }

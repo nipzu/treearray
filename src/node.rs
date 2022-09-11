@@ -2,7 +2,7 @@ use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use alloc::boxed::Box;
 
-use crate::utils::{slice_assume_init_ref, ArrayVecMut};
+use crate::utils::slice_assume_init_ref;
 
 // use crate::panics::panic_length_overflow;
 
@@ -73,10 +73,6 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
         }
     }
 
-    pub fn as_array_vec(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {
-        unsafe { ArrayVecMut::new(&mut self.children, self.base.children_len.assume_init_mut()) }
-    }
-
     pub fn sum_lens(&self) -> usize {
         self.children().iter().map(Node::len).sum()
     }
@@ -89,14 +85,13 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     pub fn from_child_array<const N: usize>(children: [Self; N]) -> Self {
-        let mut boxed_children = Box::new(InternalNode::new());
-        let mut vec = boxed_children.as_array_vec();
-        let ptr = NonNull::from(Box::leak(boxed_children));
+        let boxed_children = NonNull::from(Box::leak(Box::new(InternalNode::new())));
+        let mut vec = unsafe { handle::InternalMut::new(boxed_children.cast()).as_array_vec() };
         let mut length = 0;
         for (i, mut child) in children.into_iter().enumerate() {
             length += child.len();
             unsafe {
-                child.ptr.as_mut().parent = Some(ptr);
+                child.ptr.as_mut().parent = Some(boxed_children);
                 child.ptr.as_mut().parent_index.write(i as u16);
             }
             vec.push_back(child);
@@ -104,7 +99,7 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
         Self {
             length,
-            ptr: ptr.cast::<NodeBase<T, B, C>>(),
+            ptr: boxed_children.cast::<NodeBase<T, B, C>>(),
         }
     }
 
