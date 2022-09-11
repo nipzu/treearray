@@ -6,9 +6,8 @@ use crate::{
             height, ExactHeightNode, FreeableNode, InsertResult, InternalMut, Leaf, LeafMut,
             OwnedNode, SplitResult,
         },
-        LeafNode, NodeBase,
+        LeafNode, Node, NodeBase,
     },
-    node::{InternalNode, Node},
     BTreeVec,
 };
 
@@ -239,18 +238,9 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
         let mut old_root = unsafe { self.root_mut().assume_init_read() };
         old_root.length = unsafe { (*InternalMut::new(old_root.ptr).node.as_ptr()).sum_lens() };
-        let new_root_ptr: *mut _ = self
-            .root_mut()
+        self.root_mut()
             .write(Node::from_child_array([old_root, new_node]));
         *self.height_mut() += 1;
-
-        let mut new_root = unsafe {
-            InternalMut::new_parent_of_internal((*new_root_ptr).ptr.cast::<InternalNode<T, B, C>>())
-        };
-        new_root.with_brand(|mut new_root| {
-            new_root.set_child_parent_cache(0);
-            new_root.set_child_parent_cache(1);
-        });
     }
 
     unsafe fn split_root_leaf(&mut self, split_res: SplitResult<T, B, C>) {
@@ -261,7 +251,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
         let mut old_root = unsafe { self.root_mut().assume_init_read() };
         old_root.length = unsafe { old_root.ptr.as_mut().children_len.assume_init().into() };
-        // new_node.length = unsafe { new_node.ptr.as_mut().children_len.assume_init().into() };
         let new_root_ptr: *mut _ = self
             .root_mut()
             .write(Node::from_child_array([old_root, new_node]));
@@ -303,10 +292,16 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             return;
         }
 
-        // height of `cur_node`
-        let mut height = 1;
-        let cur_node =
-            unsafe { InternalMut::new_parent_of_leaf((*leaf_ptr.as_ptr()).base.parent.unwrap()) };
+        let cur_node = if let Some(parent) = unsafe { (*leaf_ptr.as_ptr()).base.parent } {
+            unsafe { InternalMut::new_parent_of_leaf(parent) }
+        } else {
+            // height is 1
+            if let InsertResult::Split(split_res) = to_insert {
+                unsafe { self.split_root_leaf(split_res) };
+            }
+            return;
+        };
+
         let child_index = unsafe { (*leaf_ptr.as_ptr()).base.parent_index.assume_init() as usize };
 
         let mut parent = cur_node;
@@ -344,29 +339,22 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
         let mut cur_node = parent.into_internal();
 
-        height += 1;
-
         while let InsertResult::Split(split_res) = to_insert {
-            // should not be >?
-            if height >= self.height() {
-                // debug_assert_eq!(height, self.height());
-                unsafe { self.split_root_internal(split_res) };
-                return;
-            }
-
             unsafe {
-                let (mut parent, child_index) = cur_node.into_parent_and_index().unwrap();
-                
-                let child = (*parent.node.as_ptr())
-                    .children
-                    .as_mut_ptr()
-                    .add(child_index.into())
-                    .cast::<Node<T, B, C>>();
-                (*child).length = (*InternalMut::new((*child).ptr).node.as_ptr()).sum_lens();
+                if let Some((mut parent, child_index)) = cur_node.into_parent_and_index() {
+                    let child = (*parent.node.as_ptr())
+                        .children
+                        .as_mut_ptr()
+                        .add(child_index.into())
+                        .cast::<Node<T, B, C>>();
+                    (*child).length = (*InternalMut::new((*child).ptr).node.as_ptr()).sum_lens();
 
-                to_insert = parent.insert_node(child_index as usize + 1, split_res);
-                cur_node = parent.into_internal();
-                height += 1;
+                    to_insert = parent.insert_node(child_index as usize + 1, split_res);
+                    cur_node = parent.into_internal();
+                } else {
+                    self.split_root_internal(split_res);
+                    return;
+                }
             }
         }
     }
@@ -382,15 +370,20 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             self.update_path_lengths(|len| len - 1);
         }
 
-        let height = self.height();
         let mut leaf_index = self.leaf_index;
         let mut leaf = self
             .leaf_mut()
             .expect("attempting to remove from empty tree");
         assert!(leaf_index < leaf.len(), "out of bounds");
         let ret = leaf.remove_child(leaf_index);
+        // root is internal
 
-        if height == 1 {
+        let leaf_underfull = leaf.is_underfull();
+
+        let mut parent = if let Some(parent) = unsafe { (*leaf.node_ptr().as_ptr()).base.parent } {
+            unsafe { InternalMut::new_parent_of_leaf(parent) }
+        } else {
+            // height is 1
             if leaf.len() == 0 {
                 unsafe {
                     OwnedNode::new_leaf(self.root_mut().assume_init_read()).free();
@@ -399,14 +392,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             }
             debug_assert_eq!(self.leaf_index, self.index);
             return ret;
-        }
-
-        // root is internal
-
-        let leaf_underfull = leaf.is_underfull();
-
-        let mut parent = unsafe {
-            InternalMut::new_parent_of_leaf((*leaf.node_ptr().as_ptr()).base.parent.unwrap())
         };
 
         let mut child_index = unsafe {
