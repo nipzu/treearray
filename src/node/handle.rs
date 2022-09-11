@@ -1,7 +1,6 @@
 use core::{
-    hint::unreachable_unchecked,
     marker::PhantomData,
-    ops::Range,
+    ops::RangeFrom,
     ptr::{addr_of_mut, NonNull},
 };
 
@@ -53,7 +52,7 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
 }
 
 pub struct Internal<'a, T, const B: usize, const C: usize> {
-    node: &'a InternalNode<T, B, C>,
+    pub node: &'a InternalNode<T, B, C>,
 }
 
 impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
@@ -74,7 +73,7 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
             }
         }
 
-        unsafe { unreachable_unchecked() };
+        panic!();
     }
 }
 
@@ -308,8 +307,8 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, height::One, T, B, C
             let next_len = unsafe { (*self.node.as_ptr()).children[1].assume_init_ref().length };
             unsafe {
                 (*self.node.as_ptr()).children[0].assume_init_mut().length += next_len;
-                self.remove_child(1).free();
             }
+            self.remove_child(1).free();
         } else {
             cur.push_back_child(next.pop_front_child());
             unsafe {
@@ -334,8 +333,8 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, height::One, T, B, C
                 (*self.node.as_ptr()).children[*index - 1]
                     .assume_init_mut()
                     .length += cur_len;
-                self.remove_child(*index).free();
             }
+            self.remove_child(*index).free();
             *index -= 1;
             *child_index += prev_children_len;
         } else {
@@ -379,12 +378,6 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, height::TwoOrMore, T
 impl<'a, 'id, T, const B: usize, const C: usize>
     InternalMut<'a, height::BrandedTwoOrMore<'id>, T, B, C>
 {
-    pub fn set_child_parent_cache(&mut self, index: usize) {
-        let self_node = self.node;
-        self.child_mut(index)
-            .set_parent_node_and_index(self_node, index);
-    }
-
     pub fn child_mut(
         &mut self,
         index: usize,
@@ -431,8 +424,8 @@ impl<'a, 'id, T, const B: usize, const C: usize>
             let next_len = unsafe { (*self.node.as_ptr()).children[1].assume_init_ref().length };
             unsafe {
                 (*self.node.as_ptr()).children[0].assume_init_mut().length += next_len;
-                self.remove_child(1).free();
             }
+            self.remove_child(1).free();
         } else {
             let x = next.pop_front_child();
             let x_len = x.node.length;
@@ -463,8 +456,8 @@ impl<'a, 'id, T, const B: usize, const C: usize>
                 (*self.node.as_ptr()).children[*index - 1]
                     .assume_init_mut()
                     .length += cur_len;
-                self.remove_child(*index).free();
             }
+            self.remove_child(*index).free();
             *index -= 1;
             *child_index += prev_len_children;
         } else {
@@ -568,14 +561,12 @@ where
         self.len_children()
     }
     fn insert_child(&mut self, index: usize, child: Self::Child) {
-        // unsafe { self.set_len(self.len() + child.node.len()) };
         self.as_array_vec().insert(index, child.node);
-        self.set_parent_links(index..self.len_children());
+        self.set_parent_links(index..);
     }
     fn remove_child(&mut self, index: usize) -> Self::Child {
-        // unsafe { self.set_len(self.len() - node.len()) };
         let node = self.as_array_vec().remove(index);
-        self.set_parent_links(index..self.len_children());
+        self.set_parent_links(index..);
         OwnedNode {
             node,
             _height: unsafe { self.height.make_child_height() },
@@ -584,10 +575,7 @@ where
     fn append_children(&mut self, mut other: Self) {
         let self_old_len = self.len_children();
         self.as_array_vec().append(other.as_array_vec());
-        self.set_parent_links(self_old_len..self.len_children());
-
-        // unsafe { self.set_len(self.len() + other.len()) };
-        // unsafe { other.set_len(0) };
+        self.set_parent_links(self_old_len..);
     }
 }
 
@@ -624,21 +612,6 @@ where
 
     pub fn is_underfull(&self) -> bool {
         self.len_children() <= Self::UNDERFULL_LEN
-    }
-
-    pub fn set_parent_node_and_index(
-        &mut self,
-        parent: NonNull<InternalNode<T, B, C>>,
-        index: usize,
-    ) {
-        self.set_parent_index(index);
-        unsafe { (*self.node.as_ptr()).base.parent = Some(parent) }
-    }
-
-    pub fn set_parent_index(&mut self, index: usize) {
-        unsafe {
-            (*self.node.as_ptr()).base.parent_index.write(index as u16);
-        }
     }
 
     pub fn as_array_vec(&mut self) -> ArrayVecMut<Node<T, B, C>, B> {
@@ -682,8 +655,7 @@ where
             }
         }
 
-        debug_assert!(false);
-        unsafe { unreachable_unchecked() };
+        panic!();
     }
 
     pub unsafe fn insert_node(
@@ -716,9 +688,7 @@ where
     unsafe fn insert_fitting(&mut self, index: usize, node: Node<T, B, C>) {
         debug_assert!(!self.is_full());
         self.as_array_vec().insert(index, node);
-
-        let self_children_len = self.as_array_vec().len();
-        self.set_parent_links(index..self_children_len);
+        self.set_parent_links(index..);
     }
 
     unsafe fn split_and_insert_left(&mut self, index: usize, node: Node<T, B, C>) -> Node<T, B, C> {
@@ -731,9 +701,7 @@ where
             .split(split_index, new_sibling.as_array_vec());
         unsafe { self.insert_fitting(index, node) };
 
-        let new_children_len = new_sibling.as_array_vec().len();
-        new_sibling.set_parent_links(0..new_children_len);
-
+        new_sibling.set_parent_links(0..);
         new_sibling_node.length = unsafe { new_sibling.node.as_ref().sum_lens() };
         new_sibling_node
     }
@@ -752,14 +720,12 @@ where
             .split(split_index, new_sibling.as_array_vec());
         new_sibling.as_array_vec().insert(index - split_index, node);
 
-        let new_children_len = new_sibling.as_array_vec().len();
-        new_sibling.set_parent_links(0..new_children_len);
-
+        new_sibling.set_parent_links(0..);
         new_sibling_node.length = unsafe { new_sibling.node.as_ref().sum_lens() };
         new_sibling_node
     }
 
-    fn set_parent_links(&mut self, range: Range<usize>) {
+    fn set_parent_links(&mut self, range: RangeFrom<usize>) {
         for (i, n) in self.as_array_vec()[range.clone()].iter_mut().enumerate() {
             unsafe {
                 (*n.ptr.as_ptr()).parent = Some(self.node);

@@ -21,7 +21,7 @@ use node::{
     LeafNode, Node,
 };
 
-// pub fn foo(b: &BTreeVec<i32, 32, 64>, x: usize) -> Option<&i32> {
+// pub fn foo(b: &BTreeVec<i32>, x: usize) -> Option<&i32> {
 //     b.get(x)
 // }
 
@@ -123,20 +123,35 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     }
 
     #[must_use]
-    #[inline]
     pub fn first(&self) -> Option<&T> {
-        self.get(0)
+        let mut cur_node = self.root()?;
+
+        for _ in 1..self.height {
+            let handle = unsafe { Internal::new(cur_node.ptr.cast().as_ref()) };
+            cur_node = unsafe { handle.node.children[0].assume_init_ref() };
+        }
+
+        unsafe { Some(Leaf::<T, B, C>::new(cur_node.ptr.cast().as_ref()).value_unchecked(0)) }
     }
 
     #[must_use]
-    #[inline]
     pub fn first_mut(&mut self) -> Option<&mut T> {
-        self.get_mut(0)
+        let mut cur_node = self.root_mut()? as *mut Node<T, B, C>;
+
+        for _ in 1..self.height {
+            let handle = unsafe { InternalMut::<_, T, B, C>::new((*cur_node).ptr.cast()) };
+            cur_node = unsafe { (*handle.node.as_ptr()).children.as_mut_ptr().cast() };
+        }
+
+        unsafe {
+            Some(LeafMut::<T, B, C>::new_leaf((*cur_node).ptr.cast()).into_value_unchecked_mut(0))
+        }
     }
 
     #[must_use]
     #[inline]
     pub fn last(&self) -> Option<&T> {
+        // TODO: optimize
         // If `self.len() == 0`, the index wraps to `usize::MAX`
         // which is definitely outside the range of an empty array.
         self.get(self.len().wrapping_sub(1))

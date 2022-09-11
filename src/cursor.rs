@@ -80,58 +80,36 @@ pub struct CursorMut<'a, T, const B: usize, const C: usize> {
 
 impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
     pub(crate) fn new_at(tree: &'a mut BTreeVec<T, B, C>, index: usize) -> Self {
-        let len = tree.len();
-        if index > len {
+        if index > tree.len() {
             panic!();
         }
 
-        if tree.is_empty() {
+        let mut cur_node = if let Some(root) = tree.root_mut() {
+            root.ptr
+        } else {
             return Self {
                 index: 0,
                 tree,
                 leaf_index: 0,
                 leaf: MaybeUninit::uninit(),
             };
+        };
+
+        let is_past_the_end = index == tree.len();
+        let mut target_index = index - usize::from(is_past_the_end);
+
+        // the height of `cur_node` is `tree.height - 1`
+        // decrement the height of `cur_node` `tree.height - 1` times
+        for _ in 1..tree.height {
+            let handle = unsafe { InternalMut::new(cur_node) };
+            cur_node = unsafe { handle.into_child_containing_index(&mut target_index).ptr };
         }
-
-        if tree.height == 1 {
-            let leaf = unsafe { MaybeUninit::new(tree.root.assume_init_mut().ptr.cast()) };
-            return Self {
-                index,
-                tree,
-                leaf_index: index,
-                leaf,
-            };
-        }
-
-        let is_past_the_end = index == len;
-        let mut remaining_index = index;
-
-        if is_past_the_end {
-            remaining_index -= 1;
-        }
-
-        let height = tree.height - 1;
-        // the height of `cur_node` is `height`
-        let mut cur_node = unsafe { InternalMut::new(tree.root.assume_init_mut().ptr.cast()) };
-        // decrement the height of `cur_node` `height - 1` times
-        for _ in (1..height).rev() {
-            let handle = cur_node;
-            let new_cur_node: &mut Node<T, B, C> =
-                unsafe { handle.into_child_containing_index(&mut remaining_index) };
-            cur_node = unsafe { InternalMut::new(new_cur_node.ptr) };
-        }
-
-        // debug_assert_eq!(cur_node.len(), cur_node.children().sum_lens());
-        let leaf = unsafe { cur_node.into_child_containing_index(&mut remaining_index) };
-
-        let leaf_index = remaining_index + usize::from(is_past_the_end);
 
         Self {
             index,
             tree,
-            leaf_index,
-            leaf: MaybeUninit::new(leaf.ptr.cast()),
+            leaf_index: target_index + usize::from(is_past_the_end),
+            leaf: MaybeUninit::new(cur_node.cast()),
         }
     }
 
@@ -285,13 +263,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             false
         };
 
-        if self.height() == 1 {
-            if let InsertResult::Split(split_res) = to_insert {
-                unsafe { self.split_root_leaf(split_res) };
-            }
-            return;
-        }
-
         let cur_node = if let Some(parent) = unsafe { (*leaf_ptr.as_ptr()).base.parent } {
             unsafe { InternalMut::new_parent_of_leaf(parent) }
         } else {
@@ -397,7 +368,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         let mut child_index = unsafe {
             let mut self_index =
                 (*leaf.node_ptr().as_ptr()).base.parent_index.assume_init() as usize;
-            // parent.set_len(parent.len() - 1);
 
             if leaf_underfull {
                 if self_index > 0 {
@@ -433,7 +403,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                         } else {
                             parent.handle_underfull_internal_child_head();
                         }
-                        parent.set_child_parent_cache(cur_index);
                         if h == 1 {
                             self.leaf.write(
                                 InternalMut::new_parent_of_leaf(parent.child_mut(cur_index).node)

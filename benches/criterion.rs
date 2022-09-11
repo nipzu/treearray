@@ -9,15 +9,10 @@ fn bench_get_bvec(c: &mut Criterion) {
 
     for size in [1_000, 10_000, 100_000, 1_000_000, 10_000_000] {
         let mut bvec = BTreeVec::<i32>::new();
-        // let mut vec = Vec::new();
-        // let mut im_vec = Vector::new();
 
         for x in 0..size as i32 {
             let i = rng.gen_range(0..=bvec.len());
-
             bvec.insert(i, x);
-            // vec.insert(i, x);
-            // im_vec.insert(i, x);
         }
 
         c.bench_with_input(
@@ -31,30 +26,6 @@ fn bench_get_bvec(c: &mut Criterion) {
                 )
             },
         );
-
-        // c.bench_with_input(
-        //     BenchmarkId::new("Vec<i32>::get (random)", size),
-        //     &size,
-        //     |b, &s| {
-        //         b.iter_batched(
-        //             || rng.gen_range(0..s),
-        //             |i| vec.get(i),
-        //             BatchSize::SmallInput,
-        //         )
-        //     },
-        // );
-
-        // c.bench_with_input(
-        //     BenchmarkId::new("im::Vector<i32>::get (random)", size),
-        //     &size,
-        //     |b, &s| {
-        //         b.iter_batched(
-        //             || rng.gen_range(0..s),
-        //             |i| im_vec.get(i),
-        //             BatchSize::SmallInput,
-        //         )
-        //     },
-        // );
     }
 }
 
@@ -69,7 +40,7 @@ fn bench_get_vec(c: &mut Criterion) {
         }
 
         c.bench_with_input(
-            BenchmarkId::new("Vec<i32>::get (random)", size),
+            BenchmarkId::new("std::Vec<i32>::get (random)", size),
             &size,
             |b, &s| {
                 b.iter_batched(
@@ -138,7 +109,7 @@ fn bench_insert(c: &mut Criterion) {
         );
 
         c.bench_with_input(
-            BenchmarkId::new("Vec<i32>::insert_remove (random)", size),
+            BenchmarkId::new("std::Vec<i32>::insert_remove (random)", size),
             &size,
             |b, &s| {
                 b.iter_batched(
