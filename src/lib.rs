@@ -106,18 +106,18 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     pub fn get_mut(&mut self, mut index: usize) -> Option<&mut T> {
         let height = self.height;
         let mut cur_node = match self.root_mut() {
-            Some(root) if index < root.len() => root,
+            Some(root) if index < root.len() => root.ptr,
             _ => return None,
         };
 
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..height {
-            let handle = unsafe { InternalMut::new(cur_node.ptr) };
+            let handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
-        let leaf = unsafe { LeafMut::new_leaf(cur_node.ptr.cast::<LeafNode<T, B, C>>()) };
+        let leaf = unsafe { LeafMut::new_leaf(cur_node.cast::<LeafNode<T, B, C>>()) };
         // SAFETY: from `into_child_containing_index` we know that index < leaf.len()
         unsafe { Some(leaf.into_value_unchecked_mut(index)) }
     }
@@ -189,7 +189,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     /// # Panics
     /// Panics if `index >= self.len()`.
     pub fn remove(&mut self, index: usize) -> T {
-        self.cursor_at_mut(index).remove()
+        CursorMut::new_inbounds(self, index).remove()
     }
 
     #[must_use]
@@ -208,7 +208,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
     #[must_use]
     pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T, B, C> {
-        CursorMut::new_at(self, index)
+        CursorMut::new(self, index)
     }
 }
 

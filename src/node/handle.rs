@@ -643,14 +643,14 @@ where
         }
     }
 
-    pub unsafe fn into_child_containing_index(self, index: &mut usize) -> &'a mut Node<T, B, C> {
+    pub unsafe fn into_child_containing_index(self, index: &mut usize) -> NonNull<NodeBase<T, B, C>> {
         // debug_assert!(*index < self.len());
         unsafe {
             for child in &mut (*self.node.as_ptr()).children {
                 let len = child.assume_init_mut().len();
                 match index.checked_sub(len) {
                     Some(r) => *index = r,
-                    None => return child.assume_init_mut(),
+                    None => return child.assume_init_mut().ptr,
                 }
             }
         }

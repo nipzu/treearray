@@ -79,36 +79,47 @@ pub struct CursorMut<'a, T, const B: usize, const C: usize> {
 }
 
 impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
-    pub(crate) fn new_at(tree: &'a mut BTreeVec<T, B, C>, index: usize) -> Self {
+    pub(crate) fn new(tree: &'a mut BTreeVec<T, B, C>, index: usize) -> Self {
         if index > tree.len() {
             panic!();
         }
 
-        let mut cur_node = if let Some(root) = tree.root_mut() {
-            root.ptr
-        } else {
+        if tree.is_empty() {
             return Self {
                 index: 0,
                 tree,
                 leaf_index: 0,
                 leaf: MaybeUninit::uninit(),
             };
-        };
+        }
 
         let is_past_the_end = index == tree.len();
-        let mut target_index = index - usize::from(is_past_the_end);
+        let mut cursor = Self::new_inbounds(tree, index - usize::from(is_past_the_end));
+        if is_past_the_end {
+            cursor.leaf_index += 1;
+        }
+        cursor
+    }
+
+    pub(crate) fn new_inbounds(tree: &'a mut BTreeVec<T, B, C>, index: usize) -> Self {
+        if index >= tree.len() {
+            panic!();
+        }
+
+        let mut cur_node = unsafe { tree.root.assume_init_mut().ptr };
+        let mut target_index = index;
 
         // the height of `cur_node` is `tree.height - 1`
         // decrement the height of `cur_node` `tree.height - 1` times
         for _ in 1..tree.height {
             let handle = unsafe { InternalMut::new(cur_node) };
-            cur_node = unsafe { handle.into_child_containing_index(&mut target_index).ptr };
+            cur_node = unsafe { handle.into_child_containing_index(&mut target_index) };
         }
 
         Self {
             index,
             tree,
-            leaf_index: target_index + usize::from(is_past_the_end),
+            leaf_index: target_index,
             leaf: MaybeUninit::new(cur_node.cast()),
         }
     }
@@ -320,7 +331,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                         .cast::<Node<T, B, C>>();
                     (*child).length = (*InternalMut::new((*child).ptr).node.as_ptr()).sum_lens();
 
-                    to_insert = parent.insert_node(child_index as usize + 1, split_res);
+                    to_insert = parent.insert_node(usize::from(child_index) + 1, split_res);
                     cur_node = parent.into_internal();
                 } else {
                     self.split_root_internal(split_res);
@@ -435,7 +446,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             //             }
             //         }
             unsafe {
-                *self = Self::new_at(&mut *(self.tree as *mut _), self.index);
+                *self = Self::new(&mut *(self.tree as *mut _), self.index);
             }
         }
         // }
