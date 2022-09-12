@@ -97,6 +97,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         let mut cursor = Self::new_inbounds(tree, index - usize::from(is_past_the_end));
         if is_past_the_end {
             cursor.leaf_index += 1;
+            cursor.index += 1;
         }
         cursor
     }
@@ -327,11 +328,11 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                     let child = (*parent.node.as_ptr())
                         .children
                         .as_mut_ptr()
-                        .add(child_index.into())
+                        .add(child_index)
                         .cast::<Node<T, B, C>>();
                     (*child).length = (*InternalMut::new((*child).ptr).node.as_ptr()).sum_lens();
 
-                    to_insert = parent.insert_node(usize::from(child_index) + 1, split_res);
+                    to_insert = parent.insert_node(child_index + 1, split_res);
                     cur_node = parent.into_internal();
                 } else {
                     self.split_root_internal(split_res);
@@ -358,7 +359,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             .expect("attempting to remove from empty tree");
         assert!(leaf_index < leaf.len(), "out of bounds");
         let ret = leaf.remove_child(leaf_index);
-        // root is internal
 
         let leaf_underfull = leaf.is_underfull();
 
@@ -376,7 +376,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             return ret;
         };
 
-        let mut child_index = unsafe {
+        unsafe {
             let mut self_index =
                 (*leaf.node_ptr().as_ptr()).base.parent_index.assume_init() as usize;
 
@@ -389,42 +389,17 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 self.leaf.write(parent.child_mut(self_index).node_ptr());
                 self.leaf_index = leaf_index;
             }
-            self_index
-        };
+        }
 
         let mut cur_node = parent.into_internal();
 
-        // update lengths and merge nodes if needed
+        // merge nodes if needed
         unsafe {
-            // height of `cur_node`
-            for h in 1..self.height() - 1 {
-                // TODO: make another loop after non-underfull?
-                let (mut cur_parent, cur_index) = cur_node.into_parent_and_index().unwrap();
-                let mut cur_index = usize::from(cur_index);
-
-                cur_parent.with_brand(|mut parent| {
-                    let cur_node = parent.child_mut(cur_index as usize);
-
-                    if cur_node.is_underfull() {
-                        if cur_index > 0 {
-                            parent.handle_underfull_internal_child_tail(
-                                &mut cur_index,
-                                &mut child_index,
-                            );
-                        } else {
-                            parent.handle_underfull_internal_child_head();
-                        }
-                        if h == 1 {
-                            self.leaf.write(
-                                InternalMut::new_parent_of_leaf(parent.child_mut(cur_index).node)
-                                    .child_mut(child_index)
-                                    .node_ptr(),
-                            );
-                        }
-                    }
-                });
+            while let Some((mut cur_parent, cur_index)) = cur_node.into_parent_and_index() {
+                if !cur_parent.maybe_handle_underfull_child(cur_index) {
+                    break;
+                }
                 cur_node = cur_parent.into_internal();
-                child_index = cur_index;
             }
         }
 
@@ -453,7 +428,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
         // move the root one level lower if needed
         unsafe {
-            let mut old_root = InternalMut::new(self.tree.root.assume_init_mut().ptr.cast());
+            let mut old_root = InternalMut::new(self.tree.root.assume_init_mut().ptr);
 
             if old_root.is_singleton() {
                 *self.height_mut() -= 1;

@@ -134,6 +134,12 @@ pub mod height {
 
 use height::ExactInternal;
 
+// pub struct NodeMut<'a, H, T, const B: usize, const C: usize> {
+//     node: NonNull<NodeBase<T, B, C>>,
+//     height: H,
+//     _marker: PhantomData<&'a mut T>,
+// }
+
 pub struct OwnedNode<H, T, const B: usize, const C: usize> {
     node: Node<T, B, C>,
     _height: H,
@@ -373,20 +379,32 @@ impl<'a, T, const B: usize, const C: usize> InternalMut<'a, height::TwoOrMore, T
 
         f(parent)
     }
+
+    pub fn maybe_handle_underfull_child(&mut self, index: usize) -> bool {
+        self.with_brand(|mut parent| {
+            let is_child_underfull = parent.child_mut(index).is_underfull();
+
+            if is_child_underfull {
+                if index > 0 {
+                    parent.handle_underfull_internal_child_tail(index);
+                } else {
+                    parent.handle_underfull_internal_child_head();
+                }
+            }
+
+            is_child_underfull
+        })
+    }
 }
 
 impl<'a, 'id, T, const B: usize, const C: usize>
     InternalMut<'a, height::BrandedTwoOrMore<'id>, T, B, C>
 {
-    pub fn child_mut(
-        &mut self,
-        index: usize,
-    ) -> InternalMut<height::ChildOf<height::BrandedTwoOrMore<'id>>, T, B, C> {
-        let height = unsafe { self.height.make_child_height() };
+    pub fn child_mut(&mut self, index: usize) -> InternalMut<height::Positive, T, B, C> {
         let ptr = unsafe { (*self.node.as_ptr()).children.as_mut_ptr() };
         InternalMut {
             node: unsafe { ptr.add(index).read().assume_init().ptr.cast() },
-            height,
+            height: height::Positive,
             lifetime: PhantomData,
         }
     }
@@ -416,13 +434,13 @@ impl<'a, 'id, T, const B: usize, const C: usize>
         ]
     }
 
-    pub fn handle_underfull_internal_child_head(&mut self) {
+    fn handle_underfull_internal_child_head(&mut self) {
         let [mut cur, mut next] = self.child_pair_at(0);
 
         if next.is_almost_underfull() {
             cur.append_children(next);
-            let next_len = unsafe { (*self.node.as_ptr()).children[1].assume_init_ref().length };
             unsafe {
+                let next_len = (*self.node.as_ptr()).children[1].assume_init_ref().length;
                 (*self.node.as_ptr()).children[0].assume_init_mut().length += next_len;
             }
             self.remove_child(1).free();
@@ -437,42 +455,34 @@ impl<'a, 'id, T, const B: usize, const C: usize>
         }
     }
 
-    pub fn handle_underfull_internal_child_tail(
-        &mut self,
-        index: &mut usize,
-        child_index: &mut usize,
-    ) {
-        let [mut prev, mut cur] = self.child_pair_at(*index - 1);
+    fn handle_underfull_internal_child_tail(&mut self, index: usize) {
+        let [mut prev, mut cur] = self.child_pair_at(index - 1);
 
         if prev.is_almost_underfull() {
-            let prev_len_children = prev.len_children();
             prev.append_children(cur);
             let cur_len = unsafe {
-                (*self.node.as_ptr()).children[*index]
+                (*self.node.as_ptr()).children[index]
                     .assume_init_ref()
                     .length
             };
             unsafe {
-                (*self.node.as_ptr()).children[*index - 1]
+                (*self.node.as_ptr()).children[index - 1]
                     .assume_init_mut()
                     .length += cur_len;
             }
-            self.remove_child(*index).free();
-            *index -= 1;
-            *child_index += prev_len_children;
+            self.remove_child(index).free();
         } else {
             let x = prev.pop_back_child();
             let x_len = x.node.length;
             cur.push_front_child(x);
             unsafe {
-                (*self.node.as_ptr()).children[*index - 1]
+                (*self.node.as_ptr()).children[index - 1]
                     .assume_init_mut()
                     .length -= x_len;
-                (*self.node.as_ptr()).children[*index]
+                (*self.node.as_ptr()).children[index]
                     .assume_init_mut()
                     .length += x_len;
             }
-            *child_index += 1;
         }
     }
 }
@@ -625,12 +635,12 @@ where
 
     pub unsafe fn into_parent_and_index(
         self,
-    ) -> Option<(InternalMut<'a, height::TwoOrMore, T, B, C>, u16)> {
+    ) -> Option<(InternalMut<'a, height::TwoOrMore, T, B, C>, usize)> {
         unsafe {
             let parent = InternalMut::new_parent_of_internal((*self.node.as_ptr()).base.parent?);
             Some((
                 parent,
-                (*self.node.as_ptr()).base.parent_index.assume_init(),
+                (*self.node.as_ptr()).base.parent_index.assume_init().into(),
             ))
         }
     }
@@ -643,7 +653,10 @@ where
         }
     }
 
-    pub unsafe fn into_child_containing_index(self, index: &mut usize) -> NonNull<NodeBase<T, B, C>> {
+    pub unsafe fn into_child_containing_index(
+        self,
+        index: &mut usize,
+    ) -> NonNull<NodeBase<T, B, C>> {
         // debug_assert!(*index < self.len());
         unsafe {
             for child in &mut (*self.node.as_ptr()).children {
