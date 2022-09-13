@@ -17,7 +17,7 @@ pub use cursor::CursorMut;
 
 use iter::{Drain, Iter};
 use node::{
-    handle::{Internal, InternalMut, Leaf, LeafMut},
+    handle::{Internal, Leaf, LeafMut, NodeMut},
     LeafNode, Node,
 };
 
@@ -112,12 +112,12 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..height {
-            let handle = unsafe { InternalMut::new(cur_node) };
+            let handle = unsafe { NodeMut::new(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
-        let leaf = unsafe { LeafMut::new_leaf(cur_node.cast::<LeafNode<T, B, C>>()) };
+        let leaf = unsafe { LeafMut::new_leaf(cur_node) };
         // SAFETY: from `into_child_containing_index` we know that index < leaf.len()
         unsafe { Some(leaf.into_value_unchecked_mut(index)) }
     }
@@ -139,12 +139,12 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         let mut cur_node = self.root_mut()? as *mut Node<T, B, C>;
 
         for _ in 1..self.height {
-            let handle = unsafe { InternalMut::<_, T, B, C>::new((*cur_node).ptr.cast()) };
-            cur_node = unsafe { (*handle.node.as_ptr()).children.as_mut_ptr().cast() };
+            let handle = unsafe { NodeMut::<_, T, B, C>::new((*cur_node).ptr) };
+            cur_node = unsafe { (*handle.internal_ptr()).children.as_mut_ptr().cast() };
         }
 
         unsafe {
-            Some(LeafMut::<T, B, C>::new_leaf((*cur_node).ptr.cast()).into_value_unchecked_mut(0))
+            Some(LeafMut::<T, B, C>::new_leaf((*cur_node).ptr).into_value_unchecked_mut(0))
         }
     }
 

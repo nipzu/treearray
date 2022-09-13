@@ -14,7 +14,7 @@ pub struct Node<T, const B: usize, const C: usize> {
 }
 
 pub struct NodeBase<T, const B: usize, const C: usize> {
-    pub parent: Option<NonNull<InternalNode<T, B, C>>>,
+    pub parent: Option<NonNull<NodeBase<T, B, C>>>,
     pub parent_index: MaybeUninit<u16>,
     pub children_len: MaybeUninit<u16>,
     _marker: PhantomData<T>,
@@ -85,13 +85,13 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
     }
 
     pub fn from_child_array<const N: usize>(children: [Self; N]) -> Self {
-        let boxed_children = NonNull::from(Box::leak(Box::new(InternalNode::new())));
-        let mut vec = unsafe { handle::InternalMut::new(boxed_children.cast()).as_array_vec() };
+        let boxed_children = NonNull::from(Box::leak(Box::new(InternalNode::<T, B, C>::new())));
+        let mut vec = unsafe { handle::NodeMut::new(boxed_children.cast()).as_array_vec() };
         let mut length = 0;
         for (i, mut child) in children.into_iter().enumerate() {
             length += child.len();
             unsafe {
-                child.ptr.as_mut().parent = Some(boxed_children);
+                child.ptr.as_mut().parent = Some(boxed_children.cast());
                 child.ptr.as_mut().parent_index.write(i as u16);
             }
             vec.push_back(child);
