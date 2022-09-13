@@ -2,8 +2,6 @@ use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use alloc::boxed::Box;
 
-use crate::utils::slice_assume_init_ref;
-
 // use crate::panics::panic_length_overflow;
 
 pub mod handle;
@@ -63,19 +61,6 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
             children: [Self::UNINIT_NODE; B],
         }
     }
-
-    pub fn children(&self) -> &[Node<T, B, C>] {
-        unsafe {
-            slice_assume_init_ref(
-                self.children
-                    .get_unchecked(..usize::from(self.base.children_len.assume_init())),
-            )
-        }
-    }
-
-    pub fn sum_lens(&self) -> usize {
-        self.children().iter().map(Node::len).sum()
-    }
 }
 
 impl<T, const B: usize, const C: usize> Node<T, B, C> {
@@ -86,7 +71,8 @@ impl<T, const B: usize, const C: usize> Node<T, B, C> {
 
     pub fn from_child_array<const N: usize>(children: [Self; N]) -> Self {
         let boxed_children = NonNull::from(Box::leak(Box::new(InternalNode::<T, B, C>::new())));
-        let mut vec = unsafe { handle::NodeMut::new(boxed_children.cast()).as_array_vec() };
+        let mut vec =
+            unsafe { handle::NodeMut::new_internal(boxed_children.cast()).as_array_vec() };
         let mut length = 0;
         for (i, mut child) in children.into_iter().enumerate() {
             length += child.len();

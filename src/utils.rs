@@ -4,22 +4,6 @@ use core::{
     ptr, slice,
 };
 
-// TODO: use functions from core when https://github.com/rust-lang/rust/issues/63569 stabilises
-
-/// Assuming all the elements are initialized, get a mutable slice to them.
-///
-/// # Safety
-///
-/// It is up to the caller to guarantee that the `MaybeUninit<T>` elements
-/// really are in an initialized state.
-/// Calling this when the content is not yet fully initialized causes undefined behavior.
-#[inline]
-pub const unsafe fn slice_assume_init_ref<T>(slice: &[MaybeUninit<T>]) -> &[T] {
-    // SAFETY: similar to safety notes for `slice_get_ref`, but we have a
-    // mutable reference which is also guaranteed to be valid for writes.
-    unsafe { &*(slice as *const [MaybeUninit<T>] as *const [T]) }
-}
-
 pub struct ArrayVecMut<T, const N: usize> {
     array: *mut T,
     len: *mut u16,

@@ -215,7 +215,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         unsafe {
             ArrayVecMut::new(
                 addr_of_mut!((*self.leaf_ptr()).values),
-                addr_of_mut!((*self.leaf_ptr()).base.children_len).cast(),
+                addr_of_mut!((*self.node.as_ptr()).children_len).cast(),
             )
         }
     }
@@ -582,7 +582,7 @@ impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::Positive, T, B, 
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
-    pub unsafe fn new(node: NonNull<NodeBase<T, B, C>>) -> Self {
+    pub unsafe fn new_internal(node: NonNull<NodeBase<T, B, C>>) -> Self {
         Self {
             node,
             height: height::Positive,
@@ -701,14 +701,14 @@ where
         let split_index = Self::UNDERFULL_LEN;
 
         let mut new_sibling_node = Node::from_child_array([]);
-        let mut new_sibling = unsafe { NodeMut::new(new_sibling_node.ptr) };
+        let mut new_sibling = unsafe { NodeMut::new_internal(new_sibling_node.ptr) };
 
         self.as_array_vec()
             .split(split_index, new_sibling.as_array_vec());
         unsafe { self.insert_fitting(index, node) };
 
         new_sibling.set_parent_links(0..);
-        new_sibling_node.length = unsafe { (*new_sibling.internal_ptr()).sum_lens() };
+        new_sibling_node.length = new_sibling.sum_lens();
         new_sibling_node
     }
 
@@ -720,14 +720,14 @@ where
         let split_index = Self::UNDERFULL_LEN + 1;
 
         let mut new_sibling_node = Node::from_child_array([]);
-        let mut new_sibling = unsafe { NodeMut::new(new_sibling_node.ptr) };
+        let mut new_sibling = unsafe { NodeMut::new_internal(new_sibling_node.ptr) };
 
         self.as_array_vec()
             .split(split_index, new_sibling.as_array_vec());
         new_sibling.as_array_vec().insert(index - split_index, node);
 
         new_sibling.set_parent_links(0..);
-        new_sibling_node.length = unsafe { (*new_sibling.internal_ptr()).sum_lens() };
+        new_sibling_node.length = new_sibling.sum_lens();
         new_sibling_node
     }
 
@@ -739,6 +739,17 @@ where
                     .parent_index
                     .write((i + range.start) as u16);
             }
+        }
+    }
+
+    pub fn sum_lens(&self) -> usize {
+        unsafe {
+            (*self.internal_ptr())
+                .children
+                .iter()
+                .take(self.len_children())
+                .map(|n| n.assume_init_ref().len())
+                .sum()
         }
     }
 }
