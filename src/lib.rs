@@ -31,6 +31,7 @@ use node::{
 pub struct BTreeVec<T, const B: usize = 31, const C: usize = 63> {
     root: MaybeUninit<Node<T, B, C>>,
     // TODO: consider using a smaller type like u16
+    // remove and use a condition like node.base.children_len == node.length, requires C >= 3
     height: usize,
     // TODO: is this even needed?
     _marker: PhantomData<T>,
@@ -147,20 +148,33 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     }
 
     #[must_use]
-    #[inline]
     pub fn last(&self) -> Option<&T> {
-        // TODO: optimize
-        // If `self.len() == 0`, the index wraps to `usize::MAX`
-        // which is definitely outside the range of an empty array.
-        self.get(self.len().wrapping_sub(1))
+        let mut cur_node = self.root()?;
+
+        for _ in 1..self.height {
+            let handle = unsafe { Internal::new(cur_node.ptr.cast().as_ref()) };
+            let len_children: usize = unsafe { handle.node.base.children_len.assume_init().into() };
+            cur_node = unsafe { handle.node.children[len_children - 1].assume_init_ref() };
+        }
+
+        let leaf = unsafe { Leaf::<T, B, C>::new(cur_node.ptr.cast().as_ref()) };
+        let len_values = leaf.len();
+        unsafe { Some(leaf.value_unchecked(len_values - 1)) }
     }
 
     #[must_use]
-    #[inline]
     pub fn last_mut(&mut self) -> Option<&mut T> {
-        // If `self.len() == 0`, the index wraps to `usize::MAX`
-        // which is definitely outside the range of an empty array.
-        self.get_mut(self.len().wrapping_sub(1))
+        let mut cur_node = self.root_mut()? as *mut Node<T, B, C>;
+
+        for _ in 1..self.height {
+            let handle = unsafe { NodeMut::<_, T, B, C>::new_internal((*cur_node).ptr) };
+            let len_children = handle.len_children();
+            cur_node = unsafe { (*handle.internal_ptr()).children.as_mut_ptr().cast::<Node<T, B, C>>().add(len_children - 1) };
+        }
+
+        let leaf = unsafe { LeafMut::<T, B, C>::new_leaf((*cur_node).ptr) };
+        let len_values = leaf.len();
+        unsafe { Some(leaf.into_value_unchecked_mut(len_values - 1)) }
     }
 
     #[inline]

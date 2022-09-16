@@ -215,8 +215,6 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         let root_ptr: *mut _ = self.root_mut().write(Node::from_value(value));
         self.leaf.write(unsafe { (*root_ptr).ptr });
         *self.height_mut() = 1;
-        // self.index = 0;
-        // self.leaf_index = 0;
     }
 
     unsafe fn split_root(&mut self, new_node: Node<T, B, C>) {
@@ -255,13 +253,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         while let Some(node) = to_insert {
             unsafe {
                 if let Some((mut parent, child_index)) = cur_node.into_parent_and_index2() {
-                    let child = (*parent.internal_ptr())
-                        .children
-                        .as_mut_ptr()
-                        .add(child_index)
-                        .cast::<Node<T, B, C>>();
-                    (*child).length -= node.len();
-
+                    parent.as_array_vec()[child_index].length -= node.len();
                     to_insert = parent.insert_node(child_index + 1, node);
                     cur_node = parent.forget_height();
                 } else {
@@ -332,6 +324,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             }
         }
 
+        // TODO: maybe don't do this here
         // move cursor to start of next leaf if pointing past the end of the current leaf
         // unsafe {
         if self.leaf().unwrap().len() == leaf_index {

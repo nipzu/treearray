@@ -20,7 +20,7 @@ pub struct NodeBase<T, const B: usize, const C: usize> {
 
 #[repr(C)]
 pub struct InternalNode<T, const B: usize, const C: usize> {
-    base: NodeBase<T, B, C>,
+    pub base: NodeBase<T, B, C>,
     pub children: [MaybeUninit<Node<T, B, C>>; B],
 }
 
