@@ -81,6 +81,8 @@ pub mod height {
     use core::{marker::PhantomData, num::NonZeroUsize};
 
     #[derive(Copy, Clone)]
+    pub struct Any;
+    #[derive(Copy, Clone)]
     pub struct Zero;
     #[derive(Copy, Clone)]
     pub struct Positive;
@@ -187,6 +189,26 @@ impl<'a, H, T, const B: usize, const C: usize> NodeMut<'a, H, T, B, C> {
     pub const fn node_ptr(&self) -> NonNull<NodeBase<T, B, C>> {
         self.node
     }
+
+    pub fn forget_height(self) -> NodeMut<'a, height::Any, T, B, C> {
+        NodeMut {
+            node: self.node,
+            height: height::Any,
+            lifetime: self.lifetime,
+        }
+    }
+
+    pub unsafe fn into_parent_and_index2(
+        self,
+    ) -> Option<(NodeMut<'a, height::Positive, T, B, C>, usize)> {
+        unsafe {
+            let parent = NodeMut::new_internal((*self.node.as_ptr()).parent?);
+            Some((
+                parent,
+                (*self.node.as_ptr()).parent_index.assume_init().into(),
+            ))
+        }
+    }
 }
 
 impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
@@ -237,18 +259,18 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         self.len() == C
     }
 
-    pub fn insert_value(&mut self, index: usize, value: T) -> InsertResult<T, B, C> {
+    pub fn insert_value(&mut self, index: usize, value: T) -> Option<SplitResult<T, B, C>> {
         assert!(index <= self.len());
 
         if self.is_full() {
-            InsertResult::Split(if index <= C / 2 {
+            Some(if index <= C / 2 {
                 SplitResult::Left(self.split_and_insert_left(index, value))
             } else {
                 SplitResult::Right(self.split_and_insert_right(index, value))
             })
         } else {
             self.values_mut().insert(index, value);
-            InsertResult::Fit
+            None
         }
     }
 
@@ -667,26 +689,18 @@ where
     pub unsafe fn insert_node(
         &mut self,
         index: usize,
-        prev_split_res: SplitResult<T, B, C>,
-    ) -> InsertResult<T, B, C> {
-        let (path_through_self, node) = match prev_split_res {
-            SplitResult::Right(n) => (false, n),
-            SplitResult::Left(n) => (true, n),
-        };
-
+        node: Node<T, B, C>,
+    ) -> Option<Node<T, B, C>> {
         unsafe {
             if self.is_full() {
-                use core::cmp::Ordering::{Equal, Less};
-                InsertResult::Split(match index.cmp(&(Self::UNDERFULL_LEN + 1)) {
-                    Less => SplitResult::Left(self.split_and_insert_left(index, node)),
-                    Equal if path_through_self => {
-                        SplitResult::Left(self.split_and_insert_right(index, node))
-                    }
-                    _ => SplitResult::Right(self.split_and_insert_right(index, node)),
+                use core::cmp::Ordering::Less;
+                Some(match index.cmp(&(Self::UNDERFULL_LEN + 1)) {
+                    Less => self.split_and_insert_left(index, node),
+                    _ => self.split_and_insert_right(index, node),
                 })
             } else {
                 self.insert_fitting(index, node);
-                InsertResult::Fit
+                None
             }
         }
     }
@@ -752,11 +766,6 @@ where
                 .sum()
         }
     }
-}
-
-pub enum InsertResult<T, const B: usize, const C: usize> {
-    Fit,
-    Split(SplitResult<T, B, C>),
 }
 
 pub enum SplitResult<T, const B: usize, const C: usize> {

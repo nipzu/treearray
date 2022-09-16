@@ -2,11 +2,8 @@ use core::{mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
     node::{
-        handle::{
-            height, ExactHeightNode, FreeableNode, InsertResult, Leaf, LeafMut, NodeMut, OwnedNode,
-            SplitResult,
-        },
-        InternalNode, Node, NodeBase,
+        handle::{ExactHeightNode, FreeableNode, Leaf, LeafMut, NodeMut, OwnedNode, SplitResult},
+        Node, NodeBase,
     },
     BTreeVec,
 };
@@ -180,7 +177,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         &mut self.tree.root
     }
 
-    fn leaf_mut(&mut self) -> Option<LeafMut<T, B, C>> {
+    // TODO: this should not be unbpunded?
+    fn leaf_mut<'b>(&mut self) -> Option<LeafMut<'b, T, B, C>> {
         (self.height() > 0).then(|| unsafe { LeafMut::new_leaf(self.leaf.assume_init()) })
     }
 
@@ -221,35 +219,12 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         // self.leaf_index = 0;
     }
 
-    unsafe fn split_root_internal(&mut self, split_res: SplitResult<T, B, C>) {
-        let new_node = match split_res {
-            SplitResult::Left(n) | SplitResult::Right(n) => n,
-        };
-
+    unsafe fn split_root(&mut self, new_node: Node<T, B, C>) {
         let mut old_root = unsafe { self.root_mut().assume_init_read() };
-        old_root.length = unsafe { NodeMut::new_internal(old_root.ptr).sum_lens() };
+        old_root.length -= new_node.len();
         self.root_mut()
             .write(Node::from_child_array([old_root, new_node]));
         *self.height_mut() += 1;
-    }
-
-    unsafe fn split_root_leaf(&mut self, split_res: SplitResult<T, B, C>) {
-        let (new_node, root_path_index) = match split_res {
-            SplitResult::Left(n) => (n, 0),
-            SplitResult::Right(n) => (n, 1),
-        };
-
-        let mut old_root = unsafe { self.root_mut().assume_init_read() };
-        old_root.length = unsafe { old_root.ptr.as_mut().children_len.assume_init().into() };
-        let new_root_ptr: *mut _ = self
-            .root_mut()
-            .write(Node::from_child_array([old_root, new_node]));
-        debug_assert_eq!(self.height(), 1);
-        *self.height_mut() = 2;
-
-        let mut new_root = unsafe { NodeMut::new_parent_of_leaf((*new_root_ptr).ptr) };
-        self.leaf
-            .write(new_root.child_mut(root_path_index).node_ptr());
     }
 
     pub fn insert(&mut self, value: T) {
@@ -264,77 +239,33 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             self.insert_to_empty(value);
             return;
         };
-        let leaf_ptr = leaf.node_ptr();
 
-        let mut to_insert = leaf.insert_value(leaf_index, value);
-
-        let leaf_is_new = if let InsertResult::Split(SplitResult::Right(_)) = to_insert {
-            self.leaf_index -= leaf.len();
-            true
-        } else {
-            false
-        };
-
-        let cur_node = if let Some(parent) = unsafe { (*leaf_ptr.as_ptr()).parent } {
-            unsafe { NodeMut::new_parent_of_leaf(parent) }
-        } else {
-            // height is 1
-            if let InsertResult::Split(split_res) = to_insert {
-                unsafe { self.split_root_leaf(split_res) };
+        let mut to_insert = Some(match leaf.insert_value(leaf_index, value) {
+            Some(SplitResult::Left(n)) => n,
+            Some(SplitResult::Right(n)) => {
+                self.leaf_index -= leaf.len();
+                self.leaf.write(n.ptr);
+                n
             }
-            return;
-        };
+            None => return,
+        });
 
-        let child_index = unsafe { (*leaf_ptr.as_ptr()).parent_index.assume_init() as usize };
+        let mut cur_node = leaf.forget_height();
 
-        let mut parent = cur_node;
-        if let InsertResult::Split(split_res) = to_insert {
-            let path_index = child_index + usize::from(leaf_is_new);
+        while let Some(node) = to_insert {
             unsafe {
-                let child = (*parent.internal_ptr())
-                    .children
-                    .as_mut_ptr()
-                    .add(child_index)
-                    .cast::<Node<T, B, C>>();
-                (*child).length = (*(*child).ptr.as_ptr()).children_len.assume_init().into();
-
-                to_insert = parent.insert_node(child_index + 1, split_res);
-                let (path_index, children) =
-                    if let InsertResult::Split(SplitResult::Right(ref mut n)) = to_insert {
-                        (
-                            path_index - NodeMut::<height::One, T, B, C>::UNDERFULL_LEN - 1,
-                            NodeMut::new_parent_of_leaf(n.ptr).node_ptr(),
-                        )
-                    } else {
-                        (path_index, parent.node_ptr())
-                    };
-                self.leaf.write(
-                    (*(*children.cast::<InternalNode<T, B, C>>().as_ptr())
-                        .children
-                        .as_mut_ptr()
-                        .cast::<Node<T, B, C>>()
-                        .add(path_index))
-                    .ptr,
-                );
-            }
-        }
-
-        let mut cur_node = parent.into_internal();
-
-        while let InsertResult::Split(split_res) = to_insert {
-            unsafe {
-                if let Some((mut parent, child_index)) = cur_node.into_parent_and_index() {
+                if let Some((mut parent, child_index)) = cur_node.into_parent_and_index2() {
                     let child = (*parent.internal_ptr())
                         .children
                         .as_mut_ptr()
                         .add(child_index)
                         .cast::<Node<T, B, C>>();
-                    (*child).length = NodeMut::new_internal((*child).ptr).sum_lens();
+                    (*child).length -= node.len();
 
-                    to_insert = parent.insert_node(child_index + 1, split_res);
-                    cur_node = parent.into_internal();
+                    to_insert = parent.insert_node(child_index + 1, node);
+                    cur_node = parent.forget_height();
                 } else {
-                    self.split_root_internal(split_res);
+                    self.split_root(node);
                     return;
                 }
             }
