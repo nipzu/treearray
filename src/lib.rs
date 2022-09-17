@@ -17,11 +17,11 @@ pub use cursor::CursorMut;
 
 use iter::{Drain, Iter};
 use node::{
-    handle::{Internal, InternalMut, Leaf, NodeMut},
-    Node,
+    handle::{Internal, Leaf, LeafMut, NodeMut},
+    LeafNode, Node,
 };
 
-// pub fn foo(b: &BTreeVec<i32, 32, 64>, x: usize) -> Option<&i32> {
+// pub fn foo(b: &BTreeVec<i32>, x: usize) -> Option<&i32> {
 //     b.get(x)
 // }
 
@@ -31,6 +31,7 @@ use node::{
 pub struct BTreeVec<T, const B: usize = 31, const C: usize = 63> {
     root: MaybeUninit<Node<T, B, C>>,
     // TODO: consider using a smaller type like u16
+    // remove and use a condition like node.base.children_len == node.length, requires C >= 3
     height: usize,
     // TODO: is this even needed?
     _marker: PhantomData<T>,
@@ -92,12 +93,12 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..self.height {
-            let handle = unsafe { Internal::new(cur_node) };
+            let handle = unsafe { Internal::new(cur_node.ptr.cast().as_ref()) };
             cur_node = unsafe { handle.child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
-        let leaf = unsafe { Leaf::new(cur_node) };
+        let leaf = unsafe { Leaf::new(cur_node.ptr.cast::<LeafNode<T, B, C>>().as_ref()) };
         // SAFETY: from `get_child_containing_index` we know that index < leaf.len()
         unsafe { Some(leaf.value_unchecked(index)) }
     }
@@ -106,48 +107,74 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     pub fn get_mut(&mut self, mut index: usize) -> Option<&mut T> {
         let height = self.height;
         let mut cur_node = match self.root_mut() {
-            Some(root) if index < root.len() => root,
+            Some(root) if index < root.len() => root.ptr,
             _ => return None,
         };
 
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..height {
-            let handle = unsafe { InternalMut::new(cur_node) };
+            let handle = unsafe { NodeMut::new_internal(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
-        let leaf = unsafe { NodeMut::new_leaf(cur_node) };
+        let leaf = unsafe { LeafMut::new_leaf(cur_node) };
         // SAFETY: from `into_child_containing_index` we know that index < leaf.len()
         unsafe { Some(leaf.into_value_unchecked_mut(index)) }
     }
 
     #[must_use]
-    #[inline]
     pub fn first(&self) -> Option<&T> {
-        self.get(0)
+        let mut cur_node = self.root()?;
+
+        for _ in 1..self.height {
+            let handle = unsafe { Internal::new(cur_node.ptr.cast().as_ref()) };
+            cur_node = unsafe { handle.node.children[0].assume_init_ref() };
+        }
+
+        unsafe { Some(Leaf::<T, B, C>::new(cur_node.ptr.cast().as_ref()).value_unchecked(0)) }
     }
 
     #[must_use]
-    #[inline]
     pub fn first_mut(&mut self) -> Option<&mut T> {
-        self.get_mut(0)
+        let mut cur_node = self.root_mut()? as *mut Node<T, B, C>;
+
+        for _ in 1..self.height {
+            let handle = unsafe { NodeMut::<_, T, B, C>::new_internal((*cur_node).ptr) };
+            cur_node = unsafe { (*handle.internal_ptr()).children.as_mut_ptr().cast() };
+        }
+
+        unsafe { Some(LeafMut::<T, B, C>::new_leaf((*cur_node).ptr).into_value_unchecked_mut(0)) }
     }
 
     #[must_use]
-    #[inline]
     pub fn last(&self) -> Option<&T> {
-        // If `self.len() == 0`, the index wraps to `usize::MAX`
-        // which is definitely outside the range of an empty array.
-        self.get(self.len().wrapping_sub(1))
+        let mut cur_node = self.root()?;
+
+        for _ in 1..self.height {
+            let handle = unsafe { Internal::new(cur_node.ptr.cast().as_ref()) };
+            let len_children: usize = unsafe { handle.node.base.children_len.assume_init().into() };
+            cur_node = unsafe { handle.node.children[len_children - 1].assume_init_ref() };
+        }
+
+        let leaf = unsafe { Leaf::<T, B, C>::new(cur_node.ptr.cast().as_ref()) };
+        let len_values = leaf.len();
+        unsafe { Some(leaf.value_unchecked(len_values - 1)) }
     }
 
     #[must_use]
-    #[inline]
     pub fn last_mut(&mut self) -> Option<&mut T> {
-        // If `self.len() == 0`, the index wraps to `usize::MAX`
-        // which is definitely outside the range of an empty array.
-        self.get_mut(self.len().wrapping_sub(1))
+        let mut cur_node = self.root_mut()? as *mut Node<T, B, C>;
+
+        for _ in 1..self.height {
+            let handle = unsafe { NodeMut::<_, T, B, C>::new_internal((*cur_node).ptr) };
+            let len_children = handle.len_children();
+            cur_node = unsafe { (*handle.internal_ptr()).children.as_mut_ptr().cast::<Node<T, B, C>>().add(len_children - 1) };
+        }
+
+        let leaf = unsafe { LeafMut::<T, B, C>::new_leaf((*cur_node).ptr) };
+        let len_values = leaf.len();
+        unsafe { Some(leaf.into_value_unchecked_mut(len_values - 1)) }
     }
 
     #[inline]
@@ -174,7 +201,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     /// # Panics
     /// Panics if `index >= self.len()`.
     pub fn remove(&mut self, index: usize) -> T {
-        self.cursor_at_mut(index).remove()
+        CursorMut::new_inbounds(self, index).remove()
     }
 
     #[must_use]
@@ -193,7 +220,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
     #[must_use]
     pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T, B, C> {
-        CursorMut::new_at(self, index)
+        CursorMut::new(self, index)
     }
 }
 
@@ -239,12 +266,17 @@ mod tests {
     #[test]
     fn test_push_front_back() {
         let mut b = BTreeVec::<i32, 7, 5>::new();
+        let mut l = 0;
         for x in 0..500 {
             b.push_back(x);
+            l += 1;
+            assert_eq!(l, b.len());
         }
 
         for x in (-500..0).rev() {
-            b.push_front(x)
+            b.push_front(x);
+            l += 1;
+            assert_eq!(l, b.len());
         }
 
         for (a, b) in b.iter().zip(-500..) {
@@ -326,11 +358,12 @@ mod tests {
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len());
             let v_rem = v.remove(index);
-            b_4_2.remove(index);
+            let b_4_2_rem = b_4_2.remove(index);
             let b_5_1_rem = b_5_1.remove(index);
             assert_eq!(v.len(), b_4_2.len());
             assert_eq!(v.len(), b_5_1.len());
             assert_eq!(v_rem, b_5_1_rem);
+            assert_eq!(v_rem, b_4_2_rem);
         }
 
         assert!(b_4_2.is_empty());
@@ -503,6 +536,9 @@ mod tests {
     #[test]
     fn test_bvec_covariant() {
         fn foo<'a>(_x: BTreeVec<&'a i32>, _y: &'a i32) {}
+        fn _assert_covariant<'b, 'a: 'b>(x: BTreeVec<&'a i32>) -> BTreeVec<&'b i32> {
+            x
+        }
 
         let x = BTreeVec::<&'static i32>::new();
         let v = 123;
