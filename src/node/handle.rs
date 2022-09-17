@@ -44,7 +44,6 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
         unsafe {
             self.node
                 .values
-                .as_ref()
                 .get_unchecked(index)
                 .assume_init_ref()
         }
