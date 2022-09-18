@@ -1,5 +1,4 @@
 use core::{
-    marker::PhantomData,
     mem::MaybeUninit,
     ops::RangeFrom,
     ptr::{self, addr_of_mut, NonNull},
@@ -85,7 +84,6 @@ pub mod height {
     pub struct TwoOrMore;
     #[derive(Copy, Clone)]
     pub struct DynamicInternal(NonZeroUsize);
-    #[derive(Copy, Clone)]
     pub struct BrandedTwoOrMore<'id>(PhantomData<*mut &'id ()>);
     #[derive(Copy, Clone)]
     pub struct ChildOf<H>(PhantomData<H>);
@@ -129,34 +127,55 @@ pub mod height {
 
 use height::ExactInternal;
 
-pub struct NodeMut<'a, H, T, const B: usize, const C: usize> {
-    node: NonNull<NodeBase<T, B, C>>,
-    height: H,
-    lifetime: PhantomData<&'a mut T>,
-}
+pub mod ownership {
+    use core::marker::PhantomData;
 
-pub type LeafMut<'a, T, const B: usize, const C: usize> = NodeMut<'a, height::Zero, T, B, C>;
+    // TODO: should this be covariant?
+    pub struct Immut<'a>(PhantomData<&'a ()>);
 
-pub struct OwnedNode<H, T, const B: usize, const C: usize> {
-    pub node: NonNull<NodeBase<T, B, C>>,
-    _height: H,
-}
+    pub struct Mut<'a>(PhantomData<&'a mut ()>);
+    pub struct Owned;
 
-impl<T, const B: usize, const C: usize> OwnedNode<height::Positive, T, B, C> {
-    pub const unsafe fn new_internal(node: NonNull<NodeBase<T, B, C>>) -> Self {
-        Self {
-            node,
-            _height: height::Positive,
+    pub unsafe trait Mutable {}
+    unsafe impl<'a> Mutable for Mut<'a> {}
+    unsafe impl Mutable for Owned {}
+
+    pub unsafe trait Reference {
+        unsafe fn new() -> Self;
+    }
+    unsafe impl<'a> Reference for Immut<'a> {
+        unsafe fn new() -> Self {
+            Self(PhantomData)
+        }
+    }
+    unsafe impl<'a> Reference for Mut<'a> {
+        unsafe fn new() -> Self {
+            Self(PhantomData)
         }
     }
 }
 
-impl<T, const B: usize, const C: usize> OwnedNode<height::Zero, T, B, C> {
-    pub fn as_mut(&mut self) -> LeafMut<T, B, C> {
-        LeafMut {
+use ownership::Reference;
+
+pub struct Node<O, H, T, const B: usize, const C: usize> {
+    node: NonNull<NodeBase<T, B, C>>,
+    height: H,
+    ownership: O,
+}
+
+pub type LeafMut<'a, T, const B: usize, const C: usize> =
+    Node<ownership::Mut<'a>, height::Zero, T, B, C>;
+pub type OwnedNode<H, T, const B: usize, const C: usize> = Node<ownership::Owned, H, T, B, C>;
+
+impl<H, T, const B: usize, const C: usize> OwnedNode<H, T, B, C>
+where
+    H: Copy,
+{
+    pub fn as_mut(&mut self) -> Node<ownership::Mut, H, T, B, C> {
+        Node {
             node: self.node,
-            height: height::Zero,
-            lifetime: PhantomData,
+            height: self.height,
+            ownership: unsafe { ownership::Mut::new() },
         }
     }
 }
@@ -165,7 +184,8 @@ impl<T, const B: usize, const C: usize> OwnedNode<height::Zero, T, B, C> {
     pub const unsafe fn new_leaf(node: NonNull<NodeBase<T, B, C>>) -> Self {
         Self {
             node,
-            _height: height::Zero,
+            height: height::Zero,
+            ownership: ownership::Owned,
         }
     }
 
@@ -173,29 +193,33 @@ impl<T, const B: usize, const C: usize> OwnedNode<height::Zero, T, B, C> {
         let node = LeafNode::<T, B, C>::new();
         Self {
             node: node.cast(),
-            _height: height::Zero,
+            height: height::Zero,
+            ownership: ownership::Owned,
         }
     }
 }
 
-impl<'a, H, T, const B: usize, const C: usize> NodeMut<'a, H, T, B, C> {
+impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+where
+    O: ownership::Reference,
+{
     pub const fn node_ptr(&self) -> NonNull<NodeBase<T, B, C>> {
         self.node
     }
 
-    pub fn forget_height(self) -> NodeMut<'a, height::Any, T, B, C> {
-        NodeMut {
+    pub fn forget_height(self) -> Node<O, height::Any, T, B, C> {
+        Node {
             node: self.node,
             height: height::Any,
-            lifetime: self.lifetime,
+            ownership: self.ownership,
         }
     }
 
     pub unsafe fn into_parent_and_index2(
         self,
-    ) -> Option<(NodeMut<'a, height::Positive, T, B, C>, usize)> {
+    ) -> Option<(Node<O, height::Positive, T, B, C>, usize)> {
         unsafe {
-            let parent = NodeMut::new_internal((*self.node.as_ptr()).parent?);
+            let parent = Node::new_internal((*self.node.as_ptr()).parent?);
             Some((
                 parent,
                 (*self.node.as_ptr()).parent_index.assume_init().into(),
@@ -222,7 +246,7 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         Self {
             node,
             height: height::Zero,
-            lifetime: PhantomData,
+            ownership: unsafe { ownership::Mut::new() },
         }
     }
 
@@ -286,12 +310,15 @@ impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 }
 
-impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::One, T, B, C> {
+impl<O, T, const B: usize, const C: usize> Node<O, height::One, T, B, C>
+where
+    O: Reference,
+{
     pub unsafe fn new_parent_of_leaf(node: NonNull<NodeBase<T, B, C>>) -> Self {
         Self {
             node,
             height: height::One,
-            lifetime: PhantomData,
+            ownership: unsafe { O::new() },
         }
     }
 
@@ -351,23 +378,26 @@ impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::One, T, B, C> {
     }
 }
 
-impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::TwoOrMore, T, B, C> {
+impl<O, T, const B: usize, const C: usize> Node<O, height::TwoOrMore, T, B, C>
+where
+    O: Reference,
+{
     pub unsafe fn new_parent_of_internal(node: NonNull<NodeBase<T, B, C>>) -> Self {
         Self {
             node,
             height: height::TwoOrMore,
-            lifetime: PhantomData,
+            ownership: unsafe { O::new() },
         }
     }
 
     pub fn with_brand<F, R>(&mut self, f: F) -> R
     where
-        F: for<'new_id> FnOnce(NodeMut<height::BrandedTwoOrMore<'new_id>, T, B, C>) -> R,
+        F: for<'new_id> FnOnce(Node<O, height::BrandedTwoOrMore<'new_id>, T, B, C>) -> R,
     {
-        let parent = NodeMut {
+        let parent = Node {
             node: self.node,
             height: height::BrandedTwoOrMore::new(),
-            lifetime: PhantomData,
+            ownership: unsafe { O::new() },
         };
 
         f(parent)
@@ -390,22 +420,20 @@ impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::TwoOrMore, T, B,
     }
 }
 
-impl<'a, 'id, T, const B: usize, const C: usize>
-    NodeMut<'a, height::BrandedTwoOrMore<'id>, T, B, C>
-{
-    pub fn child_mut(&mut self, index: usize) -> NodeMut<height::Positive, T, B, C> {
+impl<'id, O, T, const B: usize, const C: usize> Node<O, height::BrandedTwoOrMore<'id>, T, B, C> {
+    pub fn child_mut(&mut self, index: usize) -> Node<ownership::Mut, height::Positive, T, B, C> {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
-        NodeMut {
+        Node {
             node: unsafe { ptr.add(index).read().assume_init().cast() },
             height: height::Positive,
-            lifetime: PhantomData,
+            ownership: unsafe { ownership::Mut::new() },
         }
     }
 
     pub fn child_pair_at(
         &mut self,
         index: usize,
-    ) -> [NodeMut<height::ChildOf<height::BrandedTwoOrMore<'id>>, T, B, C>; 2] {
+    ) -> [Node<ownership::Mut, height::ChildOf<height::BrandedTwoOrMore<'id>>, T, B, C>; 2] {
         let (h1, h2) = unsafe {
             (
                 self.height.make_child_height(),
@@ -414,15 +442,15 @@ impl<'a, 'id, T, const B: usize, const C: usize>
         };
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
         [
-            NodeMut {
+            Node {
                 node: unsafe { ptr.add(index).read().assume_init() },
                 height: h1,
-                lifetime: PhantomData,
+                ownership: unsafe { ownership::Mut::new() },
             },
-            NodeMut {
+            Node {
                 node: unsafe { ptr.add(index + 1).read().assume_init() },
                 height: h2,
-                lifetime: PhantomData,
+                ownership: unsafe { ownership::Mut::new() },
             },
         ]
     }
@@ -486,7 +514,7 @@ impl<T, const B: usize, const C: usize> FreeableNode for OwnedNode<height::Zero,
 
 impl<H, T, const B: usize, const C: usize> FreeableNode for OwnedNode<H, T, B, C>
 where
-    H: height::Internal + Copy,
+    H: height::Internal,
 {
     fn free(self) {
         debug_assert_eq!(
@@ -543,7 +571,7 @@ unsafe impl<'a, T, const B: usize, const C: usize> ExactHeightNode for LeafMut<'
     }
 }
 
-unsafe impl<'a, H, T, const B: usize, const C: usize> ExactHeightNode for NodeMut<'a, H, T, B, C>
+unsafe impl<O, H, T, const B: usize, const C: usize> ExactHeightNode for Node<O, H, T, B, C>
 where
     H: height::ExactInternal,
 {
@@ -582,7 +610,8 @@ where
             node_len,
             OwnedNode {
                 node,
-                _height: unsafe { self.height.make_child_height() },
+                height: unsafe { self.height.make_child_height() },
+                ownership: ownership::Owned,
             },
         )
     }
@@ -601,7 +630,23 @@ where
     }
 }
 
-impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::Positive, T, B, C> {
+impl<T, const B: usize, const C: usize> Node<ownership::Owned, height::Positive, T, B, C> {
+    /// # Safety:
+    ///
+    /// `node` must be a child node i.e. `node.len() > C`.
+    pub unsafe fn new_internal_owned(node: NonNull<NodeBase<T, B, C>>) -> Self {
+        Self {
+            node,
+            height: height::Positive,
+            ownership: ownership::Owned,
+        }
+    }
+}
+
+impl<O, T, const B: usize, const C: usize> Node<O, height::Positive, T, B, C>
+where
+    O: Reference,
+{
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
@@ -609,12 +654,12 @@ impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::Positive, T, B, 
         Self {
             node,
             height: height::Positive,
-            lifetime: PhantomData,
+            ownership: unsafe { O::new() },
         }
     }
 }
 
-impl<'a, H, T, const B: usize, const C: usize> NodeMut<'a, H, T, B, C>
+impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
 where
     H: height::Internal,
 {
@@ -651,9 +696,12 @@ where
 
     pub unsafe fn into_parent_and_index(
         self,
-    ) -> Option<(NodeMut<'a, height::TwoOrMore, T, B, C>, usize)> {
+    ) -> Option<(Node<O, height::TwoOrMore, T, B, C>, usize)>
+    where
+        O: Reference,
+    {
         unsafe {
-            let parent = NodeMut::new_parent_of_internal((*self.node.as_ptr()).parent?);
+            let parent = Node::new_parent_of_internal((*self.node.as_ptr()).parent?);
             Some((
                 parent,
                 (*self.node.as_ptr()).parent_index.assume_init().into(),
@@ -661,11 +709,11 @@ where
         }
     }
 
-    pub fn into_internal(self) -> NodeMut<'a, height::Positive, T, B, C> {
-        NodeMut {
+    pub fn into_internal(self) -> Node<O, height::Positive, T, B, C> {
+        Node {
             node: self.node,
             height: height::Positive,
-            lifetime: self.lifetime,
+            ownership: self.ownership,
         }
     }
 
@@ -728,7 +776,8 @@ where
         let split_index = Self::UNDERFULL_LEN;
 
         let new_sibling_node = InternalNode::<T, B, C>::new();
-        let mut new_sibling = unsafe { NodeMut::new_internal(new_sibling_node.cast()) };
+        let mut new_sibling: Node<ownership::Mut, _, _, B, C> =
+            unsafe { Node::new_internal(new_sibling_node.cast()) };
 
         unsafe {
             let tail_len = self.len_children() - split_index;
@@ -755,7 +804,8 @@ where
         let split_index = Self::UNDERFULL_LEN + 1;
 
         let new_sibling_node = InternalNode::<T, B, C>::new();
-        let mut new_sibling = unsafe { NodeMut::new_internal(new_sibling_node.cast()) };
+        let mut new_sibling: Node<ownership::Mut, _, _, B, C> =
+            unsafe { Node::new_internal(new_sibling_node.cast()) };
 
         unsafe {
             let tail_len = self.len_children() - split_index;

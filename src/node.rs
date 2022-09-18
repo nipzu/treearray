@@ -74,8 +74,10 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
         children: [(usize, NodePtr<T, B, C>); N],
     ) -> NonNull<Self> {
         let boxed_children = Self::new();
-        let mut vec =
-            unsafe { handle::NodeMut::new_internal(boxed_children.cast()).as_array_vec() };
+        let mut vec = unsafe {
+            handle::Node::<handle::ownership::Mut, _, _, B, C>::new_internal(boxed_children.cast())
+                .as_array_vec()
+        };
         for (i, (child_len, mut child)) in children.into_iter().enumerate() {
             unsafe {
                 child.as_mut().parent = Some(boxed_children.cast());

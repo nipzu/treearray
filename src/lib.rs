@@ -18,7 +18,7 @@ pub use cursor::CursorMut;
 
 use iter::{Drain, Iter};
 use node::{
-    handle::{Internal, Leaf, LeafMut, NodeMut},
+    handle::{Internal, Leaf, LeafMut, Node},
     LeafNode, NodeBase,
 };
 
@@ -105,7 +105,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..height {
-            let handle = unsafe { NodeMut::new_internal(cur_node) };
+            let handle =
+                unsafe { Node::<node::handle::ownership::Mut, _, _, B, C>::new_internal(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
 
@@ -132,7 +133,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         let mut cur_node = self.root()?;
 
         for _ in 1..self.height {
-            let handle = unsafe { NodeMut::<_, T, B, C>::new_internal(cur_node) };
+            let handle =
+                unsafe { Node::<node::handle::ownership::Mut, _, T, B, C>::new_internal(cur_node) };
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
 
@@ -159,7 +161,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         let mut cur_node = self.root()?;
 
         for _ in 1..self.height {
-            let handle = unsafe { NodeMut::<_, T, B, C>::new_internal(cur_node) };
+            let handle =
+                unsafe { Node::<node::handle::ownership::Mut, _, T, B, C>::new_internal(cur_node) };
             let len_children = handle.len_children();
             cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
         }
