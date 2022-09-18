@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use core::{fmt, marker::PhantomData, mem::MaybeUninit};
+use core::{fmt, marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 mod cursor;
 pub mod iter;
@@ -18,7 +18,7 @@ pub use cursor::CursorMut;
 use iter::{Drain, Iter};
 use node::{
     handle::{Internal, Leaf, LeafMut, NodeMut},
-    LeafNode, Node,
+    LeafNode, NodeBase,
 };
 
 // pub fn foo(b: &BTreeVec<i32>, x: usize) -> Option<&i32> {
@@ -29,7 +29,8 @@ use node::{
 // - `B >= 3`
 // - `C >= 1`
 pub struct BTreeVec<T, const B: usize = 31, const C: usize = 63> {
-    root: MaybeUninit<Node<T, B, C>>,
+    root: MaybeUninit<NonNull<NodeBase<T, B, C>>>,
+    len: usize,
     // TODO: consider using a smaller type like u16
     // remove and use a condition like node.base.children_len == node.length, requires C >= 3
     height: usize,
@@ -48,6 +49,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         Self {
             root: MaybeUninit::uninit(),
+            len: 0,
             height: 0,
             _marker: PhantomData,
         }
@@ -56,25 +58,14 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[must_use]
     #[inline]
     pub const fn len(&self) -> usize {
-        match self.root() {
-            Some(root) => root.len(),
-            None => 0,
-        }
+        self.len
     }
 
-    const fn root(&self) -> Option<&Node<T, B, C>> {
+    const fn root(&self) -> Option<NonNull<NodeBase<T, B, C>>> {
         if self.is_empty() {
             None
         } else {
-            unsafe { Some(self.root.assume_init_ref()) }
-        }
-    }
-
-    fn root_mut(&mut self) -> Option<&mut Node<T, B, C>> {
-        if self.is_empty() {
-            None
-        } else {
-            unsafe { Some(self.root.assume_init_mut()) }
+            unsafe { Some(self.root.assume_init()) }
         }
     }
 
@@ -87,18 +78,18 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[must_use]
     pub fn get(&self, mut index: usize) -> Option<&T> {
         let mut cur_node = match self.root() {
-            Some(root) if index < root.len() => root,
+            Some(root) if index < self.len() => root,
             _ => return None,
         };
 
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..self.height {
-            let handle = unsafe { Internal::new(cur_node.ptr.cast().as_ref()) };
+            let handle = unsafe { Internal::new(cur_node.cast().as_ref()) };
             cur_node = unsafe { handle.child_containing_index(&mut index) };
         }
 
         // SAFETY: the height of `cur_node` is 0
-        let leaf = unsafe { Leaf::new(cur_node.ptr.cast::<LeafNode<T, B, C>>().as_ref()) };
+        let leaf = unsafe { Leaf::new(cur_node.cast::<LeafNode<T, B, C>>().as_ref()) };
         // SAFETY: from `get_child_containing_index` we know that index < leaf.len()
         unsafe { Some(leaf.value_unchecked(index)) }
     }
@@ -106,8 +97,8 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     #[must_use]
     pub fn get_mut(&mut self, mut index: usize) -> Option<&mut T> {
         let height = self.height;
-        let mut cur_node = match self.root_mut() {
-            Some(root) if index < root.len() => root.ptr,
+        let mut cur_node = match self.root() {
+            Some(root) if index < self.len() => root,
             _ => return None,
         };
 
@@ -128,23 +119,23 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         let mut cur_node = self.root()?;
 
         for _ in 1..self.height {
-            let handle = unsafe { Internal::new(cur_node.ptr.cast().as_ref()) };
-            cur_node = unsafe { handle.node.children[0].assume_init_ref() };
+            let handle = unsafe { Internal::new(cur_node.cast().as_ref()) };
+            cur_node = unsafe { handle.node.children[0].assume_init() };
         }
 
-        unsafe { Some(Leaf::<T, B, C>::new(cur_node.ptr.cast().as_ref()).value_unchecked(0)) }
+        unsafe { Some(Leaf::<T, B, C>::new(cur_node.cast().as_ref()).value_unchecked(0)) }
     }
 
     #[must_use]
     pub fn first_mut(&mut self) -> Option<&mut T> {
-        let mut cur_node = self.root_mut()? as *mut Node<T, B, C>;
+        let mut cur_node = self.root()?;
 
         for _ in 1..self.height {
-            let handle = unsafe { NodeMut::<_, T, B, C>::new_internal((*cur_node).ptr) };
-            cur_node = unsafe { (*handle.internal_ptr()).children.as_mut_ptr().cast() };
+            let handle = unsafe { NodeMut::<_, T, B, C>::new_internal(cur_node) };
+            cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
 
-        unsafe { Some(LeafMut::<T, B, C>::new_leaf((*cur_node).ptr).into_value_unchecked_mut(0)) }
+        unsafe { Some(LeafMut::<T, B, C>::new_leaf(cur_node).into_value_unchecked_mut(0)) }
     }
 
     #[must_use]
@@ -152,27 +143,27 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         let mut cur_node = self.root()?;
 
         for _ in 1..self.height {
-            let handle = unsafe { Internal::new(cur_node.ptr.cast().as_ref()) };
+            let handle = unsafe { Internal::new(cur_node.cast().as_ref()) };
             let len_children: usize = unsafe { handle.node.base.children_len.assume_init().into() };
-            cur_node = unsafe { handle.node.children[len_children - 1].assume_init_ref() };
+            cur_node = unsafe { handle.node.children[len_children - 1].assume_init() };
         }
 
-        let leaf = unsafe { Leaf::<T, B, C>::new(cur_node.ptr.cast().as_ref()) };
+        let leaf = unsafe { Leaf::<T, B, C>::new(cur_node.cast().as_ref()) };
         let len_values = leaf.len();
         unsafe { Some(leaf.value_unchecked(len_values - 1)) }
     }
 
     #[must_use]
     pub fn last_mut(&mut self) -> Option<&mut T> {
-        let mut cur_node = self.root_mut()? as *mut Node<T, B, C>;
+        let mut cur_node = self.root()?;
 
         for _ in 1..self.height {
-            let handle = unsafe { NodeMut::<_, T, B, C>::new_internal((*cur_node).ptr) };
+            let handle = unsafe { NodeMut::<_, T, B, C>::new_internal(cur_node) };
             let len_children = handle.len_children();
-            cur_node = unsafe { (*handle.internal_ptr()).children.as_mut_ptr().cast::<Node<T, B, C>>().add(len_children - 1) };
+            cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
         }
 
-        let leaf = unsafe { LeafMut::<T, B, C>::new_leaf((*cur_node).ptr) };
+        let leaf = unsafe { LeafMut::<T, B, C>::new_leaf(cur_node) };
         let len_values = leaf.len();
         unsafe { Some(leaf.into_value_unchecked_mut(len_values - 1)) }
     }
