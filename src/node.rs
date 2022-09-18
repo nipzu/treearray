@@ -42,7 +42,7 @@ impl<T, const B: usize, const C: usize> NodeBase<T, B, C> {
 impl<T, const B: usize, const C: usize> LeafNode<T, B, C> {
     const UNINIT_T: MaybeUninit<T> = MaybeUninit::uninit();
 
-    pub const fn new() -> NonNull<Self> {
+    pub fn new() -> NonNull<Self> {
         NonNull::from(Box::leak(Box::new(Self {
             base: NodeBase::new(),
             values: [Self::UNINIT_T; C],
@@ -62,26 +62,25 @@ impl<T, const B: usize, const C: usize> LeafNode<T, B, C> {
 impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
     const UNINIT_NODE: MaybeUninit<NonNull<NodeBase<T, B, C>>> = MaybeUninit::uninit();
 
-    pub const fn new() -> Self {
-        Self {
+    pub fn new() -> NonNull<Self> {
+        NonNull::from(Box::leak(Box::new(Self {
             base: NodeBase::new(),
             lengths: [MaybeUninit::uninit(); B],
             children: [Self::UNINIT_NODE; B],
-        }
+        })))
     }
 
     pub fn from_child_array<const N: usize>(
         children: [(usize, NodePtr<T, B, C>); N],
     ) -> NonNull<Self> {
-        let boxed_children = NonNull::from(Box::leak(Box::new(InternalNode::<T, B, C>::new())));
+        let boxed_children = Self::new();
         let mut vec =
             unsafe { handle::NodeMut::new_internal(boxed_children.cast()).as_array_vec() };
-        let mut length = 0;
         for (i, (child_len, mut child)) in children.into_iter().enumerate() {
-            length += child_len;
             unsafe {
                 child.as_mut().parent = Some(boxed_children.cast());
                 child.as_mut().parent_index.write(i as u16);
+                (*boxed_children.as_ptr()).lengths[i].write(child_len);
             }
             vec.push_back(child);
         }

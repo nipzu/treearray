@@ -1,7 +1,8 @@
 use core::{
     marker::PhantomData,
+    mem::MaybeUninit,
     ops::RangeFrom,
-    ptr::{addr_of_mut, NonNull},
+    ptr::{self, addr_of_mut, NonNull},
 };
 
 use alloc::boxed::Box;
@@ -59,9 +60,9 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
 
     pub unsafe fn child_containing_index(&self, index: &mut usize) -> NonNull<NodeBase<T, B, C>> {
         for (i, len) in self.node.lengths.iter().enumerate() {
-            match index.checked_sub(len.assume_init()) {
+            match index.checked_sub(unsafe { len.assume_init() }) {
                 Some(r) => *index = r,
-                None => return self.node.children[i].assume_init(),
+                None => return unsafe { self.node.children[i].assume_init() },
             }
         }
 
@@ -316,7 +317,7 @@ impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::One, T, B, C> {
             unsafe {
                 *(*self.internal_ptr()).lengths[0].assume_init_mut() += next_len;
             }
-            self.remove_child(1).free();
+            self.remove_child(1).1.free();
         } else {
             cur.push_back_child(next.pop_front_child());
             unsafe {
@@ -336,7 +337,7 @@ impl<'a, T, const B: usize, const C: usize> NodeMut<'a, height::One, T, B, C> {
             unsafe {
                 *(*self.internal_ptr()).lengths[*index - 1].assume_init_mut() += cur_len;
             }
-            self.remove_child(*index).free();
+            self.remove_child(*index).1.free();
             *index -= 1;
             *child_index += prev_children_len;
         } else {
@@ -435,10 +436,10 @@ impl<'a, 'id, T, const B: usize, const C: usize>
                 let next_len = (*self.internal_ptr()).lengths[1].assume_init();
                 *(*self.internal_ptr()).lengths[0].assume_init_mut() += next_len;
             }
-            self.remove_child(1).free();
+            self.remove_child(1).1.free();
         } else {
             let x = next.pop_front_child();
-            let x_len = x.node.length;
+            let x_len = x.0;
             cur.push_back_child(x);
             unsafe {
                 *(*self.internal_ptr()).lengths[0].assume_init_mut() += x_len;
@@ -456,10 +457,10 @@ impl<'a, 'id, T, const B: usize, const C: usize>
             unsafe {
                 *(*self.internal_ptr()).lengths[index - 1].assume_init_mut() += cur_len;
             }
-            self.remove_child(index).free();
+            self.remove_child(index).1.free();
         } else {
             let x = prev.pop_back_child();
-            let x_len = x.node.length;
+            let x_len = x.0;
             cur.push_front_child(x);
             unsafe {
                 *(*self.internal_ptr()).lengths[index - 1].assume_init_mut() -= x_len;
@@ -546,25 +547,55 @@ unsafe impl<'a, H, T, const B: usize, const C: usize> ExactHeightNode for NodeMu
 where
     H: height::ExactInternal,
 {
-    type Child = OwnedNode<H::ChildHeight, T, B, C>;
+    type Child = (usize, OwnedNode<H::ChildHeight, T, B, C>);
     const UNDERFULL_LEN: usize = (B - 1) / 2;
     fn len_children(&self) -> usize {
         self.len_children()
     }
     fn insert_child(&mut self, index: usize, child: Self::Child) {
-        self.as_array_vec().insert(index, child.node);
+        self.as_array_vec().insert(index, child.1.node);
+        unsafe {
+            let lens_ptr = (*self.internal_ptr()).lengths.as_mut_ptr();
+            ptr::copy(
+                lens_ptr.add(index),
+                lens_ptr.add(index + 1),
+                self.len_children() - 1 - index,
+            );
+            ptr::write(lens_ptr.add(index), MaybeUninit::new(child.0));
+        }
         self.set_parent_links(index..);
     }
     fn remove_child(&mut self, index: usize) -> Self::Child {
         let node = self.as_array_vec().remove(index);
-        self.set_parent_links(index..);
-        OwnedNode {
-            node,
-            _height: unsafe { self.height.make_child_height() },
+        let node_len;
+        unsafe {
+            let lens_ptr = (*self.internal_ptr()).lengths.as_mut_ptr();
+            node_len = lens_ptr.add(index).read().assume_init();
+            ptr::copy(
+                lens_ptr.add(index + 1),
+                lens_ptr.add(index),
+                self.len_children() - index,
+            );
         }
+        self.set_parent_links(index..);
+        (
+            node_len,
+            OwnedNode {
+                node,
+                _height: unsafe { self.height.make_child_height() },
+            },
+        )
     }
     fn append_children(&mut self, mut other: Self) {
         let self_old_len = self.len_children();
+        unsafe {
+            let lens_src = (*other.internal_ptr()).lengths.as_ptr();
+            let lens_dst = (*self.internal_ptr())
+                .lengths
+                .as_mut_ptr()
+                .add(self.as_array_vec().len());
+            ptr::copy_nonoverlapping(lens_src, lens_dst, other.as_array_vec().len());
+        }
         self.as_array_vec().append(other.as_array_vec());
         self.set_parent_links(self_old_len..);
     }
@@ -677,6 +708,15 @@ where
     unsafe fn insert_fitting(&mut self, index: usize, node: (usize, NodePtr<T, B, C>)) {
         debug_assert!(!self.is_full());
         self.as_array_vec().insert(index, node.1);
+        unsafe {
+            let lens_ptr = (*self.internal_ptr()).lengths.as_mut_ptr();
+            ptr::copy(
+                lens_ptr.add(index),
+                lens_ptr.add(index + 1),
+                self.len_children() - 1 - index,
+            );
+            ptr::write(lens_ptr.add(index), MaybeUninit::new(node.0));
+        }
         self.set_parent_links(index..);
     }
 
@@ -687,9 +727,18 @@ where
     ) -> (usize, NodePtr<T, B, C>) {
         let split_index = Self::UNDERFULL_LEN;
 
-        let mut new_sibling_node = InternalNode::<T, B, C>::from_child_array([]);
+        let new_sibling_node = InternalNode::<T, B, C>::new();
         let mut new_sibling = unsafe { NodeMut::new_internal(new_sibling_node.cast()) };
 
+        unsafe {
+            let tail_len = self.len_children() - split_index;
+            let lens_ptr = (*self.internal_ptr()).lengths.as_ptr();
+            ptr::copy_nonoverlapping(
+                lens_ptr.add(split_index),
+                (*new_sibling_node.as_ptr()).lengths.as_mut_ptr(),
+                tail_len,
+            );
+        }
         self.as_array_vec()
             .split(split_index, new_sibling.as_array_vec());
         unsafe { self.insert_fitting(index, node) };
@@ -705,14 +754,23 @@ where
     ) -> (usize, NodePtr<T, B, C>) {
         let split_index = Self::UNDERFULL_LEN + 1;
 
-        let mut new_sibling_node = InternalNode::<T, B, C>::from_child_array([]);
+        let new_sibling_node = InternalNode::<T, B, C>::new();
         let mut new_sibling = unsafe { NodeMut::new_internal(new_sibling_node.cast()) };
 
+        unsafe {
+            let tail_len = self.len_children() - split_index;
+            let lens_ptr = (*self.internal_ptr()).lengths.as_ptr();
+            ptr::copy_nonoverlapping(
+                lens_ptr.add(split_index),
+                (*new_sibling_node.as_ptr()).lengths.as_mut_ptr(),
+                tail_len,
+            );
+        }
         self.as_array_vec()
             .split(split_index, new_sibling.as_array_vec());
-        new_sibling
-            .as_array_vec()
-            .insert(index - split_index, node.1);
+        unsafe {
+            new_sibling.insert_fitting(index - split_index, node);
+        }
 
         new_sibling.set_parent_links(0..);
         (new_sibling.sum_lens(), new_sibling_node.cast())

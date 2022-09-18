@@ -200,29 +200,29 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 let mut cur_node = self.leaf.assume_init();
                 while let Some(parent) = (*cur_node.as_ptr()).parent {
                     let index = (*cur_node.as_ptr()).parent_index.assume_init();
-                    let mut parent = NodeMut::new_internal(parent);
-                    let mut length: &mut usize =
+                    let parent = NodeMut::new_internal(parent);
+                    let length: &mut usize =
                         (*parent.internal_ptr()).lengths[index as usize].assume_init_mut();
                     *length = f(*length);
                     cur_node = parent.node_ptr();
                 }
-                let mut len = &mut self.tree.len;
+                let len = &mut self.tree.len;
                 *len = f(*len);
             }
         }
     }
 
     fn insert_to_empty(&mut self, value: T) {
-        let root_ptr = self
+        self.tree.len = 1;
+        let root_ptr = *self
             .root_mut()
             .write(LeafNode::<T, B, C>::from_value(value).cast());
-        self.tree.len = 1;
-        self.leaf.write(unsafe { *root_ptr });
+        self.leaf.write(root_ptr);
         *self.height_mut() = 1;
     }
 
     unsafe fn split_root(&mut self, new_node_len: usize, new_node: NodePtr<T, B, C>) {
-        let mut old_root = unsafe { self.root_mut().assume_init_read() };
+        let old_root = unsafe { self.root_mut().assume_init_read() };
         let mut old_root_len = self.tree.len;
         old_root_len -= new_node_len;
         self.root_mut().write(
@@ -360,9 +360,9 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                 new_root.as_mut().parent = None;
                 // `old_root` points to the `root` field of `self` so it must be freed before assigning a new root
                 OwnedNode::new_internal(self.root_mut().assume_init_read()).free();
-                let new_root = self.root_mut().write(new_root);
+                let new_root = *self.root_mut().write(new_root);
                 if self.height() == 1 {
-                    self.leaf.write(*new_root);
+                    self.leaf.write(new_root);
                 }
             }
         }
