@@ -11,22 +11,20 @@ use crate::{
     utils::ArrayVecMut,
 };
 
-pub struct Leaf<'a, T, const B: usize, const C: usize> {
-    node: &'a LeafNode<T, B, C>,
-}
+pub type Leaf<'a, T, const B: usize, const C: usize> = Node<ownership::Immut<'a>, height::Zero, T, B, C>;
 
 impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a leaf node i.e. `node.len() <= C`.
     pub unsafe fn new(node: &'a LeafNode<T, B, C>) -> Self {
-        let this = Self { node };
+        let this = Self { node: NonNull::from(node).cast(), height: height::Zero, ownership: unsafe { ownership::Immut::new() } };
         debug_assert!(this.len() <= C);
         this
     }
 
     pub fn len(&self) -> usize {
-        unsafe { usize::from(self.node.base.children_len.assume_init()) }
+        unsafe { usize::from(self.node.as_ref().children_len.assume_init()) }
     }
 
     pub fn value(&self, index: usize) -> Option<&'a T> {
@@ -41,27 +39,25 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
         // should not be any mutable references which
         // could cause aliasing problems with taking
         // a reference to the whole array.
-        unsafe { self.node.values.get_unchecked(index).assume_init_ref() }
+        unsafe { self.node.cast::<LeafNode<T, B, C>>().as_ref().values.get_unchecked(index).assume_init_ref() }
     }
 }
 
-pub struct Internal<'a, T, const B: usize, const C: usize> {
-    pub node: &'a InternalNode<T, B, C>,
-}
+pub type Internal<'a, T, const B: usize, const C: usize> = Node<ownership::Immut<'a>, height::Positive, T, B, C>;
 
 impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
     pub const unsafe fn new(node: &'a InternalNode<T, B, C>) -> Self {
-        Self { node }
+        Self { node: NonNull::from(node).cast(), height: height::Positive, ownership: unsafe { ownership::Immut::new() } }
     }
 
     pub unsafe fn child_containing_index(&self, index: &mut usize) -> NonNull<NodeBase<T, B, C>> {
-        for (i, len) in self.node.lengths.iter().enumerate() {
+        for (i, len) in self.node.cast::<InternalNode<T,B,C>>().as_ref().lengths.iter().enumerate() {
             match index.checked_sub(unsafe { len.assume_init() }) {
                 Some(r) => *index = r,
-                None => return unsafe { self.node.children[i].assume_init() },
+                None => return unsafe { self.node.cast::<InternalNode<T,B,C>>().as_ref().children[i].assume_init() },
             }
         }
 
