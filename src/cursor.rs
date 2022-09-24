@@ -185,7 +185,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
     }
 
     fn leaf(&self) -> Option<Leaf<T, B, C>> {
-        (self.height() > 0).then(|| unsafe { Leaf::new(self.leaf.assume_init().cast().as_ref()) })
+        (self.height() > 0).then(|| unsafe { Leaf::new(self.leaf.assume_init()) })
     }
 
     fn height(&self) -> usize {

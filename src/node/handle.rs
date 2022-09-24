@@ -1,7 +1,7 @@
 use core::{
     mem::MaybeUninit,
     ops::RangeFrom,
-    ptr::{self, addr_of_mut, NonNull},
+    ptr::{self, addr_of_mut},
 };
 
 use alloc::boxed::Box;
@@ -21,9 +21,9 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a leaf node i.e. `node.len() <= C`.
-    pub unsafe fn new(node: &'a LeafNode<T, B, C>) -> Self {
+    pub unsafe fn new(node: NodePtr<T, B, C>) -> Self {
         let this = Self {
-            node: NonNull::from(node).cast(),
+            node,
             height: height::Zero,
             ownership: unsafe { ownership::Immut::new() },
         };
@@ -65,9 +65,9 @@ impl<'a, T, const B: usize, const C: usize> Internal<'a, T, B, C> {
     /// # Safety:
     ///
     /// `node` must be a child node i.e. `node.len() > C`.
-    pub unsafe fn new(node: &'a InternalNode<T, B, C>) -> Self {
+    pub unsafe fn new(node: NodePtr<T, B, C>) -> Self {
         Self {
-            node: NonNull::from(node).cast(),
+            node,
             height: height::Positive,
             ownership: unsafe { ownership::Immut::new() },
         }
