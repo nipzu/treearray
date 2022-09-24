@@ -31,10 +31,6 @@ impl<'a, T, const B: usize, const C: usize> Leaf<'a, T, B, C> {
         this
     }
 
-    pub fn len(&self) -> usize {
-        unsafe { usize::from(self.node.as_ref().children_len.assume_init()) }
-    }
-
     pub fn value(&self, index: usize) -> Option<&'a T> {
         (index < self.len()).then(|| unsafe { self.value_unchecked(index) })
     }
@@ -251,11 +247,13 @@ where
     }
 }
 
-impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
+impl<O, T, const B: usize, const C: usize> Node<O, height::Zero, T, B, C> {
     pub fn len(&self) -> usize {
-        unsafe { (*self.leaf_ptr()).base.children_len.assume_init().into() }
+        unsafe { usize::from(self.node.as_ref().children_len) }
     }
+}
 
+impl<'a, T, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     const fn leaf_ptr(&self) -> *mut LeafNode<T, B, C> {
         self.node.cast().as_ptr()
     }
@@ -527,10 +525,7 @@ pub trait FreeableNode {
 
 impl<T, const B: usize, const C: usize> FreeableNode for OwnedNode<height::Zero, T, B, C> {
     fn free(self) {
-        debug_assert_eq!(
-            unsafe { (*self.node.as_ptr()).children_len.assume_init() },
-            0
-        );
+        debug_assert_eq!(unsafe { (*self.node.as_ptr()).children_len }, 0);
         unsafe { Box::from_raw(self.node.as_ptr().cast::<LeafNode<T, B, C>>()) };
     }
 }
@@ -540,10 +535,7 @@ where
     H: height::Internal,
 {
     fn free(self) {
-        debug_assert_eq!(
-            unsafe { (*self.node.as_ptr()).children_len.assume_init() },
-            0
-        );
+        debug_assert_eq!(unsafe { (*self.node.as_ptr()).children_len }, 0);
         // debug_assert_eq!(self.node.len(), 0);
         unsafe { Box::from_raw(self.node.as_ptr().cast::<InternalNode<T, B, C>>()) };
     }
@@ -693,7 +685,7 @@ where
     }
 
     pub fn len_children(&self) -> usize {
-        unsafe { (*self.node.as_ptr()).children_len.assume_init().into() }
+        unsafe { usize::from((*self.node.as_ptr()).children_len) }
     }
 
     pub fn is_singleton(&self) -> bool {

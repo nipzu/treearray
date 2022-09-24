@@ -13,7 +13,7 @@ pub type NodePtr<T, const B: usize, const C: usize> = NonNull<NodeBase<T, B, C>>
 pub struct NodeBase<T, const B: usize, const C: usize> {
     pub parent: Option<NodePtr<T, B, C>>,
     pub parent_index: MaybeUninit<u16>,
-    pub children_len: MaybeUninit<u16>,
+    pub children_len: u16,
     _marker: PhantomData<T>,
 }
 
@@ -35,7 +35,7 @@ impl<T, const B: usize, const C: usize> NodeBase<T, B, C> {
         Self {
             parent: None,
             parent_index: MaybeUninit::uninit(),
-            children_len: MaybeUninit::new(0),
+            children_len: 0,
             _marker: PhantomData,
         }
     }
@@ -55,7 +55,7 @@ impl<T, const B: usize, const C: usize> LeafNode<T, B, C> {
         let mut leaf = Self::new();
         unsafe {
             leaf.as_mut().values.as_mut()[0].write(value);
-            leaf.as_mut().base.children_len.write(1);
+            leaf.as_mut().base.children_len = 1;
         };
         leaf
     }
