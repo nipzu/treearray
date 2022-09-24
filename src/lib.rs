@@ -1,12 +1,11 @@
 #![no_std]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::module_name_repetitions)]
-#![feature(let_else)]
 // TODO #![deny(missing_docs)]
 
 extern crate alloc;
 
-use core::{fmt, marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
+use core::{fmt, marker::PhantomData, mem::MaybeUninit};
 
 mod cursor;
 pub mod iter;
@@ -18,8 +17,8 @@ pub use cursor::CursorMut;
 
 use iter::{Drain, Iter};
 use node::{
-    handle::{Internal, Leaf, LeafMut, Node},
-    LeafNode, NodeBase,
+    handle::{ownership, Internal, Leaf, LeafMut, Node},
+    LeafNode, NodePtr,
 };
 
 // pub fn foo(b: &BTreeVec<i32>, x: usize) -> Option<&i32> {
@@ -30,7 +29,7 @@ use node::{
 // - `B >= 3`
 // - `C >= 1`
 pub struct BTreeVec<T, const B: usize = 31, const C: usize = 63> {
-    root: MaybeUninit<NonNull<NodeBase<T, B, C>>>,
+    root: MaybeUninit<NodePtr<T, B, C>>,
     len: usize,
     // TODO: consider using a smaller type like u16
     // remove and use a condition like node.base.children_len == node.length, requires C >= 3
@@ -62,7 +61,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         self.len
     }
 
-    const fn root(&self) -> Option<NonNull<NodeBase<T, B, C>>> {
+    const fn root(&self) -> Option<NodePtr<T, B, C>> {
         if self.is_empty() {
             None
         } else {
@@ -105,8 +104,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         // decrement the height of `cur_node` `self.height - 1` times
         for _ in 1..height {
-            let handle =
-                unsafe { Node::<node::handle::ownership::Mut, _, _, B, C>::new_internal(cur_node) };
+            let handle = unsafe { Node::<ownership::Mut, _, _, B, C>::new_internal(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
 
@@ -122,7 +120,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         for _ in 1..self.height {
             let handle = unsafe { Internal::new(cur_node.cast().as_ref()) };
-            cur_node = unsafe { handle.node.children[0].assume_init() };
+            cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
 
         unsafe { Some(Leaf::<T, B, C>::new(cur_node.cast().as_ref()).value_unchecked(0)) }
@@ -133,8 +131,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         let mut cur_node = self.root()?;
 
         for _ in 1..self.height {
-            let handle =
-                unsafe { Node::<node::handle::ownership::Mut, _, T, B, C>::new_internal(cur_node) };
+            let handle = unsafe { Node::<ownership::Mut, _, T, B, C>::new_internal(cur_node) };
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
 
@@ -147,8 +144,13 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
 
         for _ in 1..self.height {
             let handle = unsafe { Internal::new(cur_node.cast().as_ref()) };
-            let len_children: usize = unsafe { handle.node.base.children_len.assume_init().into() };
-            cur_node = unsafe { handle.node.children[len_children - 1].assume_init() };
+            let len_children: usize = unsafe {
+                (*handle.node_ptr().as_ptr())
+                    .children_len
+                    .assume_init()
+                    .into()
+            };
+            cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
         }
 
         let leaf = unsafe { Leaf::<T, B, C>::new(cur_node.cast().as_ref()) };
@@ -161,8 +163,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         let mut cur_node = self.root()?;
 
         for _ in 1..self.height {
-            let handle =
-                unsafe { Node::<node::handle::ownership::Mut, _, T, B, C>::new_internal(cur_node) };
+            let handle = unsafe { Node::<ownership::Mut, _, T, B, C>::new_internal(cur_node) };
             let len_children = handle.len_children();
             cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
         }

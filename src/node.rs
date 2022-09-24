@@ -6,10 +6,12 @@ use alloc::boxed::Box;
 
 pub mod handle;
 
+pub struct NodeWithSize<T, const B: usize, const C: usize>(pub usize, pub NodePtr<T, B, C>);
+
 pub type NodePtr<T, const B: usize, const C: usize> = NonNull<NodeBase<T, B, C>>;
 
 pub struct NodeBase<T, const B: usize, const C: usize> {
-    pub parent: Option<NonNull<NodeBase<T, B, C>>>,
+    pub parent: Option<NodePtr<T, B, C>>,
     pub parent_index: MaybeUninit<u16>,
     pub children_len: MaybeUninit<u16>,
     _marker: PhantomData<T>,
@@ -17,14 +19,14 @@ pub struct NodeBase<T, const B: usize, const C: usize> {
 
 #[repr(C)]
 pub struct InternalNode<T, const B: usize, const C: usize> {
-    pub base: NodeBase<T, B, C>,
-    pub children: [MaybeUninit<NonNull<NodeBase<T, B, C>>>; B],
+    base: NodeBase<T, B, C>,
+    pub children: [MaybeUninit<NodePtr<T, B, C>>; B],
     pub lengths: [MaybeUninit<usize>; B],
 }
 
 #[repr(C)]
 pub struct LeafNode<T, const B: usize, const C: usize> {
-    pub base: NodeBase<T, B, C>,
+    base: NodeBase<T, B, C>,
     values: [MaybeUninit<T>; C],
 }
 
@@ -60,7 +62,7 @@ impl<T, const B: usize, const C: usize> LeafNode<T, B, C> {
 }
 
 impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
-    const UNINIT_NODE: MaybeUninit<NonNull<NodeBase<T, B, C>>> = MaybeUninit::uninit();
+    const UNINIT_NODE: MaybeUninit<NodePtr<T, B, C>> = MaybeUninit::uninit();
 
     pub fn new() -> NonNull<Self> {
         NonNull::from(Box::leak(Box::new(Self {
@@ -70,15 +72,13 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
         })))
     }
 
-    pub fn from_child_array<const N: usize>(
-        children: [(usize, NodePtr<T, B, C>); N],
-    ) -> NonNull<Self> {
+    pub fn from_child_array<const N: usize>(children: [NodeWithSize<T, B, C>; N]) -> NonNull<Self> {
         let boxed_children = Self::new();
         let mut vec = unsafe {
             handle::Node::<handle::ownership::Mut, _, _, B, C>::new_internal(boxed_children.cast())
                 .as_array_vec()
         };
-        for (i, (child_len, mut child)) in children.into_iter().enumerate() {
+        for (i, NodeWithSize(child_len, mut child)) in children.into_iter().enumerate() {
             unsafe {
                 child.as_mut().parent = Some(boxed_children.cast());
                 child.as_mut().parent_index.write(i as u16);

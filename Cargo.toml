@@ -6,7 +6,7 @@ edition = "2021"
 [dev-dependencies]
 rand = "0.8.5"
 trybuild = "1.0.56"
-criterion = "0.3"
+criterion = "0.4"
 im = "15.0"
 
 [profile.bench]
