@@ -2,6 +2,8 @@ use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use alloc::boxed::Box;
 
+use self::handle::InternalMut;
+
 // use crate::panics::panic_length_overflow;
 
 pub mod handle;
@@ -72,12 +74,11 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
         })))
     }
 
-    pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T, B, C>; N]) -> NonNull<Self> {
+    pub fn from_child_array<const N: usize>(
+        children: [RawNodeWithLen<T, B, C>; N],
+    ) -> NonNull<Self> {
         let boxed_children = Self::new();
-        let mut vec = unsafe {
-            handle::Node::<handle::ownership::Mut, _, _, B, C>::new_internal(boxed_children.cast())
-                .as_array_vec()
-        };
+        let mut vec = unsafe { InternalMut::<T, B, C>::new(boxed_children.cast()).as_array_vec() };
         for (i, RawNodeWithLen(child_len, mut child)) in children.into_iter().enumerate() {
             unsafe {
                 child.as_mut().parent = Some(boxed_children.cast());

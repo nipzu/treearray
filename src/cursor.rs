@@ -2,9 +2,7 @@ use core::mem::MaybeUninit;
 
 use crate::{
     node::{
-        handle::{
-            ownership, ExactHeightNode, FreeableNode, Leaf, LeafMut, Node, OwnedNode, SplitResult,
-        },
+        handle::{ExactHeightNode, Internal, InternalMut, Leaf, LeafMut, LeafRef, SplitResult},
         InternalNode, LeafNode, NodePtr, RawNodeWithLen,
     },
     BTreeVec,
@@ -112,7 +110,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         // the height of `cur_node` is `tree.height - 1`
         // decrement the height of `cur_node` `tree.height - 1` times
         for _ in 1..tree.height {
-            let handle = unsafe { Node::<ownership::Mut, _, _, B, C>::new_internal(cur_node) };
+            let handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut target_index) };
         }
 
@@ -184,11 +182,11 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
     where
         T: 'b,
     {
-        (self.height() > 0).then(|| unsafe { LeafMut::new_leaf(self.leaf.assume_init()) })
+        (self.height() > 0).then(|| unsafe { LeafMut::new(self.leaf.assume_init()) })
     }
 
-    fn leaf(&self) -> Option<Leaf<T, B, C>> {
-        (self.height() > 0).then(|| unsafe { Leaf::new(self.leaf.assume_init()) })
+    fn leaf(&self) -> Option<LeafRef<T, B, C>> {
+        (self.height() > 0).then(|| unsafe { LeafRef::new(self.leaf.assume_init()) })
     }
 
     fn height(&self) -> usize {
@@ -202,9 +200,10 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
     unsafe fn update_path_lengths<F: Fn(usize) -> usize>(&mut self, f: F) {
         if self.height() > 0 {
             unsafe {
-                let mut new_parent =
-                    Node::<ownership::Mut, _, _, B, C>::new_leaf(self.leaf.assume_init())
-                        .into_parent_and_index2();
+                let mut new_parent = self.leaf_mut().and_then(|leaf| {
+                    leaf.into_parent_and_index3()
+                        .map(|(n, l)| (n.into_internal(), l))
+                });
                 while let Some((mut parent, index)) = new_parent {
                     let length = (*parent.internal_ptr()).lengths[index as usize].assume_init_mut();
                     *length = f(*length);
@@ -230,7 +229,8 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         let mut old_root_len = self.tree.len;
         old_root_len -= new_node.0;
         self.root_mut().write(
-            InternalNode::from_child_array([RawNodeWithLen(old_root_len, old_root), new_node]).cast(),
+            InternalNode::from_child_array([RawNodeWithLen(old_root_len, old_root), new_node])
+                .cast(),
         );
         *self.height_mut() += 1;
     }
@@ -287,18 +287,15 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         let leaf_underfull = leaf.is_underfull();
         let leaf_is_empty = leaf.len() == 0;
 
-        let Some((mut parent, mut self_index)) = (unsafe { leaf.into_parent_and_index2() }) else {
+        let Some((mut parent, mut self_index)) = (unsafe { leaf.into_parent_and_index3() }) else {
             // height is 1
             if leaf_is_empty {
-                unsafe { OwnedNode::new_leaf(self.root_mut().assume_init_read()).free() };
+                unsafe { Leaf::new(self.root_mut().assume_init_read()).free() };
                 *self.height_mut() = 0;
             }
             debug_assert_eq!(self.leaf_index, self.index);
             return ret;
         };
-
-        let mut parent =
-            unsafe { Node::<ownership::Mut, _, _, B, C>::new_parent_of_leaf(parent.node_ptr()) };
 
         if leaf_underfull {
             if self_index > 0 {
@@ -348,16 +345,14 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
         // move the root one level lower if needed
         unsafe {
-            let mut old_root =
-                Node::<ownership::Mut, _, _, B, C>::new_internal(self.tree.root.assume_init());
+            let mut old_root = InternalMut::new(self.tree.root.assume_init());
 
             if old_root.is_singleton() {
                 *self.height_mut() -= 1;
                 let mut new_root = old_root.as_array_vec().pop_back();
                 new_root.as_mut().parent = None;
                 // `old_root` points to the `root` field of `self` so it must be freed before assigning a new root
-                OwnedNode::<_, _, B, C>::new_internal_owned(self.root_mut().assume_init_read())
-                    .free();
+                Internal::new(self.root_mut().assume_init_read()).free();
                 self.root_mut().write(new_root);
                 if self.height() == 1 {
                     self.leaf.write(new_root);
