@@ -1,7 +1,7 @@
 use core::{
     mem::MaybeUninit,
     ops::RangeFrom,
-    ptr::{self, addr_of_mut, NonNull},
+    ptr::{self, addr_of_mut},
 };
 
 use alloc::boxed::Box;
@@ -193,30 +193,14 @@ where
     H: height::Height,
     O: ownership::NodePtrType<H::NodeType<T, B, C>>,
 {
-    pub unsafe fn new(node: NodePtr<T, B, C>) -> Self {
+    pub unsafe fn new(ptr: NodePtr<T, B, C>) -> Self {
         Self {
-            node: unsafe { O::from_raw(node.cast()) },
+            node: unsafe { O::from_raw(ptr.cast()) },
         }
     }
-}
 
-impl<H, T, const B: usize, const C: usize> Node<ownership::Owned, H, T, B, C>
-where
-    H: height::Height + Copy,
-{
-    pub fn as_mut(&mut self) -> Node<ownership::Mut, H, T, B, C> {
-        Node {
-            node: NonNull::from(&mut *self.node),
-        }
-    }
-}
-
-impl<T, const B: usize, const C: usize> Leaf<T, B, C> {
-    pub fn new_empty_leaf() -> Self {
-        let node = LeafNode::<T, B, C>::new();
-        Self {
-            node: unsafe { Box::from_raw(node.as_ptr().cast()) },
-        }
+    pub fn node_ptr(&mut self) -> NodePtr<T, B, C> {
+        <O as ownership::NodePtrType<H::NodeType<T, B, C>>>::as_raw(&mut self.node).cast()
     }
 }
 
@@ -225,10 +209,6 @@ where
     O: ownership::NodePtrType<H::NodeType<T, B, C>> + ownership::NodePtrType<InternalNode<T, B, C>>,
     H: height::Height,
 {
-    pub fn node_ptr(&mut self) -> NodePtr<T, B, C> {
-        <O as ownership::NodePtrType<H::NodeType<T, B, C>>>::as_raw(&mut self.node).cast()
-    }
-
     pub unsafe fn into_parent_and_index2(
         mut self,
     ) -> Option<(Node<O, height::Positive, T, B, C>, usize)>
@@ -248,6 +228,7 @@ where
         }
     }
 }
+
 impl<O, T, const B: usize, const C: usize> Node<O, height::Zero, T, B, C>
 where
     O: ownership::NodePtrType<LeafNode<T, B, C>> + ownership::NodePtrType<InternalNode<T, B, C>>,
@@ -326,32 +307,32 @@ impl<'a, T: 'a, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
 
     fn split_and_insert_left(&mut self, index: usize, value: T) -> RawNodeWithLen<T, B, C> {
         let split_index = C / 2;
-        let mut new_node = Leaf::<_, B, C>::new_empty_leaf();
-        let mut new_leaf = new_node.as_mut();
+        let new_node = LeafNode::<T, B, C>::new().cast();
+        let mut new_leaf = unsafe {LeafMut::new(new_node)};
         self.values_mut().split(split_index, new_leaf.values_mut());
         self.values_mut().insert(index, value);
         RawNodeWithLen(
             new_leaf.values_mut().len(),
-            NonNull::from(Box::leak(new_node.node)).cast(),
+            new_node
         )
     }
 
     fn split_and_insert_right(&mut self, index: usize, value: T) -> RawNodeWithLen<T, B, C> {
         let split_index = (C - 1) / 2 + 1;
-        let mut new_node = Leaf::<_, B, C>::new_empty_leaf();
-        let mut new_leaf = new_node.as_mut();
+        let new_node = LeafNode::<T, B, C>::new().cast();
+        let mut new_leaf = unsafe {LeafMut::new(new_node)};
         self.values_mut().split(split_index, new_leaf.values_mut());
         new_leaf.values_mut().insert(index - self.len(), value);
         RawNodeWithLen(
             new_leaf.values_mut().len(),
-            NonNull::from(Box::leak(new_node.node)).cast(),
+            new_node
         )
     }
 }
 
 impl<O, T, const B: usize, const C: usize> Node<O, height::One, T, B, C>
 where
-    O: ownership::NodePtrType<InternalNode<T, B, C>>,
+    O: ownership::NodePtrType<InternalNode<T, B, C>> + ownership::Mutable,
 {
     pub fn child_mut(&mut self, index: usize) -> LeafMut<T, B, C> {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
@@ -371,16 +352,15 @@ where
 
         if next.is_almost_underfull() {
             cur.append_children(next);
-            let next_len = unsafe { (*self.internal_ptr()).lengths[1].assume_init() };
+            let next_len = unsafe { self.internal_mut().lengths[1].assume_init() };
             unsafe {
-                *(*self.internal_ptr()).lengths[0].assume_init_mut() += next_len;
+                *self.internal_mut().lengths[0].assume_init_mut() += next_len;
                 Leaf::new(self.remove_child(1).1).free();
             }
         } else {
             cur.push_back_child(next.pop_front_child());
             unsafe {
-                *(*self.internal_ptr()).lengths[0].assume_init_mut() += 1;
-                *(*self.internal_ptr()).lengths[1].assume_init_mut() -= 1;
+                self.steal_length_from_following(0, 1)
             }
         }
     }
@@ -391,9 +371,9 @@ where
         if prev.is_almost_underfull() {
             let prev_children_len = prev.len_children();
             prev.append_children(cur);
-            let cur_len = unsafe { (*self.internal_ptr()).lengths[*index].assume_init() };
+            let cur_len = unsafe { self.internal_mut().lengths[*index].assume_init() };
             unsafe {
-                *(*self.internal_ptr()).lengths[*index - 1].assume_init_mut() += cur_len;
+                *self.internal_mut().lengths[*index - 1].assume_init_mut() += cur_len;
                 Leaf::new(self.remove_child(*index).1).free();
             }
             *index -= 1;
@@ -401,8 +381,7 @@ where
         } else {
             cur.push_front_child(prev.pop_back_child());
             unsafe {
-                *(*self.internal_ptr()).lengths[*index - 1].assume_init_mut() -= 1;
-                *(*self.internal_ptr()).lengths[*index].assume_init_mut() += 1;
+                self.steal_length_from_previous(*index, 1);
             }
             *child_index += 1;
         }
@@ -452,7 +431,7 @@ where
 
 impl<'id, O, T, const B: usize, const C: usize> Node<O, height::BrandedTwoOrMore<'id>, T, B, C>
 where
-    O: ownership::NodePtrType<InternalNode<T, B, C>>,
+    O: ownership::NodePtrType<InternalNode<T, B, C>> + ownership::Mutable,
 {
     pub fn child_mut(&mut self, index: usize) -> Node<ownership::Mut, height::Positive, T, B, C> {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
@@ -491,8 +470,7 @@ where
             let x_len = x.0;
             cur.push_back_child(x);
             unsafe {
-                *(*self.internal_ptr()).lengths[0].assume_init_mut() += x_len;
-                *(*self.internal_ptr()).lengths[1].assume_init_mut() -= x_len;
+                self.steal_length_from_following(0, x_len);
             }
         }
     }
@@ -512,8 +490,7 @@ where
             let x_len = x.0;
             cur.push_front_child(x);
             unsafe {
-                *(*self.internal_ptr()).lengths[index - 1].assume_init_mut() -= x_len;
-                *(*self.internal_ptr()).lengths[index].assume_init_mut() += x_len;
+                self.steal_length_from_previous(index, x_len);
             }
         }
     }
@@ -629,6 +606,30 @@ where
         }
         self.as_array_vec().append(other.as_array_vec());
         self.set_parent_links(self_old_len..);
+    }
+}
+
+impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+where
+    H: height::Internal,
+    O: ownership::NodePtrType<InternalNode<T, B, C>> + ownership::Mutable,
+{
+    pub fn internal_mut(&mut self) -> &mut InternalNode<T, B, C> {
+        unsafe { O::as_raw(&mut self.node).cast().as_mut() }
+    }
+
+    unsafe fn steal_length_from_following(&mut self, index: usize, amount: usize) {
+        unsafe {
+            *self.internal_mut().lengths[index + 1].assume_init_mut() -= amount;
+            *self.internal_mut().lengths[index].assume_init_mut() += amount;
+        }
+    }
+
+    unsafe fn steal_length_from_previous(&mut self, index: usize, amount: usize) {
+        unsafe {
+            *self.internal_mut().lengths[index - 1].assume_init_mut() -= amount;
+            *self.internal_mut().lengths[index].assume_init_mut() += amount;
+        }
     }
 }
 
@@ -800,7 +801,7 @@ where
     fn set_parent_links(&mut self, range: RangeFrom<usize>) {
         for (i, n) in self.as_array_vec()[range.clone()].iter_mut().enumerate() {
             unsafe {
-                (*n.as_ptr()).parent = Some(O::as_raw(&mut self.node).cast());
+                (*n.as_ptr()).parent = Some(self.node_ptr());
                 (*n.as_ptr()).parent_index.write((i + range.start) as u16);
             }
         }
