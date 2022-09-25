@@ -6,7 +6,7 @@ use alloc::boxed::Box;
 
 pub mod handle;
 
-pub struct NodeWithSize<T, const B: usize, const C: usize>(pub usize, pub NodePtr<T, B, C>);
+pub struct RawNodeWithLen<T, const B: usize, const C: usize>(pub usize, pub NodePtr<T, B, C>);
 
 pub type NodePtr<T, const B: usize, const C: usize> = NonNull<NodeBase<T, B, C>>;
 
@@ -72,13 +72,13 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
         })))
     }
 
-    pub fn from_child_array<const N: usize>(children: [NodeWithSize<T, B, C>; N]) -> NonNull<Self> {
+    pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T, B, C>; N]) -> NonNull<Self> {
         let boxed_children = Self::new();
         let mut vec = unsafe {
             handle::Node::<handle::ownership::Mut, _, _, B, C>::new_internal(boxed_children.cast())
                 .as_array_vec()
         };
-        for (i, NodeWithSize(child_len, mut child)) in children.into_iter().enumerate() {
+        for (i, RawNodeWithLen(child_len, mut child)) in children.into_iter().enumerate() {
             unsafe {
                 child.as_mut().parent = Some(boxed_children.cast());
                 child.as_mut().parent_index.write(i as u16);
