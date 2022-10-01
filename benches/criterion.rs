@@ -1,5 +1,7 @@
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 
+use pprof::criterion::{Output, PProfProfiler};
+
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 use btreevec::BTreeVec;
@@ -127,7 +129,7 @@ fn bench_insert(c: &mut Criterion) {
 
 criterion_group!(
     name = benches;
-    config = Criterion::default().sample_size(500);
+    config = Criterion::default().sample_size(500).with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
     targets = bench_get_bvec, bench_get_vec, bench_get_im_vec, bench_insert
 );
 criterion_main!(benches);

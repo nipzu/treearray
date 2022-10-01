@@ -4,10 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dev-dependencies]
-rand = "0.8.5"
+rand = { version = "0.8.5", features = ["small_rng"] }
 trybuild = "1.0.56"
 criterion = "0.4"
 im = "15.0"
+pprof = { git = "https://github.com/tikv/pprof-rs", features = ["criterion", "flamegraph"] }
 
 [profile.bench]
 debug = true
