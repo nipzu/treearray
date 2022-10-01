@@ -78,7 +78,7 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
         children: [RawNodeWithLen<T, B, C>; N],
     ) -> NonNull<Self> {
         let boxed_children = Self::new();
-        let mut vec = unsafe { InternalMut::<T, B, C>::new(boxed_children.cast()).as_array_vec() };
+        let mut vec = unsafe { InternalMut::<T, B, C>::new(boxed_children.cast()).children() };
         for (i, RawNodeWithLen(child_len, mut child)) in children.into_iter().enumerate() {
             unsafe {
                 child.as_mut().parent = Some(boxed_children.cast());

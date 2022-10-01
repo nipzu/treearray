@@ -2,7 +2,7 @@ use core::mem::MaybeUninit;
 
 use crate::{
     node::{
-        handle::{ExactHeightNode, Internal, InternalMut, Leaf, LeafMut, LeafRef, SplitResult},
+        handle::{Internal, InternalMut, Leaf, LeafMut, LeafRef, SplitResult},
         InternalNode, LeafNode, NodePtr, RawNodeWithLen,
     },
     BTreeVec,
@@ -205,8 +205,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                         .map(|(n, l)| (n.into_internal(), l))
                 });
                 while let Some((mut parent, index)) = new_parent {
-                    let length = (*parent.internal_ptr()).lengths[index as usize].assume_init_mut();
-                    *length = f(*length);
+                    parent.update_length(index, &f);
                     new_parent = parent.into_parent_and_index2();
                 }
                 let len = &mut self.tree.len;
@@ -349,7 +348,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
 
             if old_root.is_singleton() {
                 *self.height_mut() -= 1;
-                let mut new_root = old_root.as_array_vec().pop_back();
+                let mut new_root = old_root.children().pop_back();
                 new_root.as_mut().parent = None;
                 // `old_root` points to the `root` field of `self` so it must be freed before assigning a new root
                 Internal::new(self.root_mut().assume_init_read()).free();

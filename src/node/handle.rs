@@ -200,7 +200,19 @@ where
     }
 
     pub fn node_ptr(&mut self) -> NodePtr<T, B, C> {
-        <O as ownership::NodePtrType<H::NodeType<T, B, C>>>::as_raw(&mut self.node).cast()
+        O::as_raw(&mut self.node).cast()
+    }
+}
+
+impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+where
+    H: height::Height,
+    O: ownership::NodePtrType<H::NodeType<T, B, C>>,
+{
+    fn reborrow<'b>(&'b mut self) -> Node<ownership::Mut<'b>, H, T, B, C> {
+        Node {
+            node: O::as_raw(&mut self.node),
+        }
     }
 }
 
@@ -308,25 +320,19 @@ impl<'a, T: 'a, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     fn split_and_insert_left(&mut self, index: usize, value: T) -> RawNodeWithLen<T, B, C> {
         let split_index = C / 2;
         let new_node = LeafNode::<T, B, C>::new().cast();
-        let mut new_leaf = unsafe {LeafMut::new(new_node)};
+        let mut new_leaf = unsafe { LeafMut::new(new_node) };
         self.values_mut().split(split_index, new_leaf.values_mut());
         self.values_mut().insert(index, value);
-        RawNodeWithLen(
-            new_leaf.values_mut().len(),
-            new_node
-        )
+        RawNodeWithLen(new_leaf.values_mut().len(), new_node)
     }
 
     fn split_and_insert_right(&mut self, index: usize, value: T) -> RawNodeWithLen<T, B, C> {
         let split_index = (C - 1) / 2 + 1;
         let new_node = LeafNode::<T, B, C>::new().cast();
-        let mut new_leaf = unsafe {LeafMut::new(new_node)};
+        let mut new_leaf = unsafe { LeafMut::new(new_node) };
         self.values_mut().split(split_index, new_leaf.values_mut());
         new_leaf.values_mut().insert(index - self.len(), value);
-        RawNodeWithLen(
-            new_leaf.values_mut().len(),
-            new_node
-        )
+        RawNodeWithLen(new_leaf.values_mut().len(), new_node)
     }
 }
 
@@ -350,17 +356,15 @@ where
     pub fn handle_underfull_leaf_child_head(&mut self) {
         let [mut cur, mut next] = self.child_pair_at(0);
 
-        if next.is_almost_underfull() {
-            cur.append_children(next);
-            let next_len = unsafe { self.internal_mut().lengths[1].assume_init() };
-            unsafe {
-                *self.internal_mut().lengths[0].assume_init_mut() += next_len;
-                Leaf::new(self.remove_child(1).1).free();
-            }
-        } else {
-            cur.push_back_child(next.pop_front_child());
-            unsafe {
-                self.steal_length_from_following(0, 1)
+        unsafe {
+            if next.is_almost_underfull() {
+                cur.values_mut().append(next.values_mut());
+                self.merge_length_from_next(0);
+                Leaf::new(self.children().remove(1)).free();
+                self.set_parent_links(1..);
+            } else {
+                cur.push_back_child(next.pop_front_child());
+                self.steal_length_from_next(0, 1);
             }
         }
     }
@@ -368,22 +372,21 @@ where
     pub fn handle_underfull_leaf_child_tail(&mut self, index: &mut usize, child_index: &mut usize) {
         let [mut prev, mut cur] = self.child_pair_at(*index - 1);
 
-        if prev.is_almost_underfull() {
-            let prev_children_len = prev.len_children();
-            prev.append_children(cur);
-            let cur_len = unsafe { self.internal_mut().lengths[*index].assume_init() };
-            unsafe {
-                *self.internal_mut().lengths[*index - 1].assume_init_mut() += cur_len;
-                Leaf::new(self.remove_child(*index).1).free();
-            }
-            *index -= 1;
-            *child_index += prev_children_len;
-        } else {
-            cur.push_front_child(prev.pop_back_child());
-            unsafe {
+        unsafe {
+            if prev.is_almost_underfull() {
+                let prev_children_len = prev.len();
+                prev.values_mut().append(cur.values_mut());
+                self.merge_length_from_next(*index - 1);
+                Leaf::new(self.children().remove(*index)).free();
+                self.set_parent_links(*index..);
+
+                *index -= 1;
+                *child_index += prev_children_len;
+            } else {
+                cur.push_front_child(prev.pop_back_child());
                 self.steal_length_from_previous(*index, 1);
+                *child_index += 1;
             }
-            *child_index += 1;
         }
     }
 }
@@ -459,18 +462,18 @@ where
         let [mut cur, mut next] = self.child_pair_at(0);
 
         if next.is_almost_underfull() {
-            cur.append_children(next);
             unsafe {
-                let next_len = (*self.internal_ptr()).lengths[1].assume_init();
-                *(*self.internal_ptr()).lengths[0].assume_init_mut() += next_len;
-                Internal::new(self.remove_child(1).1).free();
+                cur.append_children(next);
+                self.merge_length_from_next(0);
+                Internal::new(self.children().remove(1)).free();
+                self.set_parent_links(1..);
             }
         } else {
-            let x = next.pop_front_child();
-            let x_len = x.0;
-            cur.push_back_child(x);
             unsafe {
-                self.steal_length_from_following(0, x_len);
+                let x = next.pop_front_child();
+                let x_len = x.0;
+                cur.push_back_child(x);
+                self.steal_length_from_next(0, x_len);
             }
         }
     }
@@ -479,17 +482,17 @@ where
         let [mut prev, mut cur] = self.child_pair_at(index - 1);
 
         if prev.is_almost_underfull() {
-            prev.append_children(cur);
-            let cur_len = unsafe { (*self.internal_ptr()).lengths[index].assume_init() };
             unsafe {
-                *(*self.internal_ptr()).lengths[index - 1].assume_init_mut() += cur_len;
-                Internal::new(self.remove_child(index).1).free();
+                prev.append_children(cur);
+                self.merge_length_from_next(index - 1);
+                Internal::new(self.children().remove(index)).free();
+                self.set_parent_links(index..);
             }
         } else {
-            let x = prev.pop_back_child();
-            let x_len = x.0;
-            cur.push_front_child(x);
             unsafe {
+                let x = prev.pop_back_child();
+                let x_len = x.0;
+                cur.push_front_child(x);
                 self.steal_length_from_previous(index, x_len);
             }
         }
@@ -511,100 +514,66 @@ impl<T, const B: usize, const C: usize> Internal<T, B, C> {
     }
 }
 
-pub unsafe trait ExactHeightNode {
-    type Child;
-    const UNDERFULL_LEN: usize;
-    fn len_children(&self) -> usize;
-    fn insert_child(&mut self, index: usize, child: Self::Child);
-    fn remove_child(&mut self, index: usize) -> Self::Child;
-    fn append_children(&mut self, other: Self);
-
-    fn push_front_child(&mut self, child: Self::Child) {
-        self.insert_child(0, child);
+impl<'a, T: 'a, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
+    const UNDERFULL_LEN: usize = (C - 1) / 2;
+    pub fn remove_child(&mut self, index: usize) -> T {
+        self.values_mut().remove(index)
     }
-    fn push_back_child(&mut self, child: Self::Child) {
-        self.insert_child(self.len_children(), child);
+    fn push_front_child(&mut self, child: T) {
+        self.values_mut().insert(0, child);
     }
-    fn pop_front_child(&mut self) -> Self::Child {
+    fn push_back_child(&mut self, child: T) {
+        self.values_mut().insert(self.len(), child);
+    }
+    fn pop_front_child(&mut self) -> T {
         self.remove_child(0)
     }
-    fn pop_back_child(&mut self) -> Self::Child {
-        self.remove_child(self.len_children() - 1)
+    fn pop_back_child(&mut self) -> T {
+        self.remove_child(self.len() - 1)
     }
-    fn is_underfull(&self) -> bool {
-        self.len_children() <= Self::UNDERFULL_LEN
+    pub fn is_underfull(&self) -> bool {
+        self.len() <= Self::UNDERFULL_LEN
+    }
+    fn is_almost_underfull(&self) -> bool {
+        self.len() <= Self::UNDERFULL_LEN + 1
+    }
+}
+
+impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+where
+    H: height::Internal,
+    O: ownership::NodePtrType<InternalNode<T, B, C>> + ownership::Mutable,
+{
+    unsafe fn push_front_child(&mut self, child: RawNodeWithLen<T, B, C>) {
+        unsafe {
+            self.push_front_length(child.0);
+            self.children().insert(0, child.1);
+            self.set_parent_links(0..);
+        }
+    }
+    unsafe fn push_back_child(&mut self, child: RawNodeWithLen<T, B, C>) {
+        unsafe { self.push_back_length(child.0) };
+        self.children().insert(self.len_children(), child.1);
+        self.set_parent_links(self.len_children() - 1..);
+    }
+    unsafe fn pop_front_child(&mut self) -> RawNodeWithLen<T, B, C> {
+        let node = self.children().remove(0);
+        let node_len = unsafe { self.pop_front_length() };
+        self.set_parent_links(0..);
+        RawNodeWithLen(node_len, node)
+    }
+    unsafe fn pop_back_child(&mut self) -> RawNodeWithLen<T, B, C> {
+        let last_len = unsafe { self.pop_back_length() };
+        let last = self.children().pop_back();
+        RawNodeWithLen(last_len, last)
     }
     fn is_almost_underfull(&self) -> bool {
         self.len_children() <= Self::UNDERFULL_LEN + 1
     }
-}
-
-unsafe impl<'a, T: 'a, const B: usize, const C: usize> ExactHeightNode for LeafMut<'a, T, B, C> {
-    type Child = T;
-    const UNDERFULL_LEN: usize = (C - 1) / 2;
-    fn len_children(&self) -> usize {
-        self.len()
-    }
-    fn insert_child(&mut self, index: usize, child: Self::Child) {
-        self.values_mut().insert(index, child);
-    }
-    fn remove_child(&mut self, index: usize) -> Self::Child {
-        self.values_mut().remove(index)
-    }
-    fn append_children(&mut self, mut other: Self) {
-        self.values_mut().append(other.values_mut());
-    }
-}
-
-unsafe impl<O, H, T, const B: usize, const C: usize> ExactHeightNode for Node<O, H, T, B, C>
-where
-    H: height::ExactInternal,
-    O: ownership::NodePtrType<InternalNode<T, B, C>>,
-{
-    type Child = RawNodeWithLen<T, B, C>;
-    const UNDERFULL_LEN: usize = (B - 1) / 2;
-    fn len_children(&self) -> usize {
-        self.len_children()
-    }
-    fn insert_child(&mut self, index: usize, child: Self::Child) {
-        self.as_array_vec().insert(index, child.1);
-        unsafe {
-            let lens_ptr = (*self.internal_ptr()).lengths.as_mut_ptr();
-            ptr::copy(
-                lens_ptr.add(index),
-                lens_ptr.add(index + 1),
-                self.len_children() - 1 - index,
-            );
-            ptr::write(lens_ptr.add(index), MaybeUninit::new(child.0));
-        }
-        self.set_parent_links(index..);
-    }
-    fn remove_child(&mut self, index: usize) -> Self::Child {
-        let node = self.as_array_vec().remove(index);
-        let node_len;
-        unsafe {
-            let lens_ptr = (*self.internal_ptr()).lengths.as_mut_ptr();
-            node_len = lens_ptr.add(index).read().assume_init();
-            ptr::copy(
-                lens_ptr.add(index + 1),
-                lens_ptr.add(index),
-                self.len_children() - index,
-            );
-        }
-        self.set_parent_links(index..);
-        RawNodeWithLen(node_len, node)
-    }
-    fn append_children(&mut self, mut other: Self) {
+    unsafe fn append_children(&mut self, mut other: Self) {
         let self_old_len = self.len_children();
-        unsafe {
-            let lens_src = (*other.internal_ptr()).lengths.as_ptr();
-            let lens_dst = (*self.internal_ptr())
-                .lengths
-                .as_mut_ptr()
-                .add(self.as_array_vec().len());
-            ptr::copy_nonoverlapping(lens_src, lens_dst, other.as_array_vec().len());
-        }
-        self.as_array_vec().append(other.as_array_vec());
+        unsafe { self.append_lengths(other.reborrow()) };
+        self.children().append(other.children());
         self.set_parent_links(self_old_len..);
     }
 }
@@ -618,7 +587,7 @@ where
         unsafe { O::as_raw(&mut self.node).cast().as_mut() }
     }
 
-    unsafe fn steal_length_from_following(&mut self, index: usize, amount: usize) {
+    unsafe fn steal_length_from_next(&mut self, index: usize, amount: usize) {
         unsafe {
             *self.internal_mut().lengths[index + 1].assume_init_mut() -= amount;
             *self.internal_mut().lengths[index].assume_init_mut() += amount;
@@ -631,19 +600,103 @@ where
             *self.internal_mut().lengths[index].assume_init_mut() += amount;
         }
     }
-}
 
+    unsafe fn append_lengths<'b>(&'b mut self, mut other: Node<ownership::Mut<'b>, H, T, B, C>) {
+        unsafe {
+            let lens_src = other.internal_mut().lengths.as_ptr();
+            let lens_dst = self
+                .internal_mut()
+                .lengths
+                .as_mut_ptr()
+                .add(self.children().len());
+            ptr::copy_nonoverlapping(lens_src, lens_dst, other.children().len());
+        }
+    }
+
+    unsafe fn merge_length_from_next(&mut self, index: usize) {
+        unsafe {
+            let lens_ptr = self.internal_mut().lengths.as_mut_ptr();
+            let next_len = lens_ptr.add(index + 1).read().assume_init();
+            *(*lens_ptr.add(index)).assume_init_mut() += next_len;
+            ptr::copy(
+                lens_ptr.add(index + 2),
+                lens_ptr.add(index + 1),
+                B - index - 2,
+            );
+        }
+    }
+
+    unsafe fn insert_length(&mut self, index: usize, len: usize) {
+        unsafe {
+            let lens_ptr = self.internal_mut().lengths.as_mut_ptr();
+            ptr::copy(
+                lens_ptr.add(index),
+                lens_ptr.add(index + 1),
+                self.len_children() - index,
+            );
+            ptr::write(lens_ptr.add(index), MaybeUninit::new(len));
+        }
+    }
+
+    unsafe fn split_lengths<'b>(
+        &'b mut self,
+        index: usize,
+        mut other: Node<ownership::Mut<'b>, H, T, B, C>,
+    ) {
+        unsafe {
+            let tail_len = self.len_children() - index;
+            let lens_ptr = self.internal_mut().lengths.as_ptr();
+            ptr::copy_nonoverlapping(
+                lens_ptr.add(index),
+                other.internal_mut().lengths.as_mut_ptr(),
+                tail_len,
+            );
+        }
+    }
+
+    unsafe fn pop_front_length(&mut self) -> usize {
+        unsafe {
+            let lens_ptr = self.internal_mut().lengths.as_mut_ptr();
+            let first_len = lens_ptr.read().assume_init();
+            ptr::copy(lens_ptr.add(1), lens_ptr, B - 1);
+            first_len
+        }
+    }
+
+    unsafe fn pop_back_length(&mut self) -> usize {
+        unsafe {
+            let len = self.len_children();
+            self.internal_mut().lengths[len - 1].assume_init()
+        }
+    }
+
+    unsafe fn push_back_length(&mut self, len: usize) {
+        unsafe {
+            let children_len = self.len_children();
+            let lens_ptr = self.internal_mut().lengths.as_mut_ptr();
+            ptr::write(lens_ptr.add(children_len), MaybeUninit::new(len));
+        }
+    }
+
+    unsafe fn push_front_length(&mut self, len: usize) {
+        unsafe {
+            let lens_ptr = self.internal_mut().lengths.as_mut_ptr();
+            ptr::copy(lens_ptr, lens_ptr.add(1), self.len_children());
+            ptr::write(lens_ptr, MaybeUninit::new(len));
+        }
+    }
+
+    pub unsafe fn update_length<F: Fn(usize) -> usize>(&mut self, index: usize, f: F) {
+        let length = unsafe { self.internal_mut().lengths[index as usize].assume_init_mut() };
+        *length = f(*length);
+    }
+}
 impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
 where
     H: height::Internal,
     O: ownership::NodePtrType<InternalNode<T, B, C>>,
 {
     pub const UNDERFULL_LEN: usize = (B - 1) / 2;
-
-    pub fn internal_ptr(&mut self) -> *mut InternalNode<T, B, C> {
-        O::as_raw(&mut self.node).cast().as_ptr()
-    }
-
     pub fn len_children(&self) -> usize {
         usize::from(O::as_ref(&self.node).base.children_len)
     }
@@ -659,8 +712,17 @@ where
     pub fn is_underfull(&self) -> bool {
         self.len_children() <= Self::UNDERFULL_LEN
     }
+    pub fn internal_ptr(&mut self) -> *mut InternalNode<T, B, C> {
+        O::as_raw(&mut self.node).cast().as_ptr()
+    }
+}
 
-    pub fn as_array_vec(&mut self) -> ArrayVecMut<NodePtr<T, B, C>, B> {
+impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+where
+    H: height::Internal,
+    O: ownership::NodePtrType<InternalNode<T, B, C>> + ownership::Mutable,
+{
+    pub fn children(&mut self) -> ArrayVecMut<NodePtr<T, B, C>, B> {
         unsafe {
             ArrayVecMut::new(
                 addr_of_mut!((*self.internal_ptr()).children),
@@ -696,7 +758,7 @@ where
     pub unsafe fn into_child_containing_index(mut self, index: &mut usize) -> NodePtr<T, B, C> {
         // debug_assert!(*index < self.len());
         unsafe {
-            for (i, len) in &mut (*self.internal_ptr()).lengths.iter().enumerate() {
+            for (i, len) in &mut self.internal_mut().lengths.iter().enumerate() {
                 match index.checked_sub(len.assume_init()) {
                     Some(r) => *index = r,
                     None => return (*self.internal_ptr()).children[i].assume_init(),
@@ -713,7 +775,7 @@ where
         node: RawNodeWithLen<T, B, C>,
     ) -> Option<RawNodeWithLen<T, B, C>> {
         unsafe {
-            *(*self.internal_ptr()).lengths[index].assume_init_mut() -= node.0;
+            self.update_length(index, |l| l - node.0);
             if self.is_full() {
                 use core::cmp::Ordering::Less;
                 Some(match index.cmp(&Self::UNDERFULL_LEN) {
@@ -729,16 +791,10 @@ where
 
     unsafe fn insert_fitting(&mut self, index: usize, node: RawNodeWithLen<T, B, C>) {
         debug_assert!(!self.is_full());
-        self.as_array_vec().insert(index, node.1);
         unsafe {
-            let lens_ptr = (*self.internal_ptr()).lengths.as_mut_ptr();
-            ptr::copy(
-                lens_ptr.add(index),
-                lens_ptr.add(index + 1),
-                self.len_children() - 1 - index,
-            );
-            ptr::write(lens_ptr.add(index), MaybeUninit::new(node.0));
+            self.insert_length(index, node.0);
         }
+        self.children().insert(index, node.1);
         self.set_parent_links(index..);
     }
 
@@ -750,20 +806,14 @@ where
         let split_index = Self::UNDERFULL_LEN;
 
         let new_sibling_node = InternalNode::<T, B, C>::new();
-        let mut new_sibling = unsafe { InternalMut::<T, B, C>::new(new_sibling_node.cast()) };
+        let mut new_sibling =
+            unsafe { Node::<ownership::Mut, H, T, B, C>::new(new_sibling_node.cast()) };
 
         unsafe {
-            let tail_len = self.len_children() - split_index;
-            let lens_ptr = (*self.internal_ptr()).lengths.as_ptr();
-            ptr::copy_nonoverlapping(
-                lens_ptr.add(split_index),
-                (*new_sibling_node.as_ptr()).lengths.as_mut_ptr(),
-                tail_len,
-            );
-        }
-        self.as_array_vec()
-            .split(split_index, new_sibling.as_array_vec());
-        unsafe { self.insert_fitting(index, node) };
+            self.split_lengths(split_index, new_sibling.reborrow());
+            self.children().split(split_index, new_sibling.children());
+            self.insert_fitting(index, node)
+        };
 
         new_sibling.set_parent_links(0..);
         RawNodeWithLen(new_sibling.sum_lens(), new_sibling_node.cast())
@@ -777,20 +827,13 @@ where
         let split_index = Self::UNDERFULL_LEN + 1;
 
         let new_sibling_node = InternalNode::<T, B, C>::new();
-        let mut new_sibling = unsafe { InternalMut::<T, B, C>::new(new_sibling_node.cast()) };
+
+        let mut new_sibling =
+            unsafe { Node::<ownership::Mut, H, T, B, C>::new(new_sibling_node.cast()) };
 
         unsafe {
-            let tail_len = self.len_children() - split_index;
-            let lens_ptr = (*self.internal_ptr()).lengths.as_ptr();
-            ptr::copy_nonoverlapping(
-                lens_ptr.add(split_index),
-                (*new_sibling_node.as_ptr()).lengths.as_mut_ptr(),
-                tail_len,
-            );
-        }
-        self.as_array_vec()
-            .split(split_index, new_sibling.as_array_vec());
-        unsafe {
+            self.split_lengths(split_index, new_sibling.reborrow());
+            self.children().split(split_index, new_sibling.children());
             new_sibling.insert_fitting(index - split_index, node);
         }
 
@@ -799,7 +842,7 @@ where
     }
 
     fn set_parent_links(&mut self, range: RangeFrom<usize>) {
-        for (i, n) in self.as_array_vec()[range.clone()].iter_mut().enumerate() {
+        for (i, n) in self.children()[range.clone()].iter_mut().enumerate() {
             unsafe {
                 (*n.as_ptr()).parent = Some(self.node_ptr());
                 (*n.as_ptr()).parent_index.write((i + range.start) as u16);
