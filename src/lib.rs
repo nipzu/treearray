@@ -28,8 +28,8 @@ use node::{
 // CONST INVARIANTS:
 // - `B >= 3`
 // - `C >= 1`
-pub struct BTreeVec<T, const B: usize = 32, const C: usize = 63> {
-    root: MaybeUninit<NodePtr<T, B, C>>,
+pub struct BTreeVec<T, const C: usize = 63> {
+    root: MaybeUninit<NodePtr<T, C>>,
     len: usize,
     // TODO: consider using a smaller type like u16
     // remove and use a condition like node.base.children_len == node.length, requires C >= 3
@@ -38,13 +38,12 @@ pub struct BTreeVec<T, const B: usize = 32, const C: usize = 63> {
     _marker: PhantomData<T>,
 }
 
-impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
+impl<T, const C: usize> BTreeVec<T, C> {
     /// # Panics
     /// Panics if `B < 3` or `C == 0`
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
-        assert!(B >= 3);
         assert!(C >= 1);
 
         Self {
@@ -61,7 +60,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
         self.len
     }
 
-    const fn root(&self) -> Option<NodePtr<T, B, C>> {
+    const fn root(&self) -> Option<NodePtr<T, C>> {
         if self.is_empty() {
             None
         } else {
@@ -123,7 +122,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
 
-        unsafe { Some(LeafRef::<T, B, C>::new(cur_node).value_unchecked(0)) }
+        unsafe { Some(LeafRef::<T, C>::new(cur_node).value_unchecked(0)) }
     }
 
     #[must_use]
@@ -135,7 +134,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
 
-        unsafe { Some(LeafMut::<T, B, C>::new(cur_node).into_value_unchecked_mut(0)) }
+        unsafe { Some(LeafMut::<T, C>::new(cur_node).into_value_unchecked_mut(0)) }
     }
 
     #[must_use]
@@ -148,7 +147,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
         }
 
-        let leaf = unsafe { LeafRef::<T, B, C>::new(cur_node) };
+        let leaf = unsafe { LeafRef::<T, C>::new(cur_node) };
         let len_values = leaf.len();
         unsafe { Some(leaf.value_unchecked(len_values - 1)) }
     }
@@ -163,7 +162,7 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
             cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
         }
 
-        let leaf = unsafe { LeafMut::<T, B, C>::new(cur_node) };
+        let leaf = unsafe { LeafMut::<T, C>::new(cur_node) };
         let len_values = leaf.len();
         unsafe { Some(leaf.into_value_unchecked_mut(len_values - 1)) }
     }
@@ -196,39 +195,39 @@ impl<T, const B: usize, const C: usize> BTreeVec<T, B, C> {
     }
 
     #[must_use]
-    pub const fn iter(&self) -> Iter<T, B, C> {
+    pub const fn iter(&self) -> Iter<T, C> {
         Iter::new(self)
     }
 
-    pub fn drain(&mut self) -> Drain<T, B, C> {
+    pub fn drain(&mut self) -> Drain<T, C> {
         Drain::new(self)
     }
 
     // #[must_use]
-    // pub fn cursor_at(&self, mut index: usize) -> Cursor<T, B, C> {
+    // pub fn cursor_at(&self, mut index: usize) -> Cursor<T, C> {
     //     todo!()
     // }
 
     #[must_use]
-    pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T, B, C> {
+    pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T, C> {
         CursorMut::new(self, index)
     }
 }
 
-impl<T, const B: usize, const C: usize> Drop for BTreeVec<T, B, C> {
+impl<T, const C: usize> Drop for BTreeVec<T, C> {
     fn drop(&mut self) {
         self.clear();
     }
 }
 
-impl<T, const B: usize, const C: usize> Default for BTreeVec<T, B, C> {
+impl<T, const C: usize> Default for BTreeVec<T, C> {
     fn default() -> Self {
         Self::new()
     }
 }
 
 // TODO: test this
-impl<T: fmt::Debug, const B: usize, const C: usize> fmt::Debug for BTreeVec<T, B, C> {
+impl<T: fmt::Debug, const C: usize> fmt::Debug for BTreeVec<T, C> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
@@ -240,7 +239,7 @@ mod tests {
 
     #[test]
     fn test_new() {
-        const _: BTreeVec<i32, 7, 3> = BTreeVec::new();
+        const _: BTreeVec<i32, 3> = BTreeVec::new();
         let _ = BTreeVec::<usize>::new();
     }
 
@@ -256,7 +255,7 @@ mod tests {
 
     #[test]
     fn test_push_front_back() {
-        let mut b = BTreeVec::<i32, 7, 5>::new();
+        let mut b = BTreeVec::<i32, 5>::new();
         let mut l = 0;
         for x in 0..500 {
             b.push_back(x);
@@ -282,7 +281,7 @@ mod tests {
 
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
-        let mut b = BTreeVec::<i32, 3, 3>::new();
+        let mut b = BTreeVec::<i32, 3>::new();
         let mut v = Vec::new();
         for x in 0..1000 {
             if rng.gen() {
@@ -313,8 +312,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_5 = BTreeVec::<i32, 4, 5>::new();
-        let mut b_5_4 = BTreeVec::<i32, 5, 4>::new();
+        let mut b_4_5 = BTreeVec::<i32, 5>::new();
+        let mut b_5_4 = BTreeVec::<i32, 4>::new();
 
         for x in 0..1000 {
             let index = rng.gen_range(0..=v.len());
@@ -337,8 +336,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_2 = BTreeVec::<i32, 4, 2>::new();
-        let mut b_5_1 = BTreeVec::<i32, 5, 1>::new();
+        let mut b_4_2 = BTreeVec::<i32, 2>::new();
+        let mut b_5_1 = BTreeVec::<i32, 1>::new();
 
         for x in 0..1000 {
             v.push(x);
@@ -369,8 +368,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_7_3 = BTreeVec::<i32, 7, 3>::new();
-        let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
+        let mut b_7_3 = BTreeVec::<i32, 3>::new();
+        let mut b_5_5 = BTreeVec::<i32, 5>::new();
 
         for x in 0..500 {
             let index = rng.gen_range(0..=v.len());
@@ -393,7 +392,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_remove_past_end() {
-        let mut v = BTreeVec::<i32, 3, 3>::new();
+        let mut v = BTreeVec::<i32, 3>::new();
         for x in 0..10 {
             v.push_back(x);
         }
@@ -404,7 +403,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_remove_past_end_root() {
-        let mut v = BTreeVec::<i32, 32, 32>::new();
+        let mut v = BTreeVec::<i32, 32>::new();
         for x in 0..10 {
             v.push_back(x);
         }
@@ -420,8 +419,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_4 = BTreeVec::<i32, 4, 4>::new();
-        let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
+        let mut b_4_4 = BTreeVec::<i32, 4>::new();
+        let mut b_5_5 = BTreeVec::<i32, 5>::new();
 
         for x in 0..1000 {
             v.push(x);
@@ -451,8 +450,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_4 = BTreeVec::<i32, 4, 4>::new();
-        let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
+        let mut b_4_4 = BTreeVec::<i32, 4>::new();
+        let mut b_5_5 = BTreeVec::<i32, 5>::new();
 
         for x in 0..1000 {
             v.push(x);
@@ -485,8 +484,8 @@ mod tests {
 
     #[test]
     fn test_random_cursor_get() {
-        let mut b_4_4 = BTreeVec::<i32, 4, 4>::new();
-        let mut b_5_5 = BTreeVec::<i32, 5, 5>::new();
+        let mut b_4_4 = BTreeVec::<i32, 4>::new();
+        let mut b_5_5 = BTreeVec::<i32, 5>::new();
         let n = 1000;
 
         for x in 0..n as i32 {
@@ -506,7 +505,7 @@ mod tests {
 
     #[test]
     fn test_empty_cursor() {
-        let mut bvec = BTreeVec::<i32, 4, 4>::new();
+        let mut bvec = BTreeVec::<i32, 4>::new();
         let cursor = bvec.cursor_at_mut(0);
         assert!(cursor.get().is_none());
     }

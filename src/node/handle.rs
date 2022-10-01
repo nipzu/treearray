@@ -10,7 +10,9 @@ use crate::{
     utils::ArrayVecMut,
 };
 
-impl<'a, T: 'a, const B: usize, const C: usize> LeafRef<'a, T, B, C> {
+use super::BRANCH_FACTOR;
+
+impl<'a, T: 'a, const C: usize> LeafRef<'a, T, C> {
     pub fn value(&self, index: usize) -> Option<&'a T> {
         (index < self.len()).then(|| unsafe { self.value_unchecked(index) })
     }
@@ -27,40 +29,19 @@ impl<'a, T: 'a, const B: usize, const C: usize> LeafRef<'a, T, B, C> {
     }
 }
 
-impl<'a, T: 'a, const B: usize, const C: usize> InternalRef<'a, T, B, C> {
-    pub unsafe fn child_containing_index(&self, index: &mut usize) -> NodePtr<T, B, C> {
-        // let target = *index;
-        // unsafe {
-        //     for (i, len) in &mut self.node.lengths.iter().enumerate() {
-        //         match target.checked_sub(*len) {
-        //             Some(r) => *index = r,
-        //             None => return self.node.children[i].assume_init(),
-        //         }
-        //     }
-        // }
-
-        // panic!();
-
-        let i = if B == 32 {
-            let mut i = 0;
-            for offset in &[8, 4, 2, 1] {
-                if self.node.lengths[i + offset - 1] <= *index {
-                    i += offset;
-                }
+impl<'a, T: 'a, const C: usize> InternalRef<'a, T, C> {
+    pub unsafe fn child_containing_index(&self, index: &mut usize) -> NodePtr<T, C> {
+        let mut i = 0;
+        for shift in 1..=BRANCH_FACTOR.trailing_zeros() {
+            let offset = BRANCH_FACTOR >> shift;
+            if self.node.lengths[i + offset - 1] <= *index {
+                i += offset;
             }
-            i
-        } else {
-            match self.node.lengths[..self.len_children()].binary_search(index) {
-            Ok(i) => i + 1,
-            Err(i) => i,
         }
-    };
         if i != 0 {
             *index -= self.node.lengths[i - 1];
         }
-        unsafe {
-            self.node.children[i].assume_init()   
-        }
+        unsafe { self.node.children[i].assume_init() }
     }
 }
 
@@ -112,15 +93,15 @@ pub mod height {
     }
 
     pub unsafe trait Height {
-        type NodeType<T, const B: usize, const C: usize>;
+        type NodeType<T, const C: usize>;
     }
 
     unsafe impl Height for Zero {
-        type NodeType<T, const B: usize, const C: usize> = LeafNode<T, B, C>;
+        type NodeType<T, const C: usize> = LeafNode<T, C>;
     }
 
     unsafe impl<H: Internal> Height for H {
-        type NodeType<T, const B: usize, const C: usize> = InternalNode<T, B, C>;
+        type NodeType<T, const C: usize> = InternalNode<T, C>;
     }
 }
 
@@ -190,69 +171,64 @@ pub mod ownership {
     }
 }
 
-pub struct Node<O, H, T, const B: usize, const C: usize>
+pub struct Node<O, H, T, const C: usize>
 where
     H: height::Height,
-    O: ownership::NodePtrType<H::NodeType<T, B, C>>,
+    O: ownership::NodePtrType<H::NodeType<T, C>>,
 {
     node: O::Ptr,
 }
 
-pub type InternalRef<'a, T, const B: usize, const C: usize> =
-    Node<ownership::Immut<'a>, height::Positive, T, B, C>;
-pub type InternalMut<'a, T, const B: usize, const C: usize> =
-    Node<ownership::Mut<'a>, height::Positive, T, B, C>;
-pub type Internal<T, const B: usize, const C: usize> =
-    Node<ownership::Owned, height::Positive, T, B, C>;
+pub type InternalRef<'a, T, const C: usize> = Node<ownership::Immut<'a>, height::Positive, T, C>;
+pub type InternalMut<'a, T, const C: usize> = Node<ownership::Mut<'a>, height::Positive, T, C>;
+pub type Internal<T, const C: usize> = Node<ownership::Owned, height::Positive, T, C>;
 
-pub type LeafRef<'a, T, const B: usize, const C: usize> =
-    Node<ownership::Immut<'a>, height::Zero, T, B, C>;
-pub type LeafMut<'a, T, const B: usize, const C: usize> =
-    Node<ownership::Mut<'a>, height::Zero, T, B, C>;
-pub type Leaf<T, const B: usize, const C: usize> = Node<ownership::Owned, height::Zero, T, B, C>;
+pub type LeafRef<'a, T, const C: usize> = Node<ownership::Immut<'a>, height::Zero, T, C>;
+pub type LeafMut<'a, T, const C: usize> = Node<ownership::Mut<'a>, height::Zero, T, C>;
+pub type Leaf<T, const C: usize> = Node<ownership::Owned, height::Zero, T, C>;
 
-impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+impl<O, H, T, const C: usize> Node<O, H, T, C>
 where
     H: height::Height,
-    O: ownership::NodePtrType<H::NodeType<T, B, C>>,
+    O: ownership::NodePtrType<H::NodeType<T, C>>,
 {
-    pub unsafe fn new(ptr: NodePtr<T, B, C>) -> Self {
+    pub unsafe fn new(ptr: NodePtr<T, C>) -> Self {
         Self {
             node: unsafe { O::from_raw(ptr.cast()) },
         }
     }
 
-    pub fn node_ptr(&mut self) -> NodePtr<T, B, C> {
+    pub fn node_ptr(&mut self) -> NodePtr<T, C> {
         O::as_raw(&mut self.node).cast()
     }
 }
 
-impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+impl<O, H, T, const C: usize> Node<O, H, T, C>
 where
     H: height::Height,
-    O: ownership::NodePtrType<H::NodeType<T, B, C>>,
+    O: ownership::NodePtrType<H::NodeType<T, C>>,
 {
-    fn reborrow<'b>(&'b mut self) -> Node<ownership::Mut<'b>, H, T, B, C> {
+    fn reborrow<'b>(&'b mut self) -> Node<ownership::Mut<'b>, H, T, C> {
         Node {
             node: O::as_raw(&mut self.node),
         }
     }
 }
 
-impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+impl<O, H, T, const C: usize> Node<O, H, T, C>
 where
-    O: ownership::NodePtrType<H::NodeType<T, B, C>> + ownership::NodePtrType<InternalNode<T, B, C>>,
+    O: ownership::NodePtrType<H::NodeType<T, C>> + ownership::NodePtrType<InternalNode<T, C>>,
     H: height::Height,
 {
     pub unsafe fn into_parent_and_index2(
         mut self,
-    ) -> Option<(Node<O, height::Positive, T, B, C>, usize)>
+    ) -> Option<(Node<O, height::Positive, T, C>, usize)>
     where
         O: ownership::Reference,
     {
         unsafe {
             let parent =
-                Node::<O, height::Positive, T, B, C>::new((*self.node_ptr().as_ptr()).parent?);
+                Node::<O, height::Positive, T, C>::new((*self.node_ptr().as_ptr()).parent?);
             Some((
                 parent,
                 (*self.node_ptr().as_ptr())
@@ -264,16 +240,16 @@ where
     }
 }
 
-impl<O, T, const B: usize, const C: usize> Node<O, height::Zero, T, B, C>
+impl<O, T, const C: usize> Node<O, height::Zero, T, C>
 where
-    O: ownership::NodePtrType<LeafNode<T, B, C>> + ownership::NodePtrType<InternalNode<T, B, C>>,
+    O: ownership::NodePtrType<LeafNode<T, C>> + ownership::NodePtrType<InternalNode<T, C>>,
 {
-    pub unsafe fn into_parent_and_index3(mut self) -> Option<(Node<O, height::One, T, B, C>, usize)>
+    pub unsafe fn into_parent_and_index3(mut self) -> Option<(Node<O, height::One, T, C>, usize)>
     where
         O: ownership::Reference,
     {
         unsafe {
-            let parent = Node::<O, height::One, T, B, C>::new((*self.node_ptr().as_ptr()).parent?);
+            let parent = Node::<O, height::One, T, C>::new((*self.node_ptr().as_ptr()).parent?);
             Some((
                 parent,
                 (*self.node_ptr().as_ptr())
@@ -285,17 +261,17 @@ where
     }
 }
 
-impl<O, T, const B: usize, const C: usize> Node<O, height::Zero, T, B, C>
+impl<O, T, const C: usize> Node<O, height::Zero, T, C>
 where
-    O: ownership::NodePtrType<LeafNode<T, B, C>>,
+    O: ownership::NodePtrType<LeafNode<T, C>>,
 {
     pub fn len(&self) -> usize {
         usize::from(O::as_ref(&self.node).base.children_len)
     }
 }
 
-impl<'a, T: 'a, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
-    fn leaf_ptr(&mut self) -> *mut LeafNode<T, B, C> {
+impl<'a, T: 'a, const C: usize> LeafMut<'a, T, C> {
+    fn leaf_ptr(&mut self) -> *mut LeafNode<T, C> {
         self.node_ptr().cast().as_ptr()
     }
 
@@ -325,7 +301,7 @@ impl<'a, T: 'a, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         self.len() == C
     }
 
-    pub fn insert_value(&mut self, index: usize, value: T) -> Option<SplitResult<T, B, C>> {
+    pub fn insert_value(&mut self, index: usize, value: T) -> Option<SplitResult<T, C>> {
         assert!(index <= self.len());
 
         if self.is_full() {
@@ -340,18 +316,18 @@ impl<'a, T: 'a, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
         }
     }
 
-    fn split_and_insert_left(&mut self, index: usize, value: T) -> RawNodeWithLen<T, B, C> {
+    fn split_and_insert_left(&mut self, index: usize, value: T) -> RawNodeWithLen<T, C> {
         let split_index = C / 2;
-        let new_node = LeafNode::<T, B, C>::new().cast();
+        let new_node = LeafNode::<T, C>::new().cast();
         let mut new_leaf = unsafe { LeafMut::new(new_node) };
         self.values_mut().split(split_index, new_leaf.values_mut());
         self.values_mut().insert(index, value);
         RawNodeWithLen(new_leaf.values_mut().len(), new_node)
     }
 
-    fn split_and_insert_right(&mut self, index: usize, value: T) -> RawNodeWithLen<T, B, C> {
+    fn split_and_insert_right(&mut self, index: usize, value: T) -> RawNodeWithLen<T, C> {
         let split_index = (C - 1) / 2 + 1;
-        let new_node = LeafNode::<T, B, C>::new().cast();
+        let new_node = LeafNode::<T, C>::new().cast();
         let mut new_leaf = unsafe { LeafMut::new(new_node) };
         self.values_mut().split(split_index, new_leaf.values_mut());
         new_leaf.values_mut().insert(index - self.len(), value);
@@ -359,16 +335,16 @@ impl<'a, T: 'a, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 }
 
-impl<O, T, const B: usize, const C: usize> Node<O, height::One, T, B, C>
+impl<O, T, const C: usize> Node<O, height::One, T, C>
 where
-    O: ownership::NodePtrType<InternalNode<T, B, C>> + ownership::Mutable,
+    O: ownership::NodePtrType<InternalNode<T, C>> + ownership::Mutable,
 {
-    pub fn child_mut(&mut self, index: usize) -> LeafMut<T, B, C> {
+    pub fn child_mut(&mut self, index: usize) -> LeafMut<T, C> {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
         unsafe { LeafMut::new(ptr.add(index).read().assume_init()) }
     }
 
-    pub fn child_pair_at(&mut self, index: usize) -> [LeafMut<T, B, C>; 2] {
+    pub fn child_pair_at(&mut self, index: usize) -> [LeafMut<T, C>; 2] {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
         [
             unsafe { LeafMut::new(ptr.add(index).read().assume_init()) },
@@ -414,11 +390,11 @@ where
     }
 }
 
-impl<O, T, const B: usize, const C: usize> Node<O, height::TwoOrMore, T, B, C>
+impl<O, T, const C: usize> Node<O, height::TwoOrMore, T, C>
 where
-    O: ownership::NodePtrType<InternalNode<T, B, C>>,
+    O: ownership::NodePtrType<InternalNode<T, C>>,
 {
-    pub unsafe fn new_parent_of_internal(node: NodePtr<T, B, C>) -> Self {
+    pub unsafe fn new_parent_of_internal(node: NodePtr<T, C>) -> Self {
         Self {
             node: unsafe { O::from_raw(node.cast()) },
         }
@@ -428,7 +404,7 @@ where
     where
         T: 'a,
         F: for<'new_id> FnOnce(
-            Node<ownership::Mut<'a>, height::BrandedTwoOrMore<'new_id>, T, B, C>,
+            Node<ownership::Mut<'a>, height::BrandedTwoOrMore<'new_id>, T, C>,
         ) -> R,
     {
         let parent = Node {
@@ -455,11 +431,11 @@ where
     }
 }
 
-impl<'id, O, T, const B: usize, const C: usize> Node<O, height::BrandedTwoOrMore<'id>, T, B, C>
+impl<'id, O, T, const C: usize> Node<O, height::BrandedTwoOrMore<'id>, T, C>
 where
-    O: ownership::NodePtrType<InternalNode<T, B, C>> + ownership::Mutable,
+    O: ownership::NodePtrType<InternalNode<T, C>> + ownership::Mutable,
 {
-    pub fn child_mut(&mut self, index: usize) -> Node<ownership::Mut, height::Positive, T, B, C> {
+    pub fn child_mut(&mut self, index: usize) -> Node<ownership::Mut, height::Positive, T, C> {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
         Node {
             node: unsafe { ptr.add(index).read().assume_init().cast() },
@@ -469,7 +445,7 @@ where
     pub fn child_pair_at(
         &mut self,
         index: usize,
-    ) -> [Node<ownership::Mut, height::ChildOf<height::BrandedTwoOrMore<'id>>, T, B, C>; 2] {
+    ) -> [Node<ownership::Mut, height::ChildOf<height::BrandedTwoOrMore<'id>>, T, C>; 2] {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
         [
             Node {
@@ -522,22 +498,22 @@ where
     }
 }
 
-impl<T, const B: usize, const C: usize> Leaf<T, B, C> {
+impl<T, const C: usize> Leaf<T, C> {
     pub fn free(self) {
         debug_assert_eq!(self.node.base.children_len, 0);
-        unsafe { Box::from_raw(Box::into_raw(self.node).cast::<LeafNode<T, B, C>>()) };
+        unsafe { Box::from_raw(Box::into_raw(self.node).cast::<LeafNode<T, C>>()) };
     }
 }
 
-impl<T, const B: usize, const C: usize> Internal<T, B, C> {
+impl<T, const C: usize> Internal<T, C> {
     pub fn free(self) {
         debug_assert_eq!(self.node.base.children_len, 0);
         // debug_assert_eq!(self.node.len(), 0);
-        unsafe { Box::from_raw(Box::into_raw(self.node).cast::<InternalNode<T, B, C>>()) };
+        unsafe { Box::from_raw(Box::into_raw(self.node).cast::<InternalNode<T, C>>()) };
     }
 }
 
-impl<'a, T: 'a, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
+impl<'a, T: 'a, const C: usize> LeafMut<'a, T, C> {
     const UNDERFULL_LEN: usize = (C - 1) / 2;
     pub fn remove_child(&mut self, index: usize) -> T {
         self.values_mut().remove(index)
@@ -562,30 +538,30 @@ impl<'a, T: 'a, const B: usize, const C: usize> LeafMut<'a, T, B, C> {
     }
 }
 
-impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+impl<O, H, T, const C: usize> Node<O, H, T, C>
 where
     H: height::Internal,
-    O: ownership::NodePtrType<InternalNode<T, B, C>> + ownership::Mutable,
+    O: ownership::NodePtrType<InternalNode<T, C>> + ownership::Mutable,
 {
-    unsafe fn push_front_child(&mut self, child: RawNodeWithLen<T, B, C>) {
+    unsafe fn push_front_child(&mut self, child: RawNodeWithLen<T, C>) {
         unsafe {
             self.push_front_length(child.0);
             self.children().insert(0, child.1);
             self.set_parent_links(0..);
         }
     }
-    unsafe fn push_back_child(&mut self, child: RawNodeWithLen<T, B, C>) {
+    unsafe fn push_back_child(&mut self, child: RawNodeWithLen<T, C>) {
         unsafe { self.push_back_length(child.0) };
         self.children().insert(self.len_children(), child.1);
         self.set_parent_links(self.len_children() - 1..);
     }
-    unsafe fn pop_front_child(&mut self) -> RawNodeWithLen<T, B, C> {
+    unsafe fn pop_front_child(&mut self) -> RawNodeWithLen<T, C> {
         let node_len = unsafe { self.pop_front_length() };
         let node = self.children().remove(0);
         self.set_parent_links(0..);
         RawNodeWithLen(node_len, node)
     }
-    unsafe fn pop_back_child(&mut self) -> RawNodeWithLen<T, B, C> {
+    unsafe fn pop_back_child(&mut self) -> RawNodeWithLen<T, C> {
         let last_len = unsafe { self.pop_back_length() };
         let last = self.children().pop_back();
         RawNodeWithLen(last_len, last)
@@ -601,12 +577,12 @@ where
     }
 }
 
-impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+impl<O, H, T, const C: usize> Node<O, H, T, C>
 where
     H: height::Internal,
-    O: ownership::NodePtrType<InternalNode<T, B, C>> + ownership::Mutable,
+    O: ownership::NodePtrType<InternalNode<T, C>> + ownership::Mutable,
 {
-    pub fn internal_mut(&mut self) -> &mut InternalNode<T, B, C> {
+    pub fn internal_mut(&mut self) -> &mut InternalNode<T, C> {
         unsafe { O::as_raw(&mut self.node).cast().as_mut() }
     }
 
@@ -618,7 +594,7 @@ where
         self.internal_mut().lengths[index - 1] -= amount;
     }
 
-    unsafe fn append_lengths<'b>(&'b mut self, mut other: Node<ownership::Mut<'b>, H, T, B, C>) {
+    unsafe fn append_lengths<'b>(&'b mut self, mut other: Node<ownership::Mut<'b>, H, T, C>) {
         let len_children = self.len_children();
         let self_sum_lens = self.internal_mut().lengths[len_children - 1];
         for i in 0..other.len_children() {
@@ -635,9 +611,9 @@ where
             ptr::copy(
                 lens_ptr.add(index + 1),
                 lens_ptr.add(index),
-                B - index - 1,
+                BRANCH_FACTOR - index - 1,
             );
-            self.internal_mut().lengths[B - 1] = usize::MAX;
+            self.internal_mut().lengths[BRANCH_FACTOR - 1] = usize::MAX;
         }
     }
 
@@ -657,7 +633,7 @@ where
     unsafe fn split_lengths<'b>(
         &'b mut self,
         index: usize,
-        mut other: Node<ownership::Mut<'b>, H, T, B, C>,
+        mut other: Node<ownership::Mut<'b>, H, T, C>,
     ) {
         let last_len = self.internal_mut().lengths[index - 1];
 
@@ -688,8 +664,8 @@ where
             } else {
                 self.internal_mut().lengths[len - 2]
             };
-            self.internal_mut().lengths[len - 1] = usize::MAX;
-            ret
+        self.internal_mut().lengths[len - 1] = usize::MAX;
+        ret
     }
 
     unsafe fn push_back_length(&mut self, len: usize) {
@@ -708,19 +684,19 @@ where
         self.internal_mut().lengths[0] = len;
     }
 
-    pub unsafe fn update_length<F: Fn(usize) -> usize>(&mut self, index: usize, f: F) {
+    pub unsafe fn add_length_wrapping(&mut self, index: usize, value: usize) {
         for i in index..self.len_children() {
             let length = &mut self.internal_mut().lengths[i];
-            *length = f(*length);
+            *length = length.wrapping_add(value);
         }
     }
 }
-impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+impl<O, H, T, const C: usize> Node<O, H, T, C>
 where
     H: height::Internal,
-    O: ownership::NodePtrType<InternalNode<T, B, C>>,
+    O: ownership::NodePtrType<InternalNode<T, C>>,
 {
-    pub const UNDERFULL_LEN: usize = (B - 1) / 2;
+    pub const UNDERFULL_LEN: usize = (BRANCH_FACTOR - 1) / 2;
     pub fn len_children(&self) -> usize {
         usize::from(O::as_ref(&self.node).base.children_len)
     }
@@ -730,23 +706,23 @@ where
     }
 
     fn is_full(&self) -> bool {
-        self.len_children() == B
+        self.len_children() == BRANCH_FACTOR
     }
 
     pub fn is_underfull(&self) -> bool {
         self.len_children() <= Self::UNDERFULL_LEN
     }
-    pub fn internal_ptr(&mut self) -> *mut InternalNode<T, B, C> {
+    pub fn internal_ptr(&mut self) -> *mut InternalNode<T, C> {
         O::as_raw(&mut self.node).cast().as_ptr()
     }
 }
 
-impl<O, H, T, const B: usize, const C: usize> Node<O, H, T, B, C>
+impl<O, H, T, const C: usize> Node<O, H, T, C>
 where
     H: height::Internal,
-    O: ownership::NodePtrType<InternalNode<T, B, C>> + ownership::Mutable,
+    O: ownership::NodePtrType<InternalNode<T, C>> + ownership::Mutable,
 {
-    pub fn children(&mut self) -> ArrayVecMut<NodePtr<T, B, C>, B> {
+    pub fn children(&mut self) -> ArrayVecMut<NodePtr<T, C>, BRANCH_FACTOR> {
         unsafe {
             ArrayVecMut::new(
                 addr_of_mut!((*self.internal_ptr()).children),
@@ -757,7 +733,7 @@ where
 
     pub unsafe fn into_parent_and_index(
         mut self,
-    ) -> Option<(Node<O, height::TwoOrMore, T, B, C>, usize)>
+    ) -> Option<(Node<O, height::TwoOrMore, T, C>, usize)>
     where
         O: ownership::Reference,
     {
@@ -775,11 +751,11 @@ where
         }
     }
 
-    pub fn into_internal(self) -> Node<O, height::Positive, T, B, C> {
+    pub fn into_internal(self) -> Node<O, height::Positive, T, C> {
         Node { node: self.node }
     }
 
-    pub unsafe fn into_child_containing_index(mut self, index: &mut usize) -> NodePtr<T, B, C> {
+    pub unsafe fn into_child_containing_index(mut self, index: &mut usize) -> NodePtr<T, C> {
         // debug_assert!(*index < self.len());
         let target = *index;
         unsafe {
@@ -797,10 +773,10 @@ where
     pub unsafe fn insert_split_of_child(
         &mut self,
         index: usize,
-        node: RawNodeWithLen<T, B, C>,
-    ) -> Option<RawNodeWithLen<T, B, C>> {
+        node: RawNodeWithLen<T, C>,
+    ) -> Option<RawNodeWithLen<T, C>> {
         unsafe {
-            self.update_length(index, |l| l - node.0);
+            self.add_length_wrapping(index, node.0.wrapping_neg());
             if self.is_full() {
                 use core::cmp::Ordering::Less;
                 Some(match index.cmp(&Self::UNDERFULL_LEN) {
@@ -814,7 +790,7 @@ where
         }
     }
 
-    unsafe fn insert_fitting(&mut self, index: usize, node: RawNodeWithLen<T, B, C>) {
+    unsafe fn insert_fitting(&mut self, index: usize, node: RawNodeWithLen<T, C>) {
         debug_assert!(!self.is_full());
         unsafe {
             self.insert_length(index, node.0);
@@ -826,13 +802,13 @@ where
     unsafe fn split_and_insert_left(
         &mut self,
         index: usize,
-        node: RawNodeWithLen<T, B, C>,
-    ) -> RawNodeWithLen<T, B, C> {
+        node: RawNodeWithLen<T, C>,
+    ) -> RawNodeWithLen<T, C> {
         let split_index = Self::UNDERFULL_LEN;
 
-        let new_sibling_node = InternalNode::<T, B, C>::new();
+        let new_sibling_node = InternalNode::<T, C>::new();
         let mut new_sibling =
-            unsafe { Node::<ownership::Mut, H, T, B, C>::new(new_sibling_node.cast()) };
+            unsafe { Node::<ownership::Mut, H, T, C>::new(new_sibling_node.cast()) };
 
         unsafe {
             self.split_lengths(split_index, new_sibling.reborrow());
@@ -847,14 +823,14 @@ where
     unsafe fn split_and_insert_right(
         &mut self,
         index: usize,
-        node: RawNodeWithLen<T, B, C>,
-    ) -> RawNodeWithLen<T, B, C> {
+        node: RawNodeWithLen<T, C>,
+    ) -> RawNodeWithLen<T, C> {
         let split_index = Self::UNDERFULL_LEN + 1;
 
-        let new_sibling_node = InternalNode::<T, B, C>::new();
+        let new_sibling_node = InternalNode::<T, C>::new();
 
         let mut new_sibling =
-            unsafe { Node::<ownership::Mut, H, T, B, C>::new(new_sibling_node.cast()) };
+            unsafe { Node::<ownership::Mut, H, T, C>::new(new_sibling_node.cast()) };
 
         unsafe {
             self.split_lengths(split_index, new_sibling.reborrow());
@@ -880,7 +856,7 @@ where
     }
 }
 
-pub enum SplitResult<T, const B: usize, const C: usize> {
-    Left(RawNodeWithLen<T, B, C>),
-    Right(RawNodeWithLen<T, B, C>),
+pub enum SplitResult<T, const C: usize> {
+    Left(RawNodeWithLen<T, C>),
+    Right(RawNodeWithLen<T, C>),
 }

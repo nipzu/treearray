@@ -8,15 +8,15 @@ use crate::{
     BTreeVec,
 };
 
-// pub struct Cursor<'a, T, const B: usize, const C: usize> {
+// pub struct Cursor<'a, T, const C: usize> {
 //     leaf_index: usize,
 //     index: usize,
-//     path: [MaybeUninit<Option<&'a Node<T, B, C>>>; usize::BITS as usize],
+//     path: [MaybeUninit<Option<&'a Node<T, C>>>; usize::BITS as usize],
 // }
 
-// impl<'a, T, const B: usize, const C: usize> Cursor<'a, T, B, C> {
+// impl<'a, T, const C: usize> Cursor<'a, T, C> {
 //     pub(crate) unsafe fn new(
-//         path: [MaybeUninit<Option<&'a Node<T, B, C>>>; usize::BITS as usize],
+//         path: [MaybeUninit<Option<&'a Node<T, C>>>; usize::BITS as usize],
 //         index: usize,
 //         leaf_index: usize,
 //     ) -> Self {
@@ -68,15 +68,15 @@ use crate::{
 // }
 
 // TODO: auto traits: Send, Sync, Unpin, UnwindSafe?
-pub struct CursorMut<'a, T, const B: usize, const C: usize> {
+pub struct CursorMut<'a, T, const C: usize> {
     leaf_index: usize,
     index: usize,
-    tree: &'a mut BTreeVec<T, B, C>,
-    leaf: MaybeUninit<NodePtr<T, B, C>>,
+    tree: &'a mut BTreeVec<T, C>,
+    leaf: MaybeUninit<NodePtr<T, C>>,
 }
 
-impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
-    pub(crate) fn new(tree: &'a mut BTreeVec<T, B, C>, index: usize) -> Self {
+impl<'a, T, const C: usize> CursorMut<'a, T, C> {
+    pub(crate) fn new(tree: &'a mut BTreeVec<T, C>, index: usize) -> Self {
         if index > tree.len() {
             panic!();
         }
@@ -99,7 +99,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         cursor
     }
 
-    pub(crate) fn new_inbounds(tree: &'a mut BTreeVec<T, B, C>, index: usize) -> Self {
+    pub(crate) fn new_inbounds(tree: &'a mut BTreeVec<T, C>, index: usize) -> Self {
         if index >= tree.len() {
             panic!();
         }
@@ -173,19 +173,19 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         &mut self.tree.height
     }
 
-    fn root_mut(&mut self) -> &mut MaybeUninit<NodePtr<T, B, C>> {
+    fn root_mut(&mut self) -> &mut MaybeUninit<NodePtr<T, C>> {
         &mut self.tree.root
     }
 
     // TODO: this should not be unbounded?
-    fn leaf_mut<'b>(&mut self) -> Option<LeafMut<'b, T, B, C>>
+    fn leaf_mut<'b>(&mut self) -> Option<LeafMut<'b, T, C>>
     where
         T: 'b,
     {
         (self.height() > 0).then(|| unsafe { LeafMut::new(self.leaf.assume_init()) })
     }
 
-    fn leaf(&self) -> Option<LeafRef<T, B, C>> {
+    fn leaf(&self) -> Option<LeafRef<T, C>> {
         (self.height() > 0).then(|| unsafe { LeafRef::new(self.leaf.assume_init()) })
     }
 
@@ -197,7 +197,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         self.tree.len()
     }
 
-    unsafe fn update_path_lengths<F: Fn(usize) -> usize>(&mut self, f: F) {
+    unsafe fn add_path_lengths_wrapping(&mut self, amount: usize) {
         if self.height() > 0 {
             unsafe {
                 let mut new_parent = self.leaf_mut().and_then(|leaf| {
@@ -205,11 +205,11 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
                         .map(|(n, l)| (n.into_internal(), l))
                 });
                 while let Some((mut parent, index)) = new_parent {
-                    parent.update_length(index, &f);
+                    parent.add_length_wrapping(index, amount);
                     new_parent = parent.into_parent_and_index2();
                 }
                 let len = &mut self.tree.len;
-                *len = f(*len);
+                *len = len.wrapping_add(amount);
             }
         }
     }
@@ -218,12 +218,12 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
         self.tree.len = 1;
         let root_ptr = *self
             .root_mut()
-            .write(LeafNode::<T, B, C>::from_value(value).cast());
+            .write(LeafNode::<T, C>::from_value(value).cast());
         self.leaf.write(root_ptr);
         *self.height_mut() = 1;
     }
 
-    unsafe fn split_root(&mut self, new_node: RawNodeWithLen<T, B, C>) {
+    unsafe fn split_root(&mut self, new_node: RawNodeWithLen<T, C>) {
         let old_root = unsafe { self.root_mut().assume_init_read() };
         let mut old_root_len = self.tree.len;
         old_root_len -= new_node.0;
@@ -235,7 +235,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
     }
 
     pub fn insert(&mut self, value: T) {
-        unsafe { self.update_path_lengths(|len| len + 1) };
+        unsafe { self.add_path_lengths_wrapping(1) };
 
         let leaf_index = self.leaf_index;
         let Some(mut leaf) = self.leaf_mut() else {
@@ -274,7 +274,7 @@ impl<'a, T, const B: usize, const C: usize> CursorMut<'a, T, B, C> {
             panic!("index out of bounds");
         }
 
-        unsafe { self.update_path_lengths(|len| len - 1) };
+        unsafe { self.add_path_lengths_wrapping(1_usize.wrapping_neg()) };
 
         let mut leaf_index = self.leaf_index;
         let mut leaf = self
