@@ -23,7 +23,7 @@ pub struct NodeBase<T, const B: usize, const C: usize> {
 pub struct InternalNode<T, const B: usize, const C: usize> {
     base: NodeBase<T, B, C>,
     pub children: [MaybeUninit<NodePtr<T, B, C>>; B],
-    pub lengths: [MaybeUninit<usize>; B],
+    pub lengths: [usize; B],
 }
 
 #[repr(C)]
@@ -69,7 +69,7 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
     pub fn new() -> NonNull<Self> {
         NonNull::from(Box::leak(Box::new(Self {
             base: NodeBase::new(),
-            lengths: [MaybeUninit::uninit(); B],
+            lengths: [usize::MAX; B],
             children: [Self::UNINIT_NODE; B],
         })))
     }
@@ -83,7 +83,7 @@ impl<T, const B: usize, const C: usize> InternalNode<T, B, C> {
             unsafe {
                 child.as_mut().parent = Some(boxed_children.cast());
                 child.as_mut().parent_index.write(i as u16);
-                (*boxed_children.as_ptr()).lengths[i].write(child_len);
+                (*boxed_children.as_ptr()).lengths[i] = child_len + if i == 0 {0} else {(*boxed_children.as_ptr()).lengths[i-1]};
             }
             vec.push_back(child);
         }
