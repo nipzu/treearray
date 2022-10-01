@@ -169,7 +169,7 @@ impl<'a, T, const C: usize> CursorMut<'a, T, C> {
     //     // }
     // }
 
-    fn height_mut(&mut self) -> &mut usize {
+    fn height_mut(&mut self) -> &mut u16 {
         &mut self.tree.height
     }
 
@@ -189,7 +189,7 @@ impl<'a, T, const C: usize> CursorMut<'a, T, C> {
         (self.height() > 0).then(|| unsafe { LeafRef::new(self.leaf.assume_init()) })
     }
 
-    fn height(&self) -> usize {
+    fn height(&self) -> u16 {
         self.tree.height
     }
 
@@ -224,7 +224,7 @@ impl<'a, T, const C: usize> CursorMut<'a, T, C> {
     }
 
     unsafe fn split_root(&mut self, new_node: RawNodeWithLen<T, C>) {
-        let old_root = unsafe { self.root_mut().assume_init_read() };
+        let old_root = unsafe { self.root_mut().assume_init() };
         let mut old_root_len = self.tree.len;
         old_root_len -= new_node.0;
         self.root_mut().write(
@@ -289,7 +289,7 @@ impl<'a, T, const C: usize> CursorMut<'a, T, C> {
         let Some((mut parent, mut self_index)) = (unsafe { leaf.into_parent_and_index3() }) else {
             // height is 1
             if leaf_is_empty {
-                unsafe { Leaf::new(self.root_mut().assume_init_read()).free() };
+                unsafe { Leaf::new(self.root_mut().assume_init()).free() };
                 *self.height_mut() = 0;
             }
             debug_assert_eq!(self.leaf_index, self.index);
@@ -351,7 +351,7 @@ impl<'a, T, const C: usize> CursorMut<'a, T, C> {
                 let mut new_root = old_root.children().pop_back();
                 new_root.as_mut().parent = None;
                 // `old_root` points to the `root` field of `self` so it must be freed before assigning a new root
-                Internal::new(self.root_mut().assume_init_read()).free();
+                Internal::new(self.root_mut().assume_init()).free();
                 self.root_mut().write(new_root);
                 if self.height() == 1 {
                     self.leaf.write(new_root);

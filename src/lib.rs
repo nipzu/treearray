@@ -31,9 +31,7 @@ use node::{
 pub struct BTreeVec<T, const C: usize = 63> {
     root: MaybeUninit<NodePtr<T, C>>,
     len: usize,
-    // TODO: consider using a smaller type like u16
-    // remove and use a condition like node.base.children_len == node.length, requires C >= 3
-    height: usize,
+    height: u16,
     // TODO: is this even needed?
     _marker: PhantomData<T>,
 }

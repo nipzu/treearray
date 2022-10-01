@@ -6,11 +6,9 @@ use core::{
 use alloc::boxed::Box;
 
 use crate::{
-    node::{InternalNode, LeafNode, NodePtr, RawNodeWithLen},
+    node::{InternalNode, LeafNode, NodePtr, RawNodeWithLen, BRANCH_FACTOR},
     utils::ArrayVecMut,
 };
-
-use super::BRANCH_FACTOR;
 
 impl<'a, T: 'a, const C: usize> LeafRef<'a, T, C> {
     pub fn value(&self, index: usize) -> Option<&'a T> {
@@ -46,7 +44,7 @@ impl<'a, T: 'a, const C: usize> InternalRef<'a, T, C> {
     }
 }
 
-pub mod height {
+mod height {
     use core::marker::PhantomData;
 
     use crate::node::{InternalNode, LeafNode};
@@ -106,7 +104,7 @@ pub mod height {
     }
 }
 
-pub mod ownership {
+mod ownership {
     use core::{marker::PhantomData, ptr::NonNull};
 
     use alloc::boxed::Box;
@@ -587,6 +585,10 @@ where
         unsafe { O::as_raw(&mut self.node).cast().as_mut() }
     }
 
+    fn lengths_mut(&mut self) -> &mut [usize; BRANCH_FACTOR] {
+        &mut self.internal_mut().lengths
+    }
+
     unsafe fn steal_length_from_next(&mut self, index: usize, amount: usize) {
         unsafe {
             self.add_length_wrapping(index + 1, amount.wrapping_neg());
@@ -602,20 +604,19 @@ where
     }
 
     unsafe fn init(&mut self) {
-	    for index in 0..self.internal_mut().lengths.len() {
-	    	let j = index | (index + 1);
-	    	if j < self.internal_mut().lengths.len() {
-                self.internal_mut().lengths[j] += self.internal_mut().lengths[index];
+        for index in 0..self.lengths_mut().len() {
+            let j = index | (index + 1);
+            if j < self.lengths_mut().len() {
+                self.lengths_mut()[j] += self.lengths_mut()[index];
             }
-	    }
+        }
     }
 
     unsafe fn fini(&mut self) {
-        for k in 1..=self.internal_mut().lengths.len() {
-            let index = self.internal_mut().lengths.len() - k;
+        for index in (0..self.lengths_mut().len()).rev() {
             let j = index | (index + 1);
-            if j < self.internal_mut().lengths.len() {
-                self.internal_mut().lengths[j] -= self.internal_mut().lengths[index];
+            if j < self.lengths_mut().len() {
+                self.lengths_mut()[j] -= self.lengths_mut()[index];
             }
         }
     }
@@ -625,8 +626,7 @@ where
         unsafe { other.fini() };
         let len_children = self.len_children();
         for i in 0..other.len_children() {
-            self.internal_mut().lengths[len_children + i] =
-                 other.internal_mut().lengths[i];
+            self.lengths_mut()[len_children + i] = other.lengths_mut()[i];
         }
         unsafe { self.init() };
     }
@@ -634,7 +634,7 @@ where
     unsafe fn merge_length_from_next(&mut self, index: usize) {
         unsafe {
             self.fini();
-            let lens_ptr = self.internal_mut().lengths.as_mut_ptr();
+            let lens_ptr = self.lengths_mut().as_mut_ptr();
             let next_len = lens_ptr.add(index + 1).read();
             (*lens_ptr.add(index)) += next_len;
             ptr::copy(
@@ -642,19 +642,19 @@ where
                 lens_ptr.add(index + 1),
                 BRANCH_FACTOR - index - 2,
             );
-            self.internal_mut().lengths[BRANCH_FACTOR - 1] = 0;
+            self.lengths_mut()[BRANCH_FACTOR - 1] = 0;
             self.init();
         }
     }
 
     unsafe fn insert_length(&mut self, index: usize, len: usize) {
         unsafe { self.fini() };
-            for i in (index..self.len_children()).rev() {
-                self.internal_mut().lengths[i + 1] = self.internal_mut().lengths[i];
-            }
-            self.internal_mut().lengths[index] = len;
-        
-        unsafe {self.init()};
+        for i in (index..self.len_children()).rev() {
+            self.lengths_mut()[i + 1] = self.lengths_mut()[i];
+        }
+        self.lengths_mut()[index] = len;
+
+        unsafe { self.init() };
     }
 
     unsafe fn split_lengths<'b>(
@@ -662,36 +662,35 @@ where
         index: usize,
         mut other: Node<ownership::Mut<'b>, H, T, C>,
     ) {
-        unsafe {self.fini()};
+        unsafe { self.fini() };
         for i in index..self.len_children() {
-            other.internal_mut().lengths[i - index] = self.internal_mut().lengths[i];
-            self.internal_mut().lengths[i] = 0;
+            other.lengths_mut()[i - index] = self.lengths_mut()[i];
+            self.lengths_mut()[i] = 0;
         }
-        unsafe {other.init()};
-        unsafe {self.init()};
+        unsafe { other.init() };
+        unsafe { self.init() };
     }
 
     unsafe fn pop_front_length(&mut self) -> usize {
         unsafe {
             self.fini();
-            let lens_ptr = self.internal_mut().lengths.as_mut_ptr();
+            let lens_ptr = self.lengths_mut().as_mut_ptr();
             let first_len = lens_ptr.read();
             for i in 1..self.len_children() {
-                self.internal_mut().lengths[i - 1] = self.internal_mut().lengths[i];
+                self.lengths_mut()[i - 1] = self.lengths_mut()[i];
             }
             let len_children = self.len_children();
-            self.internal_mut().lengths[len_children - 1] = 0;
+            self.lengths_mut()[len_children - 1] = 0;
             self.init();
             first_len
         }
     }
 
     unsafe fn pop_back_length(&mut self) -> usize {
-        unsafe {self.fini()};
+        unsafe { self.fini() };
         let len = self.len_children();
-        let ret = self.internal_mut().lengths[len - 1];
-        self.internal_mut().lengths[len - 1] = 0;
-        unsafe {self.init()};
+        let ret = core::mem::take(&mut self.lengths_mut()[len - 1]);
+        unsafe { self.init() };
         ret
     }
 
@@ -699,27 +698,28 @@ where
         unsafe {
             self.fini();
             let children_len = self.len_children();
-                self.internal_mut().lengths[children_len] = len;
+            self.lengths_mut()[children_len] = len;
             self.init();
         }
     }
 
     unsafe fn push_front_length(&mut self, len: usize) {
-        unsafe {self.fini()};
+        unsafe { self.fini() };
         for i in (0..self.len_children()).rev() {
-            self.internal_mut().lengths[i + 1] = self.internal_mut().lengths[i];
+            self.lengths_mut()[i + 1] = self.lengths_mut()[i];
         }
-        self.internal_mut().lengths[0] = len;
-        unsafe {self.init()};
+        self.lengths_mut()[0] = len;
+        unsafe { self.init() };
     }
 
     pub unsafe fn add_length_wrapping(&mut self, mut index: usize, amount: usize) {
-        while let Some(v) = self.internal_mut().lengths.get_mut(index) {
+        while let Some(v) = self.lengths_mut().get_mut(index) {
             *v = v.wrapping_add(amount);
             index |= index + 1;
         }
     }
 }
+
 impl<O, H, T, const C: usize> Node<O, H, T, C>
 where
     H: height::Internal,
@@ -788,7 +788,7 @@ where
         let mut i = 0;
         for shift in 1..=BRANCH_FACTOR.trailing_zeros() {
             let offset = BRANCH_FACTOR >> shift;
-            let v = self.internal_mut().lengths[i + offset - 1];
+            let v = self.lengths_mut()[i + offset - 1];
             if v <= *index {
                 *index -= v;
                 i += offset;
@@ -881,7 +881,7 @@ where
     }
 
     pub fn sum_lens(&mut self) -> usize {
-        unsafe { (*self.internal_ptr()).lengths[BRANCH_FACTOR - 1] }
+        self.lengths_mut()[BRANCH_FACTOR - 1]
     }
 }
 
