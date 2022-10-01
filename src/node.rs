@@ -71,26 +71,16 @@ impl<T, const C: usize> InternalNode<T, C> {
     pub fn new() -> NonNull<Self> {
         NonNull::from(Box::leak(Box::new(Self {
             base: NodeBase::new(),
-            lengths: [usize::MAX; BRANCH_FACTOR],
+            lengths: [0; BRANCH_FACTOR],
             children: [Self::UNINIT_NODE; BRANCH_FACTOR],
         })))
     }
 
     pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T, C>; N]) -> NonNull<Self> {
         let boxed_children = Self::new();
-        let mut vec = unsafe { InternalMut::<T, C>::new(boxed_children.cast()).children() };
-        for (i, RawNodeWithLen(child_len, mut child)) in children.into_iter().enumerate() {
-            unsafe {
-                child.as_mut().parent = Some(boxed_children.cast());
-                child.as_mut().parent_index.write(i as u16);
-                (*boxed_children.as_ptr()).lengths[i] = child_len
-                    + if i == 0 {
-                        0
-                    } else {
-                        (*boxed_children.as_ptr()).lengths[i - 1]
-                    };
-            }
-            vec.push_back(child);
+        let mut children_mut = unsafe { InternalMut::new(boxed_children.cast()) };
+        for child in children {
+            unsafe { children_mut.push_back_child(child) }
         }
 
         boxed_children
