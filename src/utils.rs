@@ -6,7 +6,7 @@ use core::{
 pub struct ArrayVecMut<T> {
     array: *mut T,
     len: *mut u16,
-    cap: u16
+    cap: u16,
 }
 
 impl<T> ArrayVecMut<T> {

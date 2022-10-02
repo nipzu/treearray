@@ -19,6 +19,11 @@ const BRANCH_FACTOR: usize = 4;
 #[cfg(not(miri))]
 const BRANCH_FACTOR: usize = 32;
 
+#[cfg(miri)]
+const LEAF_CAP_BYTES: usize = 16;
+#[cfg(not(miri))]
+const LEAF_CAP_BYTES: usize = 256;
+
 pub mod handle;
 
 pub struct RawNodeWithLen<T>(pub usize, pub NodePtr<T>);
@@ -57,15 +62,14 @@ impl<T> NodeBase<T> {
 }
 
 impl<T> NodeBase<T> {
-    const LEAF_CAP: usize = if size_of::<T>() <= 256 {
-        256 / size_of::<T>()
+    const LEAF_CAP: usize = if size_of::<T>() <= LEAF_CAP_BYTES {
+        LEAF_CAP_BYTES / size_of::<T>()
     } else {
         1
     };
 
     pub fn new_leaf() -> NodePtr<T> {
-        let (layout, offsets) = Self::leaf_layout();
-        assert_eq!(offsets[0], 0);
+        let (layout, _) = Self::leaf_layout();
         let ptr = unsafe { alloc(layout).cast::<NodeBase<T>>() };
         if ptr.is_null() {
             handle_alloc_error(layout);
@@ -76,20 +80,12 @@ impl<T> NodeBase<T> {
         }
     }
 
-    pub fn leaf_layout() -> (Layout, [usize; 2]) {
-        let fields = &[
-            Layout::new::<NodeBase<T>>(),
-            Layout::array::<T>(NodeBase::<T>::LEAF_CAP).unwrap(),
-        ];
-        let mut offsets = [0; 2];
-        let mut layout = Layout::from_size_align(0, 1).unwrap();
-        for (i, &field) in fields.iter().enumerate() {
-            let (new_layout, offset) = layout.extend(field).unwrap();
-            layout = new_layout;
-            offsets[i] = offset;
-        }
+    pub fn leaf_layout() -> (Layout, usize) {
+        let base = Layout::new::<NodeBase<T>>();
+        let array = Layout::array::<T>(NodeBase::<T>::LEAF_CAP).unwrap();
+        let (layout, offset) = base.extend(array).unwrap();
         // Remember to finalize with `pad_to_align`!
-        (layout.pad_to_align(), offsets)
+        (layout.pad_to_align(), offset)
     }
 }
 

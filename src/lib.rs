@@ -25,9 +25,6 @@ use node::{
 //     b.get(x)
 // }
 
-// CONST INVARIANTS:
-// - `B >= 3`
-// - `C >= 1`
 pub struct BVec<T> {
     root: MaybeUninit<NodePtr<T>>,
     len: usize,

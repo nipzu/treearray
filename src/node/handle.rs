@@ -7,11 +7,9 @@ use core::{
 use alloc::boxed::Box;
 
 use crate::{
-    node::{InternalNode, NodePtr, RawNodeWithLen, BRANCH_FACTOR},
+    node::{InternalNode, NodeBase, NodePtr, RawNodeWithLen, BRANCH_FACTOR},
     utils::ArrayVecMut,
 };
-
-use super::NodeBase;
 
 impl<'a, T: 'a> LeafRef<'a, T> {
     pub fn value(&self, index: usize) -> Option<&'a T> {
@@ -27,13 +25,14 @@ impl<'a, T: 'a> LeafRef<'a, T> {
         // could cause aliasing problems with taking
         // a reference to the whole array.
         unsafe {
-            let (_, offsets) = NodeBase::<T>::leaf_layout();
+            let (_, offset) = NodeBase::<T>::leaf_layout();
             &*self
                 .node
                 .as_ptr()
                 .cast::<u8>()
-                .add(offsets[1])
-                .cast::<T>().add(index)
+                .add(offset)
+                .cast::<T>()
+                .add(index)
         }
     }
 }
@@ -43,8 +42,7 @@ impl<'a, T: 'a> InternalRef<'a, T> {
         let mut i = 0;
         for shift in 1..=BRANCH_FACTOR.trailing_zeros() {
             let offset = BRANCH_FACTOR >> shift;
-            let v =
-                unsafe { self.node.cast::<InternalNode<T>>().as_mut().lengths[i + offset - 1] };
+            let v = unsafe { self.node.cast::<InternalNode<T>>().as_mut().lengths[i + offset - 1] };
             if v <= *index {
                 *index -= v;
                 i += offset;
@@ -180,15 +178,12 @@ where
     O: ownership::Ownership<T>,
     H: height::Height,
 {
-    pub unsafe fn into_parent_and_index2(
-        mut self,
-    ) -> Option<(Node<O, height::Positive, T>, usize)>
+    pub unsafe fn into_parent_and_index2(mut self) -> Option<(Node<O, height::Positive, T>, usize)>
     where
         O: ownership::Reference,
     {
         unsafe {
-            let parent =
-                Node::<O, height::Positive, T>::new((*self.node_ptr().as_ptr()).parent?);
+            let parent = Node::<O, height::Positive, T>::new((*self.node_ptr().as_ptr()).parent?);
             Some((
                 parent,
                 (*self.node_ptr().as_ptr())
@@ -233,8 +228,8 @@ where
 impl<'a, T: 'a> LeafMut<'a, T> {
     pub fn values_mut(&mut self) -> ArrayVecMut<T> {
         unsafe {
-            let (_, offsets) = NodeBase::<T>::leaf_layout();
-            let array = self.node.as_ptr().cast::<u8>().add(offsets[1]).cast();
+            let (_, offset) = NodeBase::<T>::leaf_layout();
+            let array = self.node.as_ptr().cast::<u8>().add(offset).cast();
             ArrayVecMut::new(
                 array,
                 addr_of_mut!((*self.node.as_ptr()).children_len).cast(),
@@ -248,13 +243,14 @@ impl<'a, T: 'a> LeafMut<'a, T> {
         debug_assert!(len <= NodeBase::<T>::LEAF_CAP);
         debug_assert!(index < len);
         unsafe {
-            let (_, offsets) = NodeBase::<T>::leaf_layout();
+            let (_, offset) = NodeBase::<T>::leaf_layout();
             &mut *self
                 .node
                 .as_ptr()
                 .cast::<u8>()
-                .add(offsets[1])
-                .cast::<T>().add(index)
+                .add(offset)
+                .cast::<T>()
+                .add(index)
         }
     }
 
@@ -365,9 +361,7 @@ where
     pub fn with_brand<'a, F, R>(&'a mut self, f: F) -> R
     where
         T: 'a,
-        F: for<'new_id> FnOnce(
-            Node<ownership::Mut<'a>, height::BrandedTwoOrMore<'new_id>, T>,
-        ) -> R,
+        F: for<'new_id> FnOnce(Node<ownership::Mut<'a>, height::BrandedTwoOrMore<'new_id>, T>) -> R,
     {
         let parent = Node {
             node: self.node,
@@ -737,9 +731,7 @@ where
         }
     }
 
-    pub unsafe fn into_parent_and_index(
-        mut self,
-    ) -> Option<(Node<O, height::TwoOrMore, T>, usize)>
+    pub unsafe fn into_parent_and_index(mut self) -> Option<(Node<O, height::TwoOrMore, T>, usize)>
     where
         O: ownership::Reference,
     {
