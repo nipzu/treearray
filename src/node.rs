@@ -51,18 +51,19 @@ impl<T, const C: usize> NodeBase<T, C> {
 impl<T, const C: usize> LeafNode<T, C> {
     const UNINIT_T: MaybeUninit<T> = MaybeUninit::uninit();
 
-    pub fn new() -> NonNull<Self> {
+    pub fn new() -> NodePtr<T, C> {
         NonNull::from(Box::leak(Box::new(Self {
             base: NodeBase::new(),
             values: [Self::UNINIT_T; C],
         })))
+        .cast()
     }
 
-    pub fn from_value(value: T) -> NonNull<Self> {
+    pub fn from_value(value: T) -> NodePtr<T, C> {
         let mut leaf = Self::new();
         unsafe {
-            leaf.as_mut().values.as_mut()[0].write(value);
-            leaf.as_mut().base.children_len = 1;
+            leaf.cast::<LeafNode<T, C>>().as_mut().values.as_mut()[0].write(value);
+            leaf.as_mut().children_len = 1;
         };
         leaf
     }
@@ -71,17 +72,18 @@ impl<T, const C: usize> LeafNode<T, C> {
 impl<T, const C: usize> InternalNode<T, C> {
     const UNINIT_NODE: MaybeUninit<NodePtr<T, C>> = MaybeUninit::uninit();
 
-    pub fn new() -> NonNull<Self> {
+    pub fn new() -> NodePtr<T, C> {
         NonNull::from(Box::leak(Box::new(Self {
             base: NodeBase::new(),
             lengths: [0; BRANCH_FACTOR],
             children: [Self::UNINIT_NODE; BRANCH_FACTOR],
         })))
+        .cast()
     }
 
-    pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T, C>; N]) -> NonNull<Self> {
+    pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T, C>; N]) -> NodePtr<T, C> {
         let boxed_children = Self::new();
-        let mut children_mut = unsafe { InternalMut::new(boxed_children.cast()) };
+        let mut children_mut = unsafe { InternalMut::new(boxed_children) };
         for child in children {
             unsafe { children_mut.push_back_child(child) }
         }

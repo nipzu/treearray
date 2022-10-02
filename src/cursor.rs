@@ -216,9 +216,7 @@ impl<'a, T, const C: usize> CursorMut<'a, T, C> {
 
     unsafe fn insert_to_empty(&mut self, value: T) {
         self.tree.len = 1;
-        let root_ptr = *self
-            .root_mut()
-            .write(LeafNode::<T, C>::from_value(value).cast());
+        let root_ptr = *self.root_mut().write(LeafNode::from_value(value));
         self.leaf.write(root_ptr);
         *self.height_mut() = 1;
     }
@@ -227,10 +225,10 @@ impl<'a, T, const C: usize> CursorMut<'a, T, C> {
         let old_root = unsafe { self.root_mut().assume_init() };
         let mut old_root_len = self.tree.len;
         old_root_len -= new_node.0;
-        self.root_mut().write(
-            InternalNode::from_child_array([RawNodeWithLen(old_root_len, old_root), new_node])
-                .cast(),
-        );
+        self.root_mut().write(InternalNode::from_child_array([
+            RawNodeWithLen(old_root_len, old_root),
+            new_node,
+        ]));
         *self.height_mut() += 1;
     }
 

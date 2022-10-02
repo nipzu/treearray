@@ -316,7 +316,7 @@ impl<'a, T: 'a, const C: usize> LeafMut<'a, T, C> {
 
     fn split_and_insert_left(&mut self, index: usize, value: T) -> RawNodeWithLen<T, C> {
         let split_index = C / 2;
-        let new_node = LeafNode::<T, C>::new().cast();
+        let new_node = LeafNode::new();
         let mut new_leaf = unsafe { LeafMut::new(new_node) };
         self.values_mut().split(split_index, new_leaf.values_mut());
         self.values_mut().insert(index, value);
@@ -325,7 +325,7 @@ impl<'a, T: 'a, const C: usize> LeafMut<'a, T, C> {
 
     fn split_and_insert_right(&mut self, index: usize, value: T) -> RawNodeWithLen<T, C> {
         let split_index = (C - 1) / 2 + 1;
-        let new_node = LeafNode::<T, C>::new().cast();
+        let new_node = LeafNode::new();
         let mut new_leaf = unsafe { LeafMut::new(new_node) };
         self.values_mut().split(split_index, new_leaf.values_mut());
         new_leaf.values_mut().insert(index - self.len(), value);
@@ -835,8 +835,7 @@ where
         let split_index = Self::UNDERFULL_LEN;
 
         let new_sibling_node = InternalNode::<T, C>::new();
-        let mut new_sibling =
-            unsafe { Node::<ownership::Mut, H, T, C>::new(new_sibling_node.cast()) };
+        let mut new_sibling = unsafe { Node::<ownership::Mut, H, T, C>::new(new_sibling_node) };
 
         unsafe {
             self.split_lengths(split_index, new_sibling.reborrow());
@@ -845,7 +844,7 @@ where
         };
 
         new_sibling.set_parent_links(0..);
-        RawNodeWithLen(new_sibling.sum_lens(), new_sibling_node.cast())
+        RawNodeWithLen(new_sibling.sum_lens(), new_sibling_node)
     }
 
     unsafe fn split_and_insert_right(
@@ -857,8 +856,7 @@ where
 
         let new_sibling_node = InternalNode::<T, C>::new();
 
-        let mut new_sibling =
-            unsafe { Node::<ownership::Mut, H, T, C>::new(new_sibling_node.cast()) };
+        let mut new_sibling = unsafe { Node::<ownership::Mut, H, T, C>::new(new_sibling_node) };
 
         unsafe {
             self.split_lengths(split_index, new_sibling.reborrow());
@@ -867,7 +865,7 @@ where
         }
 
         new_sibling.set_parent_links(0..);
-        RawNodeWithLen(new_sibling.sum_lens(), new_sibling_node.cast())
+        RawNodeWithLen(new_sibling.sum_lens(), new_sibling_node)
     }
 
     fn set_parent_links(&mut self, range: RangeFrom<usize>) {
