@@ -1,4 +1,4 @@
-use btreevec::CursorMut;
+use bvec::CursorMut;
 
 fn main() {}
 

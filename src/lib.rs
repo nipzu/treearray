@@ -28,7 +28,7 @@ use node::{
 // CONST INVARIANTS:
 // - `B >= 3`
 // - `C >= 1`
-pub struct BTreeVec<T> {
+pub struct BVec<T> {
     root: MaybeUninit<NodePtr<T>>,
     len: usize,
     height: u16,
@@ -36,7 +36,7 @@ pub struct BTreeVec<T> {
     _marker: PhantomData<T>,
 }
 
-impl<T> BTreeVec<T> {
+impl<T> BVec<T> {
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
@@ -208,20 +208,20 @@ impl<T> BTreeVec<T> {
     }
 }
 
-impl<T> Drop for BTreeVec<T> {
+impl<T> Drop for BVec<T> {
     fn drop(&mut self) {
         self.clear();
     }
 }
 
-impl<T> Default for BTreeVec<T> {
+impl<T> Default for BVec<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
 // TODO: test this
-impl<T: fmt::Debug> fmt::Debug for BTreeVec<T> {
+impl<T: fmt::Debug> fmt::Debug for BVec<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
@@ -233,8 +233,8 @@ mod tests {
 
     #[test]
     fn test_new() {
-        const _: BTreeVec<i32> = BTreeVec::new();
-        let _ = BTreeVec::<usize>::new();
+        const _: BVec<i32> = BVec::new();
+        let _ = BVec::<usize>::new();
     }
 
     #[test]
@@ -242,14 +242,14 @@ mod tests {
         use core::mem::size_of;
 
         assert_eq!(
-            size_of::<BTreeVec<i32>>(),
+            size_of::<BVec<i32>>(),
             2 * size_of::<usize>() + size_of::<*mut ()>()
         )
     }
 
     #[test]
     fn test_push_front_back() {
-        let mut b = BTreeVec::<i32>::new();
+        let mut b = BVec::<i32>::new();
         let mut l = 0;
         for x in 0..500 {
             b.push_back(x);
@@ -275,7 +275,7 @@ mod tests {
 
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
-        let mut b = BTreeVec::<i32>::new();
+        let mut b = BVec::<i32>::new();
         let mut v = Vec::new();
         for x in 0..1000 {
             if rng.gen() {
@@ -306,8 +306,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_5 = BTreeVec::<i32>::new();
-        let mut b_5_4 = BTreeVec::<i32>::new();
+        let mut b_4_5 = BVec::<i32>::new();
+        let mut b_5_4 = BVec::<i32>::new();
 
         for x in 0..1000 {
             let index = rng.gen_range(0..=v.len());
@@ -330,8 +330,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_2 = BTreeVec::<i32>::new();
-        let mut b_5_1 = BTreeVec::<i32>::new();
+        let mut b_4_2 = BVec::<i32>::new();
+        let mut b_5_1 = BVec::<i32>::new();
 
         for x in 0..1000 {
             v.push(x);
@@ -362,8 +362,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_7_3 = BTreeVec::<i32>::new();
-        let mut b_5_5 = BTreeVec::<i32>::new();
+        let mut b_7_3 = BVec::<i32>::new();
+        let mut b_5_5 = BVec::<i32>::new();
 
         for x in 0..500 {
             let index = rng.gen_range(0..=v.len());
@@ -386,7 +386,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_remove_past_end() {
-        let mut v = BTreeVec::<i32>::new();
+        let mut v = BVec::<i32>::new();
         for x in 0..10 {
             v.push_back(x);
         }
@@ -397,7 +397,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_remove_past_end_root() {
-        let mut v = BTreeVec::<i32>::new();
+        let mut v = BVec::<i32>::new();
         for x in 0..10 {
             v.push_back(x);
         }
@@ -413,8 +413,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_4 = BTreeVec::<i32>::new();
-        let mut b_5_5 = BTreeVec::<i32>::new();
+        let mut b_4_4 = BVec::<i32>::new();
+        let mut b_5_5 = BVec::<i32>::new();
 
         for x in 0..1000 {
             v.push(x);
@@ -444,8 +444,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_4 = BTreeVec::<i32>::new();
-        let mut b_5_5 = BTreeVec::<i32>::new();
+        let mut b_4_4 = BVec::<i32>::new();
+        let mut b_5_5 = BVec::<i32>::new();
 
         for x in 0..1000 {
             v.push(x);
@@ -478,8 +478,8 @@ mod tests {
 
     #[test]
     fn test_random_cursor_get() {
-        let mut b_4_4 = BTreeVec::<i32>::new();
-        let mut b_5_5 = BTreeVec::<i32>::new();
+        let mut b_4_4 = BVec::<i32>::new();
+        let mut b_5_5 = BVec::<i32>::new();
         let n = 1000;
 
         for x in 0..n as i32 {
@@ -499,7 +499,7 @@ mod tests {
 
     #[test]
     fn test_empty_cursor() {
-        let mut bvec = BTreeVec::<i32>::new();
+        let mut bvec = BVec::<i32>::new();
         let cursor = bvec.cursor_at_mut(0);
         assert!(cursor.get().is_none());
     }
@@ -519,12 +519,12 @@ mod tests {
 
     #[test]
     fn test_bvec_covariant() {
-        fn foo<'a>(_x: BTreeVec<&'a i32>, _y: &'a i32) {}
-        fn _assert_covariant<'b, 'a: 'b>(x: BTreeVec<&'a i32>) -> BTreeVec<&'b i32> {
+        fn foo<'a>(_x: BVec<&'a i32>, _y: &'a i32) {}
+        fn _assert_covariant<'b, 'a: 'b>(x: BVec<&'a i32>) -> BVec<&'b i32> {
             x
         }
 
-        let x = BTreeVec::<&'static i32>::new();
+        let x = BVec::<&'static i32>::new();
         let v = 123;
         let r = &v;
         foo(x, r);

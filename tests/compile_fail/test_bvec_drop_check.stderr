@@ -6,6 +6,6 @@ error[E0597]: `s` does not live long enough
 6 |     }
   |     - `s` dropped here while still borrowed
 7 | }
-  | - borrow might be used here, when `x` is dropped and runs the `Drop` code for type `BTreeVec`
+  | - borrow might be used here, when `x` is dropped and runs the `Drop` code for type `BVec`
   |
   = note: values in a scope are dropped in the opposite order they are defined

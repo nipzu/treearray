@@ -5,7 +5,7 @@ use crate::{
         handle::{Internal, InternalMut, Leaf, LeafMut, LeafRef, SplitResult},
         InternalNode, NodeBase, NodePtr, RawNodeWithLen,
     },
-    BTreeVec,
+    BVec,
 };
 
 // pub struct Cursor<'a, T, > {
@@ -71,12 +71,12 @@ use crate::{
 pub struct CursorMut<'a, T> {
     leaf_index: usize,
     index: usize,
-    tree: &'a mut BTreeVec<T>,
+    tree: &'a mut BVec<T>,
     leaf: MaybeUninit<NodePtr<T>>,
 }
 
 impl<'a, T> CursorMut<'a, T> {
-    pub(crate) fn new(tree: &'a mut BTreeVec<T>, index: usize) -> Self {
+    pub(crate) fn new(tree: &'a mut BVec<T>, index: usize) -> Self {
         if index > tree.len() {
             panic!();
         }
@@ -99,7 +99,7 @@ impl<'a, T> CursorMut<'a, T> {
         cursor
     }
 
-    pub(crate) fn new_inbounds(tree: &'a mut BTreeVec<T>, index: usize) -> Self {
+    pub(crate) fn new_inbounds(tree: &'a mut BVec<T>, index: usize) -> Self {
         if index >= tree.len() {
             panic!();
         }

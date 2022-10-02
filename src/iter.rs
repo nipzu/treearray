@@ -2,16 +2,16 @@
 
 // TODO: impl FusedIterator
 
-use crate::{BTreeVec, CursorMut};
+use crate::{BVec, CursorMut};
 
 pub struct Iter<'a, T> {
     index: usize,
-    v: &'a BTreeVec<T>,
+    v: &'a BVec<T>,
 }
 
 impl<'a, T> Iter<'a, T> {
     #[must_use]
-    pub(crate) const fn new(v: &'a BTreeVec<T>) -> Self {
+    pub(crate) const fn new(v: &'a BVec<T>) -> Self {
         Self { index: 0, v }
     }
 }
@@ -30,7 +30,7 @@ pub struct Drain<'a, T> {
 }
 
 impl<'a, T> Drain<'a, T> {
-    pub(crate) fn new(t: &'a mut BTreeVec<T>) -> Self {
+    pub(crate) fn new(t: &'a mut BVec<T>) -> Self {
         Self {
             cursor: t.cursor_at_mut(0),
         }

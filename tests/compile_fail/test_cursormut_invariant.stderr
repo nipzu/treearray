@@ -6,6 +6,6 @@ error: lifetime may not live long enough
 6 |     x
   |     ^ returning this value requires that `'a` must outlive `'static`
   |
-  = note: requirement occurs because of the type `btreevec::CursorMut<'_, &str>`, which makes the generic argument `&str` invariant
-  = note: the struct `btreevec::CursorMut<'a, T>` is invariant over the parameter `T`
+  = note: requirement occurs because of the type `bvec::CursorMut<'_, &str>`, which makes the generic argument `&str` invariant
+  = note: the struct `bvec::CursorMut<'a, T>` is invariant over the parameter `T`
   = help: see <https://doc.rust-lang.org/nomicon/subtyping.html> for more information about variance

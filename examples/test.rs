@@ -1,4 +1,4 @@
-use btreevec::BTreeVec as BVec;
+use bvec::BVec;
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 
 fn main() {

@@ -4,13 +4,13 @@ use pprof::criterion::{Output, PProfProfiler};
 
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
-use btreevec::BTreeVec;
+use bvec::BVec;
 
 fn bench_get_bvec(c: &mut Criterion) {
     let mut rng = StdRng::from_seed([0; 32]);
 
     for size in [1_000, 10_000, 100_000, 1_000_000, 10_000_000] {
-        let mut bvec = BTreeVec::<i32>::new();
+        let mut bvec = BVec::<i32>::new();
 
         for x in 0..size as i32 {
             let i = rng.gen_range(0..=bvec.len());
@@ -84,7 +84,7 @@ fn bench_insert(c: &mut Criterion) {
     let mut rng = StdRng::from_seed([0; 32]);
 
     for size in [1_000, 10_000, 100_000, 1_000_000] {
-        let mut bvec = BTreeVec::<i32>::new();
+        let mut bvec = BVec::<i32>::new();
         let mut vec = Vec::new();
 
         for x in 0..size as i32 {
