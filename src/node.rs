@@ -6,6 +6,9 @@ use self::handle::InternalMut;
 
 // use crate::panics::panic_length_overflow;
 
+#[cfg(miri)]
+const BRANCH_FACTOR: usize = 4;
+#[cfg(not(miri))]
 const BRANCH_FACTOR: usize = 32;
 
 pub mod handle;

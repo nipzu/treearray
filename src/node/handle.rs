@@ -111,7 +111,6 @@ mod ownership {
 
     // TODO: should this be covariant?
     pub struct Immut<'a>(PhantomData<&'a ()>);
-
     pub struct Mut<'a>(PhantomData<&'a mut ()>);
     pub struct Owned;
 
@@ -207,7 +206,7 @@ where
     H: height::Height,
     O: ownership::NodePtrType<H::NodeType<T, C>>,
 {
-    fn reborrow<'b>(&'b mut self) -> Node<ownership::Mut<'b>, H, T, C> {
+    fn reborrow(&mut self) -> Node<ownership::Mut, H, T, C> {
         Node {
             node: O::as_raw(&mut self.node),
         }
@@ -842,7 +841,7 @@ where
         unsafe {
             self.split_lengths(split_index, new_sibling.reborrow());
             self.children().split(split_index, new_sibling.children());
-            self.insert_fitting(index, node)
+            self.insert_fitting(index, node);
         };
 
         new_sibling.set_parent_links(0..);
