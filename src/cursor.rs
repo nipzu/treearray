@@ -3,20 +3,20 @@ use core::mem::MaybeUninit;
 use crate::{
     node::{
         handle::{Internal, InternalMut, Leaf, LeafMut, LeafRef, SplitResult},
-        InternalNode, LeafNode, NodePtr, RawNodeWithLen,
+        InternalNode, NodeBase, NodePtr, RawNodeWithLen,
     },
     BTreeVec,
 };
 
-// pub struct Cursor<'a, T, const C: usize> {
+// pub struct Cursor<'a, T, > {
 //     leaf_index: usize,
 //     index: usize,
-//     path: [MaybeUninit<Option<&'a Node<T, C>>>; usize::BITS as usize],
+//     path: [MaybeUninit<Option<&'a Node<T>>>; usize::BITS as usize],
 // }
 
-// impl<'a, T, const C: usize> Cursor<'a, T, C> {
+// impl<'a, T, > Cursor<'a, T> {
 //     pub(crate) unsafe fn new(
-//         path: [MaybeUninit<Option<&'a Node<T, C>>>; usize::BITS as usize],
+//         path: [MaybeUninit<Option<&'a Node<T>>>; usize::BITS as usize],
 //         index: usize,
 //         leaf_index: usize,
 //     ) -> Self {
@@ -68,15 +68,15 @@ use crate::{
 // }
 
 // TODO: auto traits: Send, Sync, Unpin, UnwindSafe?
-pub struct CursorMut<'a, T, const C: usize> {
+pub struct CursorMut<'a, T> {
     leaf_index: usize,
     index: usize,
-    tree: &'a mut BTreeVec<T, C>,
-    leaf: MaybeUninit<NodePtr<T, C>>,
+    tree: &'a mut BTreeVec<T>,
+    leaf: MaybeUninit<NodePtr<T>>,
 }
 
-impl<'a, T, const C: usize> CursorMut<'a, T, C> {
-    pub(crate) fn new(tree: &'a mut BTreeVec<T, C>, index: usize) -> Self {
+impl<'a, T> CursorMut<'a, T> {
+    pub(crate) fn new(tree: &'a mut BTreeVec<T>, index: usize) -> Self {
         if index > tree.len() {
             panic!();
         }
@@ -99,7 +99,7 @@ impl<'a, T, const C: usize> CursorMut<'a, T, C> {
         cursor
     }
 
-    pub(crate) fn new_inbounds(tree: &'a mut BTreeVec<T, C>, index: usize) -> Self {
+    pub(crate) fn new_inbounds(tree: &'a mut BTreeVec<T>, index: usize) -> Self {
         if index >= tree.len() {
             panic!();
         }
@@ -173,19 +173,19 @@ impl<'a, T, const C: usize> CursorMut<'a, T, C> {
         &mut self.tree.height
     }
 
-    fn root_mut(&mut self) -> &mut MaybeUninit<NodePtr<T, C>> {
+    fn root_mut(&mut self) -> &mut MaybeUninit<NodePtr<T>> {
         &mut self.tree.root
     }
 
     // TODO: this should not be unbounded?
-    fn leaf_mut<'b>(&mut self) -> Option<LeafMut<'b, T, C>>
+    fn leaf_mut<'b>(&mut self) -> Option<LeafMut<'b, T>>
     where
         T: 'b,
     {
         (self.height() > 0).then(|| unsafe { LeafMut::new(self.leaf.assume_init()) })
     }
 
-    fn leaf(&self) -> Option<LeafRef<T, C>> {
+    fn leaf(&self) -> Option<LeafRef<T>> {
         (self.height() > 0).then(|| unsafe { LeafRef::new(self.leaf.assume_init()) })
     }
 
@@ -216,12 +216,14 @@ impl<'a, T, const C: usize> CursorMut<'a, T, C> {
 
     unsafe fn insert_to_empty(&mut self, value: T) {
         self.tree.len = 1;
-        let root_ptr = *self.root_mut().write(LeafNode::from_value(value));
+        let new_root = NodeBase::new_leaf();
+        unsafe { LeafMut::new(new_root).values_mut().insert(0, value) };
+        let root_ptr = *self.root_mut().write(new_root);
         self.leaf.write(root_ptr);
         *self.height_mut() = 1;
     }
 
-    unsafe fn split_root(&mut self, new_node: RawNodeWithLen<T, C>) {
+    unsafe fn split_root(&mut self, new_node: RawNodeWithLen<T>) {
         let old_root = unsafe { self.root_mut().assume_init() };
         let mut old_root_len = self.tree.len;
         old_root_len -= new_node.0;

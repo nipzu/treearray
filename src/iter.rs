@@ -4,19 +4,19 @@
 
 use crate::{BTreeVec, CursorMut};
 
-pub struct Iter<'a, T, const C: usize> {
+pub struct Iter<'a, T> {
     index: usize,
-    v: &'a BTreeVec<T, C>,
+    v: &'a BTreeVec<T>,
 }
 
-impl<'a, T, const C: usize> Iter<'a, T, C> {
+impl<'a, T> Iter<'a, T> {
     #[must_use]
-    pub(crate) const fn new(v: &'a BTreeVec<T, C>) -> Self {
+    pub(crate) const fn new(v: &'a BTreeVec<T>) -> Self {
         Self { index: 0, v }
     }
 }
 
-impl<'a, T, const C: usize> Iterator for Iter<'a, T, C> {
+impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.v.get(self.index);
@@ -25,19 +25,19 @@ impl<'a, T, const C: usize> Iterator for Iter<'a, T, C> {
     }
 }
 
-pub struct Drain<'a, T, const C: usize> {
-    cursor: CursorMut<'a, T, C>,
+pub struct Drain<'a, T> {
+    cursor: CursorMut<'a, T>,
 }
 
-impl<'a, T, const C: usize> Drain<'a, T, C> {
-    pub(crate) fn new(t: &'a mut BTreeVec<T, C>) -> Self {
+impl<'a, T> Drain<'a, T> {
+    pub(crate) fn new(t: &'a mut BTreeVec<T>) -> Self {
         Self {
             cursor: t.cursor_at_mut(0),
         }
     }
 }
 
-impl<'a, T, const C: usize> Iterator for Drain<'a, T, C> {
+impl<'a, T> Iterator for Drain<'a, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -45,7 +45,7 @@ impl<'a, T, const C: usize> Iterator for Drain<'a, T, C> {
     }
 }
 
-impl<'a, T, const C: usize> Drop for Drain<'a, T, C> {
+impl<'a, T> Drop for Drain<'a, T> {
     fn drop(&mut self) {
         for _ in self {}
     }

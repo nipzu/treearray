@@ -1,20 +1,21 @@
 use core::{
-    mem::MaybeUninit,
     ops::{Index, IndexMut},
     ptr, slice,
 };
 
-pub struct ArrayVecMut<T, const N: usize> {
+pub struct ArrayVecMut<T> {
     array: *mut T,
     len: *mut u16,
+    cap: u16
 }
 
-impl<T, const N: usize> ArrayVecMut<T, N> {
-    pub unsafe fn new(array: *mut [MaybeUninit<T>; N], len: *mut u16) -> Self {
-        debug_assert!(unsafe { usize::from(*len) <= N });
+impl<T> ArrayVecMut<T> {
+    pub unsafe fn new(array: *mut T, len: *mut u16, cap: u16) -> Self {
+        debug_assert!(unsafe { usize::from(*len) <= usize::from(cap) });
         Self {
             array: array.cast(),
             len,
+            cap,
         }
     }
 
@@ -24,7 +25,7 @@ impl<T, const N: usize> ArrayVecMut<T, N> {
 
     pub fn insert(&mut self, index: usize, value: T) {
         let len = unsafe { *self.len }.into();
-        assert!(len < N);
+        assert!(len < usize::from(self.cap));
         assert!(index <= len);
         unsafe {
             let tail_ptr = self.array.add(index);
@@ -66,7 +67,7 @@ impl<T, const N: usize> ArrayVecMut<T, N> {
     }
 
     pub fn append(&mut self, other: Self) {
-        assert!(self.len() + other.len() <= N);
+        assert!(self.len() + other.len() <= usize::from(self.cap));
         let src = other.array;
         let dst = unsafe { self.array.add((*self.len).into()) };
         unsafe { ptr::copy_nonoverlapping(src, dst, (*other.len).into()) };
@@ -77,7 +78,7 @@ impl<T, const N: usize> ArrayVecMut<T, N> {
     }
 }
 
-impl<T, const N: usize, I> Index<I> for ArrayVecMut<T, N>
+impl<T, I> Index<I> for ArrayVecMut<T>
 where
     [T]: Index<I>,
 {
@@ -87,29 +88,11 @@ where
     }
 }
 
-impl<T, const N: usize, I> IndexMut<I> for ArrayVecMut<T, N>
+impl<T, I> IndexMut<I> for ArrayVecMut<T>
 where
     [T]: IndexMut<I>,
 {
     fn index_mut(&mut self, index: I) -> &mut Self::Output {
         unsafe { slice::from_raw_parts_mut(self.array, (*self.len).into()).index_mut(index) }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_array_vec_insert_front() {
-        let mut a: [MaybeUninit<usize>; 100] = [MaybeUninit::uninit(); 100];
-        let mut len = 0_u16;
-        let mut r = unsafe { ArrayVecMut::new(&mut a, &mut len) };
-
-        for x in 0..50 {
-            r.insert(0, x);
-        }
-
-        assert_eq!(&(core::array::from_fn(|i| 49 - i) as [usize; 50]), &r[..])
     }
 }

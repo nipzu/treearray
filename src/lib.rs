@@ -28,22 +28,18 @@ use node::{
 // CONST INVARIANTS:
 // - `B >= 3`
 // - `C >= 1`
-pub struct BTreeVec<T, const C: usize = 63> {
-    root: MaybeUninit<NodePtr<T, C>>,
+pub struct BTreeVec<T> {
+    root: MaybeUninit<NodePtr<T>>,
     len: usize,
     height: u16,
     // TODO: is this even needed?
     _marker: PhantomData<T>,
 }
 
-impl<T, const C: usize> BTreeVec<T, C> {
-    /// # Panics
-    /// Panics if `B < 3` or `C == 0`
+impl<T> BTreeVec<T> {
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
-        assert!(C >= 1);
-
         Self {
             root: MaybeUninit::uninit(),
             len: 0,
@@ -58,7 +54,7 @@ impl<T, const C: usize> BTreeVec<T, C> {
         self.len
     }
 
-    const fn root(&self) -> Option<NodePtr<T, C>> {
+    const fn root(&self) -> Option<NodePtr<T>> {
         if self.is_empty() {
             None
         } else {
@@ -120,7 +116,7 @@ impl<T, const C: usize> BTreeVec<T, C> {
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
 
-        unsafe { Some(LeafRef::<T, C>::new(cur_node).value_unchecked(0)) }
+        unsafe { Some(LeafRef::<T>::new(cur_node).value_unchecked(0)) }
     }
 
     #[must_use]
@@ -132,7 +128,7 @@ impl<T, const C: usize> BTreeVec<T, C> {
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
 
-        unsafe { Some(LeafMut::<T, C>::new(cur_node).into_value_unchecked_mut(0)) }
+        unsafe { Some(LeafMut::<T>::new(cur_node).into_value_unchecked_mut(0)) }
     }
 
     #[must_use]
@@ -145,7 +141,7 @@ impl<T, const C: usize> BTreeVec<T, C> {
             cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
         }
 
-        let leaf = unsafe { LeafRef::<T, C>::new(cur_node) };
+        let leaf = unsafe { LeafRef::<T>::new(cur_node) };
         let len_values = leaf.len();
         unsafe { Some(leaf.value_unchecked(len_values - 1)) }
     }
@@ -160,7 +156,7 @@ impl<T, const C: usize> BTreeVec<T, C> {
             cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
         }
 
-        let leaf = unsafe { LeafMut::<T, C>::new(cur_node) };
+        let leaf = unsafe { LeafMut::<T>::new(cur_node) };
         let len_values = leaf.len();
         unsafe { Some(leaf.into_value_unchecked_mut(len_values - 1)) }
     }
@@ -193,39 +189,39 @@ impl<T, const C: usize> BTreeVec<T, C> {
     }
 
     #[must_use]
-    pub const fn iter(&self) -> Iter<T, C> {
+    pub const fn iter(&self) -> Iter<T> {
         Iter::new(self)
     }
 
-    pub fn drain(&mut self) -> Drain<T, C> {
+    pub fn drain(&mut self) -> Drain<T> {
         Drain::new(self)
     }
 
     // #[must_use]
-    // pub fn cursor_at(&self, mut index: usize) -> Cursor<T, C> {
+    // pub fn cursor_at(&self, mut index: usize) -> Cursor<T> {
     //     todo!()
     // }
 
     #[must_use]
-    pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T, C> {
+    pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T> {
         CursorMut::new(self, index)
     }
 }
 
-impl<T, const C: usize> Drop for BTreeVec<T, C> {
+impl<T> Drop for BTreeVec<T> {
     fn drop(&mut self) {
         self.clear();
     }
 }
 
-impl<T, const C: usize> Default for BTreeVec<T, C> {
+impl<T> Default for BTreeVec<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
 // TODO: test this
-impl<T: fmt::Debug, const C: usize> fmt::Debug for BTreeVec<T, C> {
+impl<T: fmt::Debug> fmt::Debug for BTreeVec<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
     }
@@ -237,7 +233,7 @@ mod tests {
 
     #[test]
     fn test_new() {
-        const _: BTreeVec<i32, 3> = BTreeVec::new();
+        const _: BTreeVec<i32> = BTreeVec::new();
         let _ = BTreeVec::<usize>::new();
     }
 
@@ -253,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_push_front_back() {
-        let mut b = BTreeVec::<i32, 5>::new();
+        let mut b = BTreeVec::<i32>::new();
         let mut l = 0;
         for x in 0..500 {
             b.push_back(x);
@@ -279,7 +275,7 @@ mod tests {
 
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
-        let mut b = BTreeVec::<i32, 3>::new();
+        let mut b = BTreeVec::<i32>::new();
         let mut v = Vec::new();
         for x in 0..1000 {
             if rng.gen() {
@@ -310,8 +306,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_5 = BTreeVec::<i32, 5>::new();
-        let mut b_5_4 = BTreeVec::<i32, 4>::new();
+        let mut b_4_5 = BTreeVec::<i32>::new();
+        let mut b_5_4 = BTreeVec::<i32>::new();
 
         for x in 0..1000 {
             let index = rng.gen_range(0..=v.len());
@@ -334,8 +330,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_2 = BTreeVec::<i32, 2>::new();
-        let mut b_5_1 = BTreeVec::<i32, 1>::new();
+        let mut b_4_2 = BTreeVec::<i32>::new();
+        let mut b_5_1 = BTreeVec::<i32>::new();
 
         for x in 0..1000 {
             v.push(x);
@@ -366,8 +362,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_7_3 = BTreeVec::<i32, 3>::new();
-        let mut b_5_5 = BTreeVec::<i32, 5>::new();
+        let mut b_7_3 = BTreeVec::<i32>::new();
+        let mut b_5_5 = BTreeVec::<i32>::new();
 
         for x in 0..500 {
             let index = rng.gen_range(0..=v.len());
@@ -390,7 +386,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_remove_past_end() {
-        let mut v = BTreeVec::<i32, 3>::new();
+        let mut v = BTreeVec::<i32>::new();
         for x in 0..10 {
             v.push_back(x);
         }
@@ -401,7 +397,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn test_remove_past_end_root() {
-        let mut v = BTreeVec::<i32, 32>::new();
+        let mut v = BTreeVec::<i32>::new();
         for x in 0..10 {
             v.push_back(x);
         }
@@ -417,8 +413,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_4 = BTreeVec::<i32, 4>::new();
-        let mut b_5_5 = BTreeVec::<i32, 5>::new();
+        let mut b_4_4 = BTreeVec::<i32>::new();
+        let mut b_5_5 = BTreeVec::<i32>::new();
 
         for x in 0..1000 {
             v.push(x);
@@ -448,8 +444,8 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_4 = BTreeVec::<i32, 4>::new();
-        let mut b_5_5 = BTreeVec::<i32, 5>::new();
+        let mut b_4_4 = BTreeVec::<i32>::new();
+        let mut b_5_5 = BTreeVec::<i32>::new();
 
         for x in 0..1000 {
             v.push(x);
@@ -482,8 +478,8 @@ mod tests {
 
     #[test]
     fn test_random_cursor_get() {
-        let mut b_4_4 = BTreeVec::<i32, 4>::new();
-        let mut b_5_5 = BTreeVec::<i32, 5>::new();
+        let mut b_4_4 = BTreeVec::<i32>::new();
+        let mut b_5_5 = BTreeVec::<i32>::new();
         let n = 1000;
 
         for x in 0..n as i32 {
@@ -503,7 +499,7 @@ mod tests {
 
     #[test]
     fn test_empty_cursor() {
-        let mut bvec = BTreeVec::<i32, 4>::new();
+        let mut bvec = BTreeVec::<i32>::new();
         let cursor = bvec.cursor_at_mut(0);
         assert!(cursor.get().is_none());
     }
