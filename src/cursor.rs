@@ -127,10 +127,17 @@ impl<'a, T> CursorMut<'a, T> {
         self.leaf().and_then(|leaf| leaf.value(self.leaf_index))
     }
 
-    pub fn move_right(&mut self, mut offset: usize) {
-        if offset > self.len() - self.index {
+    pub fn move_(&mut self, offset: isize) {
+        // if (offset as usize) > self.len() - self.index {
+        //     panic!();
+        // }
+
+        // TODO: overflow
+        if self.index.wrapping_add(offset as usize) > self.len() {
             panic!();
         }
+
+        let mut offset = offset as usize;
 
         if self.len() == 0 {
             return;
@@ -139,17 +146,16 @@ impl<'a, T> CursorMut<'a, T> {
         let leaf_len = self.leaf_mut().unwrap().len();
 
         // fast path
-        // equivalent to self.leaf_index + offset < leaf_len,
-        // but avoids overflow with large offsets
-        if offset < leaf_len - self.leaf_index {
-            self.leaf_index += offset;
+        // TODO: why no over/underflow problems?
+        if self.leaf_index.wrapping_add(offset) < leaf_len {
+            self.leaf_index = self.leaf_index.wrapping_add(offset);
             return;
         }
 
         let mut new_parent = self.leaf_mut().unwrap().into_parent_and_index2();
-        offset += self.leaf_index;
+        offset = offset.wrapping_add(self.leaf_index);
         while let Some((mut parent, index)) = new_parent {
-            offset += parent.sum_lens_below(index);
+            offset = offset.wrapping_add(parent.sum_lens_below(index));
             if offset < parent.len() {
                 let mut cur_node = parent.node_ptr();
                 while unsafe { cur_node.as_ref().height() > 0 } {

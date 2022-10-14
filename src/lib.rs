@@ -224,6 +224,12 @@ mod tests {
         let _ = BVec::<usize>::new();
     }
 
+    // #[test]
+    // fn test_new_zst() {
+    //     const _: BVec<()> = BVec::new();
+    //     let _ = BVec::<()>::new();
+    // }
+
     #[test]
     fn test_bvec_size() {
         use core::mem::size_of;
@@ -487,11 +493,10 @@ mod tests {
         }
 
         for _ in 0..n {
-            let (x, y) = (rng.gen_range(0..b.len()), rng.gen_range(0..b.len()));
-            let (start, end) = (x.min(y), x.max(y));
+            let (start, end) = (rng.gen_range(0..b.len()), rng.gen_range(0..b.len()));
 
             let mut c = b.cursor_at_mut(start);
-            c.move_right(end - start);
+            c.move_(end as isize - start as isize);
             assert_eq!(Some(&(end as i32)), c.get());
         }
     }
