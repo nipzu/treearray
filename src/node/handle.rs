@@ -25,12 +25,12 @@ impl<'a, T: 'a> LeafRef<'a, T> {
         // could cause aliasing problems with taking
         // a reference to the whole array.
         unsafe {
-            let (_, offset) = NodeBase::<T>::leaf_layout();
+            let (_, array_offset) = NodeBase::<T>::leaf_layout();
             &*self
                 .node
                 .as_ptr()
                 .cast::<u8>()
-                .add(offset)
+                .add(array_offset)
                 .cast::<T>()
                 .add(index)
         }
@@ -55,49 +55,15 @@ impl<'a, T: 'a> InternalRef<'a, T> {
 }
 
 mod height {
-    use core::marker::PhantomData;
-
-    #[derive(Copy, Clone)]
     pub struct Zero;
-    #[derive(Copy, Clone)]
-    pub struct Positive;
-    #[derive(Copy, Clone)]
     pub struct One;
-    #[derive(Copy, Clone)]
+    pub struct Positive;
     pub struct TwoOrMore;
-    pub struct BrandedTwoOrMore<'id>(PhantomData<*mut &'id ()>);
-    #[derive(Copy, Clone)]
-    pub struct ChildOf<H>(PhantomData<H>);
 
     pub unsafe trait Internal {}
-    unsafe impl<'id> Internal for ChildOf<BrandedTwoOrMore<'id>> {}
-    unsafe impl<'id> Internal for BrandedTwoOrMore<'id> {}
-    unsafe impl Internal for Positive {}
     unsafe impl Internal for One {}
+    unsafe impl Internal for Positive {}
     unsafe impl Internal for TwoOrMore {}
-
-    pub unsafe trait ExactInternal: Internal + Sized {
-        type ChildHeight;
-        unsafe fn make_child_height(&self) -> Self::ChildHeight;
-    }
-    unsafe impl<'id> ExactInternal for BrandedTwoOrMore<'id> {
-        type ChildHeight = ChildOf<Self>;
-        unsafe fn make_child_height(&self) -> Self::ChildHeight {
-            ChildOf(PhantomData)
-        }
-    }
-    unsafe impl<'id> ExactInternal for ChildOf<BrandedTwoOrMore<'id>> {
-        type ChildHeight = ChildOf<Self>;
-        unsafe fn make_child_height(&self) -> Self::ChildHeight {
-            ChildOf(PhantomData)
-        }
-    }
-    unsafe impl ExactInternal for One {
-        type ChildHeight = Zero;
-        unsafe fn make_child_height(&self) -> Self::ChildHeight {
-            Zero
-        }
-    }
 
     pub unsafe trait Height {}
     unsafe impl Height for Zero {}
@@ -112,13 +78,13 @@ mod ownership {
     pub struct Mut<'a>(PhantomData<&'a mut ()>);
     pub struct Owned;
 
-    pub unsafe trait Mutable {}
-    unsafe impl<'a> Mutable for Mut<'a> {}
-    unsafe impl Mutable for Owned {}
+    pub unsafe trait Mutable<T>: Ownership<T> {}
+    unsafe impl<'a, T: 'a> Mutable<T> for Mut<'a> {}
+    unsafe impl<T> Mutable<T> for Owned {}
 
-    pub unsafe trait Reference {}
-    unsafe impl<'a> Reference for Immut<'a> {}
-    unsafe impl<'a> Reference for Mut<'a> {}
+    pub unsafe trait Reference<T>: Ownership<T> {}
+    unsafe impl<'a, T: 'a> Reference<T> for Immut<'a> {}
+    unsafe impl<'a, T: 'a> Reference<T> for Mut<'a> {}
 
     pub unsafe trait Ownership<T> {}
     unsafe impl<'a, T: 'a> Ownership<T> for Immut<'a> {}
@@ -158,13 +124,7 @@ where
     pub fn node_ptr(&mut self) -> NodePtr<T> {
         self.node
     }
-}
 
-impl<O, H, T> Node<O, H, T>
-where
-    H: height::Height,
-    O: ownership::Ownership<T>,
-{
     fn reborrow(&mut self) -> Node<ownership::Mut, H, T> {
         Node {
             node: self.node,
@@ -175,13 +135,10 @@ where
 
 impl<O, H, T> Node<O, H, T>
 where
-    O: ownership::Ownership<T>,
     H: height::Height,
+    O: ownership::Reference<T>,
 {
-    pub unsafe fn into_parent_and_index2(mut self) -> Option<(Node<O, height::Positive, T>, usize)>
-    where
-        O: ownership::Reference,
-    {
+    pub fn into_parent_and_index2(mut self) -> Option<(Node<O, height::Positive, T>, usize)> {
         unsafe {
             let parent = Node::<O, height::Positive, T>::new((*self.node_ptr().as_ptr()).parent?);
             Some((
@@ -197,12 +154,9 @@ where
 
 impl<O, T> Node<O, height::Zero, T>
 where
-    O: ownership::Ownership<T>,
+    O: ownership::Reference<T>,
 {
-    pub unsafe fn into_parent_and_index3(mut self) -> Option<(Node<O, height::One, T>, usize)>
-    where
-        O: ownership::Reference,
-    {
+    pub unsafe fn into_parent_and_index3(mut self) -> Option<(Node<O, height::One, T>, usize)> {
         unsafe {
             let parent = Node::<O, height::One, T>::new((*self.node_ptr().as_ptr()).parent?);
             Some((
@@ -294,7 +248,7 @@ impl<'a, T: 'a> LeafMut<'a, T> {
 
 impl<O, T> Node<O, height::One, T>
 where
-    O: ownership::Ownership<T> + ownership::Mutable,
+    O: ownership::Mutable<T>,
 {
     pub fn child_mut(&mut self, index: usize) -> LeafMut<T> {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
@@ -349,7 +303,7 @@ where
 
 impl<O, T> Node<O, height::TwoOrMore, T>
 where
-    O: ownership::Ownership<T>,
+    O: ownership::Mutable<T>,
 {
     pub unsafe fn new_parent_of_internal(node: NodePtr<T>) -> Self {
         Self {
@@ -358,40 +312,20 @@ where
         }
     }
 
-    pub fn with_brand<'a, F, R>(&'a mut self, f: F) -> R
-    where
-        T: 'a,
-        F: for<'new_id> FnOnce(Node<ownership::Mut<'a>, height::BrandedTwoOrMore<'new_id>, T>) -> R,
-    {
-        let parent = Node {
-            node: self.node,
-            _marker: PhantomData,
-        };
-
-        f(parent)
-    }
-
     pub fn maybe_handle_underfull_child(&mut self, index: usize) -> bool {
-        self.with_brand(|mut parent| {
-            let is_child_underfull = parent.child_mut(index).is_underfull();
+        let is_child_underfull = self.child_mut(index).is_underfull();
 
-            if is_child_underfull {
-                if index > 0 {
-                    parent.handle_underfull_internal_child_tail(index);
-                } else {
-                    parent.handle_underfull_internal_child_head();
-                }
+        if is_child_underfull {
+            if index > 0 {
+                self.handle_underfull_internal_child_tail(index);
+            } else {
+                self.handle_underfull_internal_child_head();
             }
+        }
 
-            is_child_underfull
-        })
+        is_child_underfull
     }
-}
 
-impl<'id, O, T> Node<O, height::BrandedTwoOrMore<'id>, T>
-where
-    O: ownership::Ownership<T> + ownership::Mutable,
-{
     pub fn child_mut(&mut self, index: usize) -> Node<ownership::Mut, height::Positive, T> {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
         Node {
@@ -403,7 +337,7 @@ where
     pub fn child_pair_at(
         &mut self,
         index: usize,
-    ) -> [Node<ownership::Mut, height::ChildOf<height::BrandedTwoOrMore<'id>>, T>; 2] {
+    ) -> [Node<ownership::Mut, height::Positive, T>; 2] {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
         [
             Node {
@@ -501,7 +435,43 @@ impl<'a, T: 'a> LeafMut<'a, T> {
 impl<O, H, T> Node<O, H, T>
 where
     H: height::Internal,
-    O: ownership::Ownership<T> + ownership::Mutable,
+    O: ownership::Ownership<T>,
+{
+    pub const UNDERFULL_LEN: usize = (BRANCH_FACTOR - 1) / 2;
+
+    fn node(&self) -> &InternalNode<T> {
+        unsafe { self.node.cast().as_ref() }
+    }
+
+    pub fn len_children(&self) -> usize {
+        usize::from(self.node().base.children_len)
+    }
+
+    pub fn is_singleton(&self) -> bool {
+        self.len_children() == 1
+    }
+
+    fn is_full(&self) -> bool {
+        self.len_children() == BRANCH_FACTOR
+    }
+
+    pub fn is_underfull(&self) -> bool {
+        self.len_children() <= Self::UNDERFULL_LEN
+    }
+
+    pub fn internal_ptr(&mut self) -> *mut InternalNode<T> {
+        self.node.cast().as_ptr()
+    }
+
+    pub fn sum_lens(&mut self) -> usize {
+        self.node().lengths[BRANCH_FACTOR - 1]
+    }
+}
+
+impl<O, H, T> Node<O, H, T>
+where
+    H: height::Internal,
+    O: ownership::Mutable<T>,
 {
     unsafe fn push_front_child(&mut self, child: RawNodeWithLen<T>) {
         unsafe {
@@ -535,13 +505,7 @@ where
         self.children().append(other.children());
         self.set_parent_links(self_old_len..);
     }
-}
 
-impl<O, H, T> Node<O, H, T>
-where
-    H: height::Internal,
-    O: ownership::Ownership<T> + ownership::Mutable,
-{
     pub fn internal_mut(&mut self) -> &mut InternalNode<T> {
         unsafe { self.node.cast().as_mut() }
     }
@@ -679,44 +643,7 @@ where
             index |= index + 1;
         }
     }
-}
 
-impl<O, H, T> Node<O, H, T>
-where
-    H: height::Internal,
-    O: ownership::Ownership<T>,
-{
-    pub const UNDERFULL_LEN: usize = (BRANCH_FACTOR - 1) / 2;
-
-    fn node(&self) -> &InternalNode<T> {
-        unsafe { self.node.cast().as_ref() }
-    }
-
-    pub fn len_children(&self) -> usize {
-        usize::from(self.node().base.children_len)
-    }
-
-    pub fn is_singleton(&self) -> bool {
-        self.len_children() == 1
-    }
-
-    fn is_full(&self) -> bool {
-        self.len_children() == BRANCH_FACTOR
-    }
-
-    pub fn is_underfull(&self) -> bool {
-        self.len_children() <= Self::UNDERFULL_LEN
-    }
-    pub fn internal_ptr(&mut self) -> *mut InternalNode<T> {
-        self.node.cast().as_ptr()
-    }
-}
-
-impl<O, H, T> Node<O, H, T>
-where
-    H: height::Internal,
-    O: ownership::Ownership<T> + ownership::Mutable,
-{
     fn node_mut(&mut self) -> &mut InternalNode<T> {
         unsafe { self.node.cast().as_mut() }
     }
@@ -733,7 +660,7 @@ where
 
     pub unsafe fn into_parent_and_index(mut self) -> Option<(Node<O, height::TwoOrMore, T>, usize)>
     where
-        O: ownership::Reference,
+        O: ownership::Reference<T>,
     {
         unsafe {
             let parent = Node::new_parent_of_internal(self.node_mut().base.parent?);
@@ -741,13 +668,6 @@ where
                 parent,
                 self.node_mut().base.parent_index.assume_init().into(),
             ))
-        }
-    }
-
-    pub fn into_internal(self) -> Node<O, height::Positive, T> {
-        Node {
-            node: self.node,
-            _marker: PhantomData,
         }
     }
 
@@ -802,7 +722,7 @@ where
     ) -> RawNodeWithLen<T> {
         let split_index = Self::UNDERFULL_LEN;
 
-        let new_sibling_node = InternalNode::<T>::new();
+        let new_sibling_node = InternalNode::<T>::new(self.node().base.height);
         let mut new_sibling = unsafe { Node::<ownership::Mut, H, T>::new(new_sibling_node) };
 
         unsafe {
@@ -822,7 +742,7 @@ where
     ) -> RawNodeWithLen<T> {
         let split_index = Self::UNDERFULL_LEN + 1;
 
-        let new_sibling_node = InternalNode::<T>::new();
+        let new_sibling_node = InternalNode::<T>::new(self.node().base.height);
 
         let mut new_sibling = unsafe { Node::<ownership::Mut, H, T>::new(new_sibling_node) };
 
@@ -843,10 +763,6 @@ where
                 (*n.as_ptr()).parent_index.write((i + range.start) as u16);
             }
         }
-    }
-
-    pub fn sum_lens(&mut self) -> usize {
-        self.lengths_mut()[BRANCH_FACTOR - 1]
     }
 }
 

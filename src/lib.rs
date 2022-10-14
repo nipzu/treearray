@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use core::{fmt, marker::PhantomData, mem::MaybeUninit};
+use core::{fmt, marker::PhantomData};
 
 mod cursor;
 pub mod iter;
@@ -26,9 +26,7 @@ use node::{
 // }
 
 pub struct BVec<T> {
-    root: MaybeUninit<NodePtr<T>>,
-    len: usize,
-    height: u16,
+    root: Option<NodePtr<T>>,
     // TODO: is this even needed?
     _marker: PhantomData<T>,
 }
@@ -38,42 +36,41 @@ impl<T> BVec<T> {
     #[inline]
     pub const fn new() -> Self {
         Self {
-            root: MaybeUninit::uninit(),
-            len: 0,
-            height: 0,
+            root: None,
             _marker: PhantomData,
         }
     }
 
     #[must_use]
     #[inline]
-    pub const fn len(&self) -> usize {
-        self.len
+    pub fn len(&self) -> usize {
+        self.root.map_or(0, |r| unsafe {
+            if r.as_ref().height == 0 {
+                LeafRef::new(r).len()
+            } else {
+                InternalRef::new(r).sum_lens()
+            }
+        })
     }
 
-    const fn root(&self) -> Option<NodePtr<T>> {
-        if self.is_empty() {
-            None
-        } else {
-            unsafe { Some(self.root.assume_init()) }
-        }
+    fn height(&self) -> usize {
+        self.root.map_or(0, |r| unsafe { r.as_ref().height.into() })
     }
 
     #[must_use]
     #[inline]
     pub const fn is_empty(&self) -> bool {
-        self.height == 0
+        self.root.is_none()
     }
 
     #[must_use]
     pub fn get(&self, mut index: usize) -> Option<&T> {
-        let mut cur_node = match self.root() {
+        let mut cur_node = match self.root {
             Some(root) if index < self.len() => root,
             _ => return None,
         };
 
-        // decrement the height of `cur_node` `self.height - 1` times
-        for _ in 1..self.height {
+        for _ in 0..self.height() {
             let handle = unsafe { InternalRef::new(cur_node) };
             cur_node = unsafe { handle.child_containing_index(&mut index) };
         }
@@ -86,14 +83,13 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn get_mut(&mut self, mut index: usize) -> Option<&mut T> {
-        let height = self.height;
-        let mut cur_node = match self.root() {
+        let mut cur_node = match self.root {
             Some(root) if index < self.len() => root,
             _ => return None,
         };
 
         // decrement the height of `cur_node` `self.height - 1` times
-        for _ in 1..height {
+        while unsafe { cur_node.as_ref().height > 0 } {
             let handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
@@ -106,9 +102,9 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn first(&self) -> Option<&T> {
-        let mut cur_node = self.root()?;
+        let mut cur_node = self.root?;
 
-        for _ in 1..self.height {
+        while unsafe { cur_node.as_ref().height > 0 } {
             let mut handle = unsafe { InternalRef::new(cur_node) };
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
@@ -118,9 +114,9 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn first_mut(&mut self) -> Option<&mut T> {
-        let mut cur_node = self.root()?;
+        let mut cur_node = self.root?;
 
-        for _ in 1..self.height {
+        while unsafe { cur_node.as_ref().height > 0 } {
             let mut handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
@@ -130,9 +126,9 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn last(&self) -> Option<&T> {
-        let mut cur_node = self.root()?;
+        let mut cur_node = self.root?;
 
-        for _ in 1..self.height {
+        while unsafe { cur_node.as_ref().height > 0 } {
             let mut handle = unsafe { InternalRef::new(cur_node) };
             let len_children = handle.len_children();
             cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
@@ -145,9 +141,9 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn last_mut(&mut self) -> Option<&mut T> {
-        let mut cur_node = self.root()?;
+        let mut cur_node = self.root?;
 
-        for _ in 1..self.height {
+        while unsafe { cur_node.as_ref().height > 0 } {
             let mut handle = unsafe { InternalMut::new(cur_node) };
             let len_children = handle.len_children();
             cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
@@ -240,7 +236,7 @@ mod tests {
 
         assert_eq!(
             size_of::<BVec<i32>>(),
-            2 * size_of::<usize>() + size_of::<*mut ()>()
+            size_of::<*mut ()>()
         )
     }
 

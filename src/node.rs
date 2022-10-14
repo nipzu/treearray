@@ -34,6 +34,7 @@ pub struct NodeBase<T> {
     pub parent: Option<NodePtr<T>>,
     pub parent_index: MaybeUninit<u16>,
     pub children_len: u16,
+    pub height: u16,
     _marker: PhantomData<T>,
 }
 
@@ -51,11 +52,12 @@ pub struct InternalNode<T> {
 // }
 
 impl<T> NodeBase<T> {
-    pub const fn new() -> Self {
+    pub const fn new(height: u16) -> Self {
         Self {
             parent: None,
             parent_index: MaybeUninit::uninit(),
             children_len: 0,
+            height,
             _marker: PhantomData,
         }
     }
@@ -71,18 +73,16 @@ impl<T> NodeBase<T> {
     pub fn new_leaf() -> NodePtr<T> {
         let (layout, _) = Self::leaf_layout();
         let ptr = unsafe { alloc(layout).cast::<NodeBase<T>>() };
-        if ptr.is_null() {
+        let Some(node_ptr) = NonNull::new(ptr) else {
             handle_alloc_error(layout);
-        }
-        unsafe {
-            ptr.write(NodeBase::new());
-            NonNull::new_unchecked(ptr)
-        }
+        };
+        unsafe { node_ptr.as_ptr().write(NodeBase::new(0)) };
+        node_ptr
     }
 
     pub fn leaf_layout() -> (Layout, usize) {
         let base = Layout::new::<NodeBase<T>>();
-        let array = Layout::array::<T>(NodeBase::<T>::LEAF_CAP).unwrap();
+        let array = Layout::array::<T>(Self::LEAF_CAP).unwrap();
         let (layout, offset) = base.extend(array).unwrap();
         // Remember to finalize with `pad_to_align`!
         (layout.pad_to_align(), offset)
@@ -92,9 +92,9 @@ impl<T> NodeBase<T> {
 impl<T> InternalNode<T> {
     const UNINIT_NODE: MaybeUninit<NodePtr<T>> = MaybeUninit::uninit();
 
-    pub fn new() -> NodePtr<T> {
+    pub fn new(height: u16) -> NodePtr<T> {
         NonNull::from(Box::leak(Box::new(Self {
-            base: NodeBase::new(),
+            base: NodeBase::new(height),
             lengths: [0; BRANCH_FACTOR],
             children: [Self::UNINIT_NODE; BRANCH_FACTOR],
         })))
@@ -102,7 +102,8 @@ impl<T> InternalNode<T> {
     }
 
     pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T>; N]) -> NodePtr<T> {
-        let boxed_children = Self::new();
+        let height = unsafe { children[0].1.as_ref().height + 1 };
+        let boxed_children = Self::new(height);
         let mut children_mut = unsafe { InternalMut::new(boxed_children) };
         for child in children {
             unsafe { children_mut.push_back_child(child) }
