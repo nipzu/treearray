@@ -109,7 +109,7 @@ impl<'a, T> CursorMut<'a, T> {
 
         // the height of `cur_node` is `tree.height - 1`
         // decrement the height of `cur_node` `tree.height - 1` times
-        while unsafe { cur_node.as_ref().height > 0 } {
+        while unsafe { cur_node.as_ref().height() > 0 } {
             let handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut target_index) };
         }
@@ -127,52 +127,44 @@ impl<'a, T> CursorMut<'a, T> {
         self.leaf().and_then(|leaf| leaf.value(self.leaf_index))
     }
 
-    // pub fn move_right(&mut self, offset: usize) {
-    //     if offset <= self.len() - self.index {
-    //         panic!();
-    //     }
+    pub fn move_right(&mut self, mut offset: usize) {
+        if offset > self.len() - self.index {
+            panic!();
+        }
 
-    //     if self.len() == 0 {
-    //         return;
-    //     }
+        if self.len() == 0 {
+            return;
+        }
 
-    //     let leaf_len = unsafe { self.leaf_mut().unwrap().len() };
+        let leaf_len = self.leaf_mut().unwrap().len();
 
-    //     // fast path
-    //     // equivalent to self.leaf_index + offset < leaf_len,
-    //     // but avoids overflow with large offsets
-    //     if offset <= leaf_len - self.leaf_index {
-    //         self.leaf_index += offset;
-    //         return;
-    //     }
+        // fast path
+        // equivalent to self.leaf_index + offset < leaf_len,
+        // but avoids overflow with large offsets
+        if offset < leaf_len - self.leaf_index {
+            self.leaf_index += offset;
+            return;
+        }
 
-    //     let mut height = self.height();
-    //     let (cur_parent, cur_index) = unsafe { self.leaf_mut().unwrap().into_parent_and_index() };
-    //     let mut remaining_len = leaf_len - self.leaf_index;
-    //     loop {
-    //         height += 1;
-    //         // remaining_len +=
-    //     }
+        let mut new_parent = self.leaf_mut().unwrap().into_parent_and_index2();
+        offset += self.leaf_index;
+        while let Some((mut parent, index)) = new_parent {
+            offset += parent.sum_lens_below(index);
+            if offset < parent.len() {
+                let mut cur_node = parent.node_ptr();
+                while unsafe { cur_node.as_ref().height() > 0 } {
+                    let handle = unsafe { InternalMut::new(cur_node) };
+                    cur_node = unsafe { handle.into_child_containing_index(&mut offset) };
+                }
+                self.leaf.write(cur_node);
+                self.leaf_index = offset;
+                return;
+            }
+            new_parent = parent.into_parent_and_index2();
+        }
 
-    //     // for height in 1..=self.height() {
-    //     //     let mut parent = self.path_internal_mut(height);
-    //     //     let parent_index =
-    //     //         parent.index_of_child_ptr(self.path[height - 1].assume_init());
-    //     //     if parent_index + 1 < B {
-    //     //         if let n @ Some(_) = parent.child_mut(parent_index + 1) {
-    //     //             let mut cur = n as *mut _;
-    //     //             for h in (0..height).rev() {
-    //     //                 self.path[h].write(cur);
-    //     //                 if h > 0 {
-    //     //                     cur = NodeMut::from_ptr(cur).child_mut(0);
-    //     //                 }
-    //     //             }
-    //     //             self.leaf_index = 0;
-    //     //             break;
-    //     //         }
-    //     //     }
-    //     // }
-    // }
+        panic!("possibly out of bounds");
+    }
 
     fn root_mut(&mut self) -> &mut Option<NodePtr<T>> {
         &mut self.tree.root

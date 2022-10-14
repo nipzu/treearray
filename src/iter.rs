@@ -19,9 +19,10 @@ impl<'a, T> Iter<'a, T> {
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
-        let item = self.v.get(self.index);
-        self.index += 1;
-        item
+        self.v.get(self.index).map(|item| {
+            self.index += 1;
+            item
+        })
     }
 }
 

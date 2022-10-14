@@ -14,11 +14,13 @@ use self::handle::InternalMut;
 
 // use crate::panics::panic_length_overflow;
 
+/// SAFETY: BRANCH_FACTOR must be less than u8::MAX.
 #[cfg(miri)]
 const BRANCH_FACTOR: usize = 4;
 #[cfg(not(miri))]
 const BRANCH_FACTOR: usize = 32;
 
+/// SAFETY: LEAF_CAP_BYTES must be less than u16::MAX.
 #[cfg(miri)]
 const LEAF_CAP_BYTES: usize = 16;
 #[cfg(not(miri))]
@@ -32,16 +34,16 @@ pub type NodePtr<T> = NonNull<NodeBase<T>>;
 
 pub struct NodeBase<T> {
     pub parent: Option<NodePtr<T>>,
-    pub parent_index: MaybeUninit<u16>,
-    pub children_len: u16,
-    pub height: u16,
+    parent_index: MaybeUninit<u8>,
+    height: u8,
+    children_len: u16,
     _marker: PhantomData<T>,
 }
 
 #[repr(C)]
 pub struct InternalNode<T> {
     base: NodeBase<T>,
-    pub lengths: [usize; BRANCH_FACTOR],
+    lengths: [usize; BRANCH_FACTOR],
     pub children: [MaybeUninit<NodePtr<T>>; BRANCH_FACTOR],
 }
 
@@ -52,7 +54,7 @@ pub struct InternalNode<T> {
 // }
 
 impl<T> NodeBase<T> {
-    pub const fn new(height: u16) -> Self {
+    pub const fn new(height: u8) -> Self {
         Self {
             parent: None,
             parent_index: MaybeUninit::uninit(),
@@ -60,6 +62,10 @@ impl<T> NodeBase<T> {
             height,
             _marker: PhantomData,
         }
+    }
+
+    pub const fn height(&self) -> u8 {
+        self.height
     }
 }
 
@@ -92,7 +98,7 @@ impl<T> NodeBase<T> {
 impl<T> InternalNode<T> {
     const UNINIT_NODE: MaybeUninit<NodePtr<T>> = MaybeUninit::uninit();
 
-    pub fn new(height: u16) -> NodePtr<T> {
+    pub fn new(height: u8) -> NodePtr<T> {
         NonNull::from(Box::leak(Box::new(Self {
             base: NodeBase::new(height),
             lengths: [0; BRANCH_FACTOR],

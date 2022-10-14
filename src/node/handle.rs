@@ -463,8 +463,18 @@ where
         self.node.cast().as_ptr()
     }
 
-    pub fn sum_lens(&mut self) -> usize {
+    pub fn len(&mut self) -> usize {
         self.node().lengths[BRANCH_FACTOR - 1]
+    }
+
+    pub fn sum_lens_below(&self, mut index: usize) -> usize {
+        let mut sum = 0;
+        assert!(index <= self.node().lengths.len());
+        while index != 0 {
+            sum += self.node().lengths[index - 1];
+            index &= index - 1;
+        }
+        sum
     }
 }
 
@@ -732,7 +742,7 @@ where
         };
 
         new_sibling.set_parent_links(0..);
-        RawNodeWithLen(new_sibling.sum_lens(), new_sibling_node)
+        RawNodeWithLen(new_sibling.len(), new_sibling_node)
     }
 
     unsafe fn split_and_insert_right(
@@ -753,14 +763,14 @@ where
         }
 
         new_sibling.set_parent_links(0..);
-        RawNodeWithLen(new_sibling.sum_lens(), new_sibling_node)
+        RawNodeWithLen(new_sibling.len(), new_sibling_node)
     }
 
     fn set_parent_links(&mut self, range: RangeFrom<usize>) {
         for (i, n) in self.children()[range.clone()].iter_mut().enumerate() {
             unsafe {
                 (*n.as_ptr()).parent = Some(self.node_ptr());
-                (*n.as_ptr()).parent_index.write((i + range.start) as u16);
+                (*n.as_ptr()).parent_index.write((i + range.start) as u8);
             }
         }
     }

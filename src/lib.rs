@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use core::{fmt, marker::PhantomData};
+use core::fmt;
 
 mod cursor;
 pub mod iter;
@@ -21,40 +21,35 @@ use node::{
     NodePtr,
 };
 
-// pub fn foo(b: &BTreeVec<i32>, x: usize) -> Option<&i32> {
+// pub fn foo(b: &BVec<i32>, x: usize) -> Option<&i32> {
 //     b.get(x)
 // }
 
 pub struct BVec<T> {
     root: Option<NodePtr<T>>,
-    // TODO: is this even needed?
-    _marker: PhantomData<T>,
 }
 
 impl<T> BVec<T> {
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
-        Self {
-            root: None,
-            _marker: PhantomData,
-        }
+        Self { root: None }
     }
 
     #[must_use]
     #[inline]
     pub fn len(&self) -> usize {
         self.root.map_or(0, |r| unsafe {
-            if r.as_ref().height == 0 {
+            if r.as_ref().height() == 0 {
                 LeafRef::new(r).len()
             } else {
-                InternalRef::new(r).sum_lens()
+                InternalRef::new(r).len()
             }
         })
     }
 
-    fn height(&self) -> usize {
-        self.root.map_or(0, |r| unsafe { r.as_ref().height.into() })
+    fn height(&self) -> u8 {
+        self.root.map_or(0, |r| unsafe { r.as_ref().height() })
     }
 
     #[must_use]
@@ -88,8 +83,8 @@ impl<T> BVec<T> {
             _ => return None,
         };
 
-        // decrement the height of `cur_node` `self.height - 1` times
-        while unsafe { cur_node.as_ref().height > 0 } {
+        // decrement the height of `cur_node` `self.height() - 1` times
+        while unsafe { cur_node.as_ref().height() > 0 } {
             let handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut index) };
         }
@@ -104,7 +99,7 @@ impl<T> BVec<T> {
     pub fn first(&self) -> Option<&T> {
         let mut cur_node = self.root?;
 
-        while unsafe { cur_node.as_ref().height > 0 } {
+        while unsafe { cur_node.as_ref().height() > 0 } {
             let mut handle = unsafe { InternalRef::new(cur_node) };
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
@@ -116,7 +111,7 @@ impl<T> BVec<T> {
     pub fn first_mut(&mut self) -> Option<&mut T> {
         let mut cur_node = self.root?;
 
-        while unsafe { cur_node.as_ref().height > 0 } {
+        while unsafe { cur_node.as_ref().height() > 0 } {
             let mut handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
         }
@@ -128,7 +123,7 @@ impl<T> BVec<T> {
     pub fn last(&self) -> Option<&T> {
         let mut cur_node = self.root?;
 
-        while unsafe { cur_node.as_ref().height > 0 } {
+        while unsafe { cur_node.as_ref().height() > 0 } {
             let mut handle = unsafe { InternalRef::new(cur_node) };
             let len_children = handle.len_children();
             cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
@@ -143,7 +138,7 @@ impl<T> BVec<T> {
     pub fn last_mut(&mut self) -> Option<&mut T> {
         let mut cur_node = self.root?;
 
-        while unsafe { cur_node.as_ref().height > 0 } {
+        while unsafe { cur_node.as_ref().height() > 0 } {
             let mut handle = unsafe { InternalMut::new(cur_node) };
             let len_children = handle.len_children();
             cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
@@ -427,8 +422,8 @@ mod tests {
 
     #[test]
     fn test_bvec_debug() {
-        use alloc::vec::Vec;
         use alloc::format;
+        use alloc::vec::Vec;
 
         let v = Vec::from_iter(0..1000);
         let mut b = BVec::new();
@@ -480,6 +475,28 @@ mod tests {
     }
 
     #[test]
+    fn test_random_cursor_move_right() {
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+        let mut b = BVec::<i32>::new();
+        let n = 1000;
+
+        for x in 0..n as i32 {
+            b.push_back(x);
+        }
+
+        for _ in 0..n {
+            let (x, y) = (rng.gen_range(0..b.len()), rng.gen_range(0..b.len()));
+            let (start, end) = (x.min(y), x.max(y));
+
+            let mut c = b.cursor_at_mut(start);
+            c.move_right(end - start);
+            assert_eq!(Some(&(end as i32)), c.get());
+        }
+    }
+
+    #[test]
     fn test_random_cursor_get() {
         let mut b_4_4 = BVec::<i32>::new();
         let mut b_5_5 = BVec::<i32>::new();
@@ -498,6 +515,16 @@ mod tests {
             assert_eq!(x, *b_4_4.cursor_at_mut(i).get().unwrap());
             assert_eq!(y, *b_5_5.cursor_at_mut(i).get().unwrap());
         }
+    }
+
+    #[test]
+    fn test_bvec_iter() {
+        let mut b = BVec::new();
+        for x in 0..1000 {
+            b.push_back(x);
+        }
+
+        assert!(b.iter().copied().eq(0..1000));
     }
 
     #[test]
