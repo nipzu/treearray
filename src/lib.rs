@@ -213,7 +213,6 @@ impl<T> Default for BVec<T> {
     }
 }
 
-// TODO: test this
 impl<T: fmt::Debug> fmt::Debug for BVec<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -234,10 +233,7 @@ mod tests {
     fn test_bvec_size() {
         use core::mem::size_of;
 
-        assert_eq!(
-            size_of::<BVec<i32>>(),
-            size_of::<*mut ()>()
-        )
+        assert_eq!(size_of::<BVec<i32>>(), size_of::<*mut ()>())
     }
 
     #[test]
@@ -427,6 +423,20 @@ mod tests {
         }
         assert!(b_4_4.is_empty());
         assert!(b_5_5.is_empty());
+    }
+
+    #[test]
+    fn test_bvec_debug() {
+        use alloc::vec::Vec;
+        use alloc::format;
+
+        let v = Vec::from_iter(0..1000);
+        let mut b = BVec::new();
+        for x in 0..1000 {
+            b.push_back(x);
+        }
+
+        assert_eq!(format!("{v:?}"), format!("{b:?}"));
     }
 
     #[test]

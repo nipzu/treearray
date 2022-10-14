@@ -183,16 +183,11 @@ impl<'a, T> CursorMut<'a, T> {
     where
         T: 'b,
     {
-        self.root_mut()
-            .is_some()
-            .then(|| unsafe { LeafMut::new(self.leaf.assume_init()) })
+        (!self.tree.is_empty()).then(|| unsafe { LeafMut::new(self.leaf.assume_init()) })
     }
 
     fn leaf(&self) -> Option<LeafRef<T>> {
-        self.tree
-            .root
-            .is_some()
-            .then(|| unsafe { LeafRef::new(self.leaf.assume_init()) })
+        (!self.tree.is_empty()).then(|| unsafe { LeafRef::new(self.leaf.assume_init()) })
     }
 
     pub(crate) fn len(&self) -> usize {
