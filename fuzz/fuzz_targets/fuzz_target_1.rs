@@ -3,7 +3,7 @@
 use libfuzzer_sys::fuzz_target;
 use libfuzzer_sys::arbitrary::Arbitrary;
 
-use btreevec::BTreeVec;
+use bvec::BVec;
 
 #[derive(Arbitrary, Debug)]
 enum Action {
@@ -14,7 +14,7 @@ enum Action {
 
 fuzz_target!(|data: Vec<Action>| {
     let mut v = Vec::new();
-    let mut b = BTreeVec::<i32, 4, 4>::new();
+    let mut b = BVec::<i32>::new();
     for action in data {
         match action {
             Action::Get(i) => assert_eq!(v.get(i), b.get(i)),
