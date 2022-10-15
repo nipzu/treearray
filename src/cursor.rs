@@ -13,9 +13,9 @@ pub struct CursorInner<'a, O, T>
 where
     O: ownership::Reference<'a, T>,
 {
-    leaf_index: usize,
     tree: O::RefTy<BVec<T>>,
     leaf: MaybeUninit<NodePtr<T>>,
+    leaf_index: usize,
 }
 
 impl<'a, T> Clone for CursorInner<'a, ownership::Immut<'a>, T> {

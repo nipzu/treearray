@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use core::fmt;
+use core::{fmt, mem::size_of};
 
 mod cursor;
 pub mod iter;
@@ -40,6 +40,10 @@ impl<T> BVec<T> {
     #[must_use]
     #[inline]
     pub fn len(&self) -> usize {
+        if size_of::<T>() == 0 {
+            return self.root.map_or(0, |p| p.as_ptr() as usize)
+        }
+
         self.root.map_or(0, |r| unsafe {
             if r.as_ref().height() == 0 {
                 LeafRef::new(r).len()
