@@ -8,8 +8,8 @@ use alloc::boxed::Box;
 
 use crate::{
     node::{InternalNode, NodeBase, NodePtr, RawNodeWithLen, BRANCH_FACTOR},
-    utils::ArrayVecMut,
     ownership,
+    utils::ArrayVecMut,
 };
 
 impl<'a, T: 'a> LeafRef<'a, T> {
@@ -647,7 +647,9 @@ where
         }
     }
 
-    pub unsafe fn into_parent_and_index<'a>(mut self) -> Option<(Node<O, height::TwoOrMore, T>, usize)>
+    pub unsafe fn into_parent_and_index<'a>(
+        mut self,
+    ) -> Option<(Node<O, height::TwoOrMore, T>, usize)>
     where
         T: 'a,
         O: ownership::Reference<'a, T>,

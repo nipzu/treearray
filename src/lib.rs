@@ -179,17 +179,12 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn iter(&self) -> Iter<T> {
-        Iter::new(self)
+        unsafe { Iter::new(self, 0, self.len()) }
     }
 
     pub fn drain(&mut self) -> Drain<T> {
         Drain::new(self)
     }
-
-    // #[must_use]
-    // pub fn cursor_at(&self, mut index: usize) -> Cursor<T> {
-    //     todo!()
-    // }
 
     #[must_use]
     pub fn cursor_at(&self, index: usize) -> Cursor<T> {
