@@ -224,11 +224,11 @@ mod tests {
         let _ = BVec::<usize>::new();
     }
 
-    // #[test]
-    // fn test_new_zst() {
-    //     const _: BVec<()> = BVec::new();
-    //     let _ = BVec::<()>::new();
-    // }
+    #[test]
+    fn test_new_zst() {
+        const _: BVec<()> = BVec::new();
+        let _ = BVec::<()>::new();
+    }
 
     #[test]
     fn test_bvec_size() {

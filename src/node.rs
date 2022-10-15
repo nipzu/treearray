@@ -71,7 +71,11 @@ impl<T> NodeBase<T> {
 
 impl<T> NodeBase<T> {
     const LEAF_CAP: usize = if size_of::<T>() <= LEAF_CAP_BYTES {
-        LEAF_CAP_BYTES / size_of::<T>()
+        if size_of::<T>() == 0 {
+            usize::MAX
+        } else {
+            LEAF_CAP_BYTES / size_of::<T>()
+        }
     } else {
         1
     };
