@@ -2,25 +2,26 @@
 
 // TODO: impl FusedIterator
 
-use crate::{BVec, CursorMut};
+use crate::{BVec, Cursor, CursorMut};
 
 pub struct Iter<'a, T> {
-    index: usize,
-    v: &'a BVec<T>,
+    cursor: Cursor<'a, T>,
 }
 
 impl<'a, T> Iter<'a, T> {
     #[must_use]
-    pub(crate) const fn new(v: &'a BVec<T>) -> Self {
-        Self { index: 0, v }
+    pub(crate) fn new(v: &'a BVec<T>) -> Self {
+        Self {
+            cursor: v.cursor_at(0)
+        }
     }
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
     fn next(&mut self) -> Option<Self::Item> {
-        self.v.get(self.index).map(|item| {
-            self.index += 1;
+        self.cursor.get().map(|item| {
+            self.cursor.move_(1);
             item
         })
     }

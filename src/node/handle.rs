@@ -9,6 +9,7 @@ use alloc::boxed::Box;
 use crate::{
     node::{InternalNode, NodeBase, NodePtr, RawNodeWithLen, BRANCH_FACTOR},
     utils::ArrayVecMut,
+    ownership,
 };
 
 impl<'a, T: 'a> LeafRef<'a, T> {
@@ -70,28 +71,6 @@ mod height {
     unsafe impl<H: Internal> Height for H {}
 }
 
-mod ownership {
-    use core::marker::PhantomData;
-
-    // TODO: should this be covariant?
-    pub struct Immut<'a>(PhantomData<&'a ()>);
-    pub struct Mut<'a>(PhantomData<&'a mut ()>);
-    pub struct Owned;
-
-    pub unsafe trait Mutable<T>: Ownership<T> {}
-    unsafe impl<'a, T: 'a> Mutable<T> for Mut<'a> {}
-    unsafe impl<T> Mutable<T> for Owned {}
-
-    pub unsafe trait Reference<T>: Ownership<T> {}
-    unsafe impl<'a, T: 'a> Reference<T> for Immut<'a> {}
-    unsafe impl<'a, T: 'a> Reference<T> for Mut<'a> {}
-
-    pub unsafe trait Ownership<T> {}
-    unsafe impl<'a, T: 'a> Ownership<T> for Immut<'a> {}
-    unsafe impl<'a, T: 'a> Ownership<T> for Mut<'a> {}
-    unsafe impl<T> Ownership<T> for Owned {}
-}
-
 pub struct Node<O, H, T>
 where
     H: height::Height,
@@ -133,10 +112,10 @@ where
     }
 }
 
-impl<O, H, T> Node<O, H, T>
+impl<'a, O, H, T: 'a> Node<O, H, T>
 where
     H: height::Height,
-    O: ownership::Reference<T>,
+    O: ownership::Reference<'a, T>,
 {
     pub fn into_parent_and_index2(mut self) -> Option<(Node<O, height::Positive, T>, usize)> {
         unsafe {
@@ -152,9 +131,9 @@ where
     }
 }
 
-impl<O, T> Node<O, height::Zero, T>
+impl<'a, O, T: 'a> Node<O, height::Zero, T>
 where
-    O: ownership::Reference<T>,
+    O: ownership::Reference<'a, T>,
 {
     pub unsafe fn into_parent_and_index3(mut self) -> Option<(Node<O, height::One, T>, usize)> {
         unsafe {
@@ -668,9 +647,10 @@ where
         }
     }
 
-    pub unsafe fn into_parent_and_index(mut self) -> Option<(Node<O, height::TwoOrMore, T>, usize)>
+    pub unsafe fn into_parent_and_index<'a>(mut self) -> Option<(Node<O, height::TwoOrMore, T>, usize)>
     where
-        O: ownership::Reference<T>,
+        T: 'a,
+        O: ownership::Reference<'a, T>,
     {
         unsafe {
             let parent = Node::new_parent_of_internal(self.node_mut().base.parent?);

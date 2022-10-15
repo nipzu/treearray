@@ -10,10 +10,11 @@ use core::fmt;
 mod cursor;
 pub mod iter;
 mod node;
+mod ownership;
 mod panics;
 mod utils;
 
-pub use cursor::CursorMut;
+pub use cursor::{Cursor, CursorMut};
 
 use iter::{Drain, Iter};
 use node::{
@@ -173,11 +174,11 @@ impl<T> BVec<T> {
     /// # Panics
     /// Panics if `index >= self.len()`.
     pub fn remove(&mut self, index: usize) -> T {
-        CursorMut::new_inbounds(self, index).remove()
+        self.cursor_at_mut(index).remove()
     }
 
     #[must_use]
-    pub const fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> Iter<T> {
         Iter::new(self)
     }
 
@@ -189,6 +190,11 @@ impl<T> BVec<T> {
     // pub fn cursor_at(&self, mut index: usize) -> Cursor<T> {
     //     todo!()
     // }
+
+    #[must_use]
+    pub fn cursor_at(&self, index: usize) -> Cursor<T> {
+        Cursor::new(self, index)
+    }
 
     #[must_use]
     pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T> {
