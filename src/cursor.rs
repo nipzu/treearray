@@ -137,12 +137,11 @@ impl<'a, T> CursorMut<'a, T> {
             panic!();
         }
 
-        let mut offset = offset as usize;
-
         if self.len() == 0 {
             return;
         }
 
+        let mut offset = offset as usize;
         let leaf_len = self.leaf_mut().unwrap().len();
 
         // fast path
