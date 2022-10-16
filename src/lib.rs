@@ -22,9 +22,9 @@ use node::{
     NodePtr,
 };
 
-// pub fn foo(b: &BVec<i32>, x: usize) -> Option<&i32> {
-//     b.get(x)
-// }
+pub fn foo(b: &BVec<i32>, x: usize) -> Option<&i32> {
+    b.get(x)
+}
 
 pub struct BVec<T> {
     root: Option<NodePtr<T>>,
@@ -41,7 +41,7 @@ impl<T> BVec<T> {
     #[inline]
     pub fn len(&self) -> usize {
         if size_of::<T>() == 0 {
-            return self.root.map_or(0, |p| p.as_ptr() as usize)
+            return self.root.map_or(0, |p| p.as_ptr() as usize);
         }
 
         self.root.map_or(0, |r| unsafe {

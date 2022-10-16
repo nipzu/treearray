@@ -55,7 +55,7 @@ impl<'a, T: 'a> InternalRef<'a, T> {
     }
 }
 
-mod height {
+pub mod height {
     pub struct Zero;
     pub struct One;
     pub struct Positive;
@@ -103,7 +103,13 @@ where
     pub fn node_ptr(&mut self) -> NodePtr<T> {
         self.node
     }
+}
 
+impl<O, H, T> Node<O, H, T>
+where
+    H: height::Height,
+    O: ownership::Mutable<T>,
+{
     fn reborrow(&mut self) -> Node<ownership::Mut, H, T> {
         Node {
             node: self.node,
@@ -442,7 +448,7 @@ where
         self.node.cast().as_ptr()
     }
 
-    pub fn len(&mut self) -> usize {
+    pub fn len(&self) -> usize {
         self.node().lengths[BRANCH_FACTOR - 1]
     }
 

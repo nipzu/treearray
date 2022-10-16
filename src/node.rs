@@ -72,7 +72,7 @@ impl<T> NodeBase<T> {
 impl<T> NodeBase<T> {
     const LEAF_CAP: usize = if size_of::<T>() <= LEAF_CAP_BYTES {
         if size_of::<T>() == 0 {
-            panic!()
+            1
         } else {
             LEAF_CAP_BYTES / size_of::<T>()
         }

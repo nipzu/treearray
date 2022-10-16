@@ -2,7 +2,9 @@ use core::mem::MaybeUninit;
 
 use crate::{
     node::{
-        handle::{Internal, InternalMut, Leaf, LeafMut, LeafRef, Node, SplitResult},
+        handle::{
+            height, Internal, InternalMut, InternalRef, Leaf, LeafMut, LeafRef, Node, SplitResult,
+        },
         InternalNode, NodeBase, NodePtr, RawNodeWithLen,
     },
     ownership, BVec,
@@ -36,37 +38,71 @@ where
     O: ownership::Reference<'a, T>,
 {
     pub(crate) fn new(tree: O::RefTy<BVec<T>>, index: usize) -> Self {
-        if index > O::as_ref(&tree).len() {
-            panic!();
-        }
+        // if index > O::as_ref(&tree).len() {
+        //     panic!();
+        // }
 
-        if O::as_ref(&tree).is_empty() {
+        // if O::as_ref(&tree).is_empty() {
+        //     return Self {
+        //         tree,
+        //         leaf_index: 0,
+        //         leaf: MaybeUninit::uninit(),
+        //     };
+        // }
+
+        // let is_past_the_end = index == O::as_ref(&tree).len();
+        // let mut cursor = Self::new_inbounds(tree, index - usize::from(is_past_the_end));
+        // if is_past_the_end {
+        //     cursor.leaf_index += 1;
+        // }
+        // cursor
+
+        let Some(root) = O::as_ref(&tree).root else {
             return Self {
                 tree,
                 leaf_index: 0,
                 leaf: MaybeUninit::uninit(),
             };
-        }
+        };
 
-        let is_past_the_end = index == O::as_ref(&tree).len();
-        let mut cursor = Self::new_inbounds(tree, index - usize::from(is_past_the_end));
-        if is_past_the_end {
-            cursor.leaf_index += 1;
+        match unsafe { root.as_ref() }.height() {
+            0 => {
+                let leaf = unsafe { Node::<O, height::Zero, T>::new(root) };
+                if index > leaf.len() {
+                    panic!()
+                }
+                Self {
+                    tree,
+                    leaf_index: index,
+                    leaf: MaybeUninit::new(root),
+                }
+            }
+            h => {
+                let root = unsafe { Node::<O, height::Positive, T>::new(root) };
+                if index >= root.len() {
+                    if index == root.len() {
+                        return unsafe { Self::new_last_unchecked(tree, root, h) };
+                    }
+                    panic!()
+                }
+
+                unsafe { Self::new_inbounds_unchecked(tree, index, root, h) }
+            }
         }
-        cursor
     }
 
-    pub(crate) fn new_inbounds(tree: O::RefTy<BVec<T>>, index: usize) -> Self {
-        if index >= O::as_ref(&tree).len() {
-            panic!();
-        }
-
-        let mut cur_node = O::as_ref(&tree).root.unwrap();
+    pub(crate) unsafe fn new_inbounds_unchecked(
+        tree: O::RefTy<BVec<T>>,
+        index: usize,
+        mut root: Node<O, height::Positive, T>,
+        height: u8,
+    ) -> Self {
+        let mut cur_node = root.node_ptr();
         let mut target_index = index;
 
-        // the height of `cur_node` is `tree.height - 1`
-        // decrement the height of `cur_node` `tree.height - 1` times
-        while unsafe { cur_node.as_ref().height() > 0 } {
+        // the height of `cur_node` is `height`
+        // decrement the height of `cur_node` `height` times
+        for _ in 0..height {
             let handle = unsafe { InternalMut::new(cur_node) };
             cur_node = unsafe { handle.into_child_containing_index(&mut target_index) };
         }
@@ -75,6 +111,27 @@ where
             tree,
             leaf_index: target_index,
             leaf: MaybeUninit::new(cur_node),
+        }
+    }
+
+    pub(crate) unsafe fn new_last_unchecked(
+        tree: O::RefTy<BVec<T>>,
+        mut root: Node<O, height::Positive, T>,
+        height: u8,
+    ) -> Self {
+        let mut cur_node = root.node_ptr();
+
+        for _ in 0..height {
+            let mut handle = unsafe { InternalRef::new(cur_node) };
+            let len_children = handle.len_children();
+            cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
+        }
+
+        let mut leaf = unsafe { LeafRef::<T>::new(cur_node) };
+        Self {
+            tree,
+            leaf_index: leaf.len(),
+            leaf: MaybeUninit::new(leaf.node_ptr()),
         }
     }
 
