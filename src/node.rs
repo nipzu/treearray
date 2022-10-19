@@ -34,7 +34,7 @@ pub type NodePtr<T> = NonNull<NodeBase<T>>;
 
 pub struct NodeBase<T> {
     pub parent: Option<NodePtr<T>>,
-    parent_index: MaybeUninit<u8>,
+    pub parent_index: MaybeUninit<u8>,
     height: u8,
     children_len: u16,
     _marker: PhantomData<T>,

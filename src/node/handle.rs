@@ -13,10 +13,6 @@ use crate::{
 };
 
 impl<'a, T: 'a> LeafRef<'a, T> {
-    pub fn value(&self, index: usize) -> Option<&'a T> {
-        (index < self.len()).then(|| unsafe { self.value_unchecked(index) })
-    }
-
     pub unsafe fn value_unchecked(&self, index: usize) -> &'a T {
         debug_assert!(self.len() <= NodeBase::<T>::LEAF_CAP);
         debug_assert!(index < self.len());
@@ -125,13 +121,10 @@ where
 {
     pub fn into_parent_and_index2(mut self) -> Option<(Node<O, height::Positive, T>, usize)> {
         unsafe {
-            let parent = Node::<O, height::Positive, T>::new((*self.node_ptr().as_ptr()).parent?);
+            let parent = Node::<O, height::Positive, T>::new(self.node_ptr().as_ref().parent?);
             Some((
                 parent,
-                (*self.node_ptr().as_ptr())
-                    .parent_index
-                    .assume_init()
-                    .into(),
+                self.node_ptr().as_ref().parent_index.assume_init().into(),
             ))
         }
     }
@@ -218,7 +211,7 @@ impl<'a, T: 'a> LeafMut<'a, T> {
         let mut new_leaf = unsafe { LeafMut::new(new_node) };
         self.values_mut().split(split_index, new_leaf.values_mut());
         self.values_mut().insert(index, value);
-        RawNodeWithLen(new_leaf.values_mut().len(), new_node)
+        RawNodeWithLen(new_leaf.len(), new_node)
     }
 
     fn split_and_insert_right(&mut self, index: usize, value: T) -> RawNodeWithLen<T> {
@@ -227,7 +220,7 @@ impl<'a, T: 'a> LeafMut<'a, T> {
         let mut new_leaf = unsafe { LeafMut::new(new_node) };
         self.values_mut().split(split_index, new_leaf.values_mut());
         new_leaf.values_mut().insert(index - self.len(), value);
-        RawNodeWithLen(new_leaf.values_mut().len(), new_node)
+        RawNodeWithLen(new_leaf.len(), new_node)
     }
 }
 
@@ -452,11 +445,11 @@ where
         self.node().lengths[BRANCH_FACTOR - 1]
     }
 
-    pub fn sum_lens_below(&self, mut index: usize) -> usize {
+    pub unsafe fn sum_lens_below(&self, mut index: usize) -> usize {
         let mut sum = 0;
-        assert!(index <= self.node().lengths.len());
+        // assert!(index <= self.node().lengths.len());
         while index != 0 {
-            sum += self.node().lengths[index - 1];
+            sum += unsafe { *self.node().lengths.get_unchecked(index - 1) };
             index &= index - 1;
         }
         sum
@@ -488,7 +481,7 @@ where
     }
     unsafe fn pop_back_child(&mut self) -> RawNodeWithLen<T> {
         let last_len = unsafe { self.pop_back_length() };
-        let last = self.children().pop_back();
+        let last = self.children().remove(self.len_children() - 1);
         RawNodeWithLen(last_len, last)
     }
     fn is_almost_underfull(&self) -> bool {

@@ -1,4 +1,4 @@
-//! Iterator `struct`s for `BTreeVec`.
+//! Iterator `struct`s for `BVec`.
 
 // TODO: impl FusedIterator
 
@@ -16,7 +16,7 @@ impl<'a, T> Iter<'a, T> {
     #[must_use]
     pub(crate) unsafe fn new(v: &'a BVec<T>, start: usize, end: usize) -> Self {
         Self {
-            cursor: v.cursor_at(start),
+            cursor: CursorInner::new(v, start),
             remaining_count: end - start,
         }
     }
@@ -24,11 +24,14 @@ impl<'a, T> Iter<'a, T> {
 
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
+    #[inline]
     fn next(&mut self) -> Option<Self::Item> {
         (self.remaining_count > 0).then(|| {
             let ret = unsafe { self.cursor.get_unchecked() };
-            self.cursor.move_(1);
             self.remaining_count -= 1;
+            if self.remaining_count != 0 {
+                self.cursor.move_next_inbounds_unchecked();
+            }
             ret
         })
     }

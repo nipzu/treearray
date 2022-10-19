@@ -11,7 +11,7 @@ pub struct ArrayVecMut<T> {
 
 impl<T> ArrayVecMut<T> {
     pub unsafe fn new(array: *mut T, len: *mut u16, cap: u16) -> Self {
-        debug_assert!(unsafe { usize::from(*len) <= usize::from(cap) });
+        debug_assert!(unsafe { *len <= cap });
         Self {
             array: array.cast(),
             len,
@@ -19,12 +19,12 @@ impl<T> ArrayVecMut<T> {
         }
     }
 
-    pub fn len(&self) -> usize {
+    fn len(&self) -> usize {
         unsafe { usize::from(*self.len) }
     }
 
     pub fn insert(&mut self, index: usize, value: T) {
-        let len = unsafe { *self.len }.into();
+        let len = self.len();
         assert!(len < usize::from(self.cap));
         assert!(index <= len);
         unsafe {
@@ -36,7 +36,7 @@ impl<T> ArrayVecMut<T> {
     }
 
     pub fn remove(&mut self, index: usize) -> T {
-        let len = unsafe { *self.len }.into();
+        let len = self.len();
         assert_ne!(len, 0);
         assert!(index < len);
         unsafe {
@@ -48,10 +48,6 @@ impl<T> ArrayVecMut<T> {
         }
     }
 
-    pub fn pop_back(&mut self) -> T {
-        self.remove(self.len() - 1)
-    }
-
     pub fn split(&mut self, index: usize, other: Self) {
         let len = self.len();
         assert!(index <= len);
@@ -59,8 +55,8 @@ impl<T> ArrayVecMut<T> {
         tail_len -= index;
         let src = unsafe { self.array.add(index) };
         let dst = other.array;
-        unsafe { ptr::copy_nonoverlapping(src, dst, tail_len) };
         unsafe {
+            ptr::copy_nonoverlapping(src, dst, tail_len);
             *self.len = index as u16;
             *other.len = tail_len as u16;
         }
@@ -70,8 +66,8 @@ impl<T> ArrayVecMut<T> {
         assert!(self.len() + other.len() <= usize::from(self.cap));
         let src = other.array;
         let dst = unsafe { self.array.add((*self.len).into()) };
-        unsafe { ptr::copy_nonoverlapping(src, dst, (*other.len).into()) };
         unsafe {
+            ptr::copy_nonoverlapping(src, dst, (*other.len).into());
             *self.len += *other.len;
             *other.len = 0;
         }

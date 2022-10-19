@@ -1,4 +1,4 @@
-use core::mem::MaybeUninit;
+use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
     node::{
@@ -11,13 +11,14 @@ use crate::{
 };
 
 // TODO: auto traits: Send, Sync, Unpin, UnwindSafe?
-pub struct CursorInner<'a, O, T>
+pub struct CursorInner<'a, O, T: 'a>
 where
     O: ownership::Reference<'a, T>,
 {
-    tree: O::RefTy<BVec<T>>,
+    tree: NonNull<BVec<T>>,
     leaf: MaybeUninit<NodePtr<T>>,
     leaf_index: usize,
+    _marker: PhantomData<(&'a (), O)>,
 }
 
 impl<'a, T> Clone for CursorInner<'a, ownership::Immut<'a>, T> {
@@ -26,18 +27,105 @@ impl<'a, T> Clone for CursorInner<'a, ownership::Immut<'a>, T> {
             leaf: self.leaf,
             leaf_index: self.leaf_index,
             tree: self.tree,
+            _marker: PhantomData,
         }
     }
 }
 
-pub type CursorMut<'a, T> = CursorInner<'a, ownership::Mut<'a>, T>;
-pub type Cursor<'a, T> = CursorInner<'a, ownership::Immut<'a>, T>;
+pub struct Cursor<'a, T> {
+    inner: CursorInner<'a, ownership::Immut<'a>, T>,
+    index: usize,
+}
+
+impl<'a, T> Cursor<'a, T> {
+    pub(crate) fn new(tree: &'a BVec<T>, index: usize) -> Self {
+        let inner = CursorInner::new(tree, index);
+        Self { inner, index }
+    }
+
+    #[must_use]
+    pub fn get(&self) -> Option<&'a T> {
+        (self.index < self.inner.len()).then(|| unsafe { self.get_unchecked() })
+    }
+
+    // TODO: should this be pub
+    pub(crate) unsafe fn get_unchecked(&self) -> &'a T {
+        unsafe { self.inner.get_unchecked() }
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    #[must_use]
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn move_(&mut self, offset: isize) {
+        // TODO: check bounds
+        self.inner.move_(offset);
+        self.index = self.index.wrapping_add(offset as usize);
+    }
+}
+
+pub struct CursorMut<'a, T> {
+    inner: CursorInner<'a, ownership::Mut<'a>, T>,
+    index: usize,
+    _invariant: PhantomData<&'a mut T>,
+}
+
+impl<'a, T> CursorMut<'a, T> {
+    pub(crate) fn new(tree: &'a mut BVec<T>, index: usize) -> Self {
+        let inner = CursorInner::new(tree, index);
+        Self {
+            inner,
+            index,
+            _invariant: PhantomData,
+        }
+    }
+
+    #[must_use]
+    pub fn get(&self) -> Option<&T> {
+        (self.index < self.len()).then(|| unsafe { self.inner.get_unchecked() })
+    }
+
+    #[must_use]
+    pub fn get_mut(&mut self) -> Option<&mut T> {
+        (self.index < self.len()).then(|| unsafe { self.inner.get_unchecked_mut() })
+    }
+
+    pub fn remove(&mut self) -> T {
+        self.inner.remove()
+    }
+
+    pub fn insert(&mut self, value: T) {
+        self.inner.insert(value)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    #[must_use]
+    pub fn index(&self) -> usize {
+        self.index
+    }
+
+    pub fn move_(&mut self, offset: isize) {
+        // TODO: check bounds
+        self.inner.move_(offset);
+        self.index = self.index.wrapping_add(offset as usize);
+    }
+}
 
 impl<'a, O, T> CursorInner<'a, O, T>
 where
     O: ownership::Reference<'a, T>,
 {
-    pub(crate) fn new(tree: O::RefTy<BVec<T>>, index: usize) -> Self {
+    pub(crate) fn new(tree: O::RefTy<'a, BVec<T>>, index: usize) -> Self {
         // if index > O::as_ref(&tree).len() {
         //     panic!();
         // }
@@ -57,47 +145,38 @@ where
         // }
         // cursor
 
-        let Some(root) = O::as_ref(&tree).root else {
-            return Self {
-                tree,
-                leaf_index: 0,
-                leaf: MaybeUninit::uninit(),
-            };
+        let Some(root) = O::as_ref(&tree).root() else {
+            if index == 0 {
+                return Self {
+                    tree: tree.into(),
+                    leaf_index: 0,
+                    leaf: MaybeUninit::uninit(),
+                    _marker: PhantomData,
+                };
+            }
+            panic!()
         };
 
-        match unsafe { root.as_ref() }.height() {
-            0 => {
-                let leaf = unsafe { Node::<O, height::Zero, T>::new(root) };
-                if index > leaf.len() {
-                    panic!()
-                }
-                Self {
-                    tree,
-                    leaf_index: index,
-                    leaf: MaybeUninit::new(root),
-                }
-            }
-            h => {
-                let root = unsafe { Node::<O, height::Positive, T>::new(root) };
-                if index >= root.len() {
-                    if index == root.len() {
-                        return unsafe { Self::new_last_unchecked(tree, root, h) };
-                    }
-                    panic!()
-                }
+        let len = O::as_ref(&tree).len();
 
-                unsafe { Self::new_inbounds_unchecked(tree, index, root, h) }
-            }
+        if index > len {
+            panic!()
+        } else if index == len {
+            let mut this = unsafe { Self::new_last_unchecked(tree) };
+            this.leaf_index += 1;
+            this
+        } else {
+            unsafe { Self::new_inbounds_unchecked(tree, index, root, root.as_ref().height()) }
         }
     }
 
     pub(crate) unsafe fn new_inbounds_unchecked(
-        tree: O::RefTy<BVec<T>>,
+        tree: O::RefTy<'a, BVec<T>>,
         index: usize,
-        mut root: Node<O, height::Positive, T>,
+        root: NodePtr<T>,
         height: u8,
     ) -> Self {
-        let mut cur_node = root.node_ptr();
+        let mut cur_node = root;
         let mut target_index = index;
 
         // the height of `cur_node` is `height`
@@ -108,30 +187,53 @@ where
         }
 
         Self {
-            tree,
+            tree: tree.into(),
             leaf_index: target_index,
             leaf: MaybeUninit::new(cur_node),
+            _marker: PhantomData,
         }
     }
 
-    pub(crate) unsafe fn new_last_unchecked(
-        tree: O::RefTy<BVec<T>>,
-        mut root: Node<O, height::Positive, T>,
-        height: u8,
-    ) -> Self {
-        let mut cur_node = root.node_ptr();
+    pub(crate) unsafe fn new_last_unchecked(tree: O::RefTy<'a, BVec<T>>) -> Self {
+        debug_assert!(O::as_ref(&tree).is_not_empty());
 
+        let mut cur_node = unsafe { O::as_ref(&tree).root().unwrap_unchecked() };
+        let height = unsafe { cur_node.as_ref().height() };
         for _ in 0..height {
             let mut handle = unsafe { InternalRef::new(cur_node) };
             let len_children = handle.len_children();
-            cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
+            cur_node = unsafe {
+                (*handle.internal_ptr())
+                    .children
+                    .get_unchecked(len_children - 1)
+                    .assume_init()
+            };
         }
 
-        let mut leaf = unsafe { LeafRef::<T>::new(cur_node) };
+        let leaf_index = unsafe { LeafRef::<T>::new(cur_node).len() - 1 };
         Self {
-            tree,
-            leaf_index: leaf.len(),
-            leaf: MaybeUninit::new(leaf.node_ptr()),
+            tree: tree.into(),
+            leaf_index,
+            leaf: MaybeUninit::new(cur_node),
+            _marker: PhantomData,
+        }
+    }
+
+    pub(crate) unsafe fn new_first_unchecked(tree: O::RefTy<'a, BVec<T>>) -> Self {
+        debug_assert!(O::as_ref(&tree).is_not_empty());
+
+        let mut cur_node = unsafe { O::as_ref(&tree).root().unwrap_unchecked() };
+        let height = unsafe { cur_node.as_ref().height() };
+        for _ in 0..height {
+            let mut handle = unsafe { InternalRef::new(cur_node) };
+            cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
+        }
+
+        Self {
+            tree: tree.into(),
+            leaf: MaybeUninit::new(cur_node),
+            leaf_index: 0,
+            _marker: PhantomData,
         }
     }
 
@@ -145,27 +247,30 @@ where
         //     panic!();
         // }
 
-        if O::as_ref(&self.tree).is_empty() {
-            return;
+        if self.tree().is_empty() {
+            if offset == 0 {
+                return;
+            }
+            panic!();
         }
 
-        let mut offset = offset as usize;
-        let leaf_len = self.leaf().unwrap().len();
+        let mut offset = self.leaf_index.wrapping_add(offset as usize);
+        let leaf_len = unsafe { self.leaf().unwrap_unchecked().len() };
 
         // fast path
         // TODO: why no over/underflow problems?
-        if self.leaf_index.wrapping_add(offset) < leaf_len {
-            self.leaf_index = self.leaf_index.wrapping_add(offset);
+        if offset < leaf_len {
+            self.leaf_index = offset;
             return;
         }
 
-        let mut new_parent = self.leaf().unwrap().into_parent_and_index2();
-        offset = offset.wrapping_add(self.leaf_index);
+        let mut new_parent = unsafe { self.leaf().unwrap_unchecked().into_parent_and_index2() };
         while let Some((mut parent, index)) = new_parent {
-            offset = offset.wrapping_add(parent.sum_lens_below(index));
+            offset = unsafe { offset.wrapping_add(parent.sum_lens_below(index)) };
             if offset < parent.len() {
                 let mut cur_node = parent.node_ptr();
-                while unsafe { cur_node.as_ref().height() > 0 } {
+                let height = unsafe { cur_node.as_ref().height() };
+                for _ in 0..height {
                     let handle = unsafe { InternalMut::new(cur_node) };
                     cur_node = unsafe { handle.into_child_containing_index(&mut offset) };
                 }
@@ -177,7 +282,7 @@ where
         }
 
         if offset == self.len() {
-            let mut cur_node = O::as_ref(&self.tree).root.unwrap();
+            let mut cur_node = self.tree().root().unwrap();
             offset -= 1;
             while unsafe { cur_node.as_ref().height() > 0 } {
                 let handle = unsafe { InternalMut::new(cur_node) };
@@ -190,24 +295,110 @@ where
         }
     }
 
+    pub fn move_inbounds_unchecked(&mut self, offset: isize) {
+        let mut offset = self.leaf_index.wrapping_add(offset as usize);
+        let leaf_len = unsafe { LeafRef::new(self.leaf.assume_init()).len() };
+
+        // fast path
+        // TODO: why no over/underflow problems?
+        if offset < leaf_len {
+            self.leaf_index = offset;
+            return;
+        }
+
+        let mut index = unsafe {
+            self.leaf
+                .assume_init()
+                .as_ref()
+                .parent_index
+                .assume_init()
+                .into()
+        };
+        let mut parent = unsafe {
+            InternalRef::<T>::new(self.leaf.assume_init().as_ref().parent.unwrap_unchecked())
+        };
+        loop {
+            offset = unsafe { offset.wrapping_add(parent.sum_lens_below(index)) };
+            if offset < parent.len() {
+                let mut cur_node = parent.node_ptr();
+                let height = unsafe { cur_node.as_ref().height() };
+                for _ in 0..height {
+                    let handle = unsafe { InternalMut::new(cur_node) };
+                    cur_node = unsafe { handle.into_child_containing_index(&mut offset) };
+                }
+                self.leaf.write(cur_node);
+                self.leaf_index = offset;
+                return;
+            }
+            index = unsafe { parent.node_ptr().as_ref().parent_index.assume_init().into() };
+            parent = unsafe {
+                Node::<_, height::Positive, T>::new(
+                    parent.node_ptr().as_ref().parent.unwrap_unchecked(),
+                )
+            };
+            // (parent, index) = unsafe { parent.into_parent_and_index2().unwrap_unchecked() };
+        }
+    }
+
+    pub fn move_next_inbounds_unchecked(&mut self) {
+        let leaf_len = unsafe { LeafRef::new(self.leaf.assume_init()).len() };
+
+        // fast path
+        // TODO: why no over/underflow problems?
+        self.leaf_index += 1;
+        if self.leaf_index < leaf_len {
+            return;
+        }
+
+        let mut index: usize = unsafe {
+            self.leaf
+                .assume_init()
+                .as_ref()
+                .parent_index
+                .assume_init()
+                .into()
+        };
+        let mut parent = unsafe {
+            InternalMut::<T>::new(self.leaf.assume_init().as_ref().parent.unwrap_unchecked())
+        };
+        loop {
+            if index + 1 < parent.len_children() {
+                let mut cur_node = unsafe { *parent.children()[..].get_unchecked(index + 1) };
+                let height = unsafe { cur_node.as_ref().height() };
+                for _ in 0..height {
+                    let mut handle = unsafe { InternalMut::new(cur_node) };
+                    cur_node = unsafe { *handle.children()[..].get_unchecked(0) };
+                }
+                self.leaf.write(cur_node);
+                self.leaf_index = 0;
+                return;
+            }
+            index = unsafe { parent.node_ptr().as_ref().parent_index.assume_init().into() };
+            parent = unsafe {
+                Node::<_, height::Positive, T>::new(
+                    parent.node_ptr().as_ref().parent.unwrap_unchecked(),
+                )
+            };
+            // (parent, index) = unsafe { parent.into_parent_and_index2().unwrap_unchecked() };
+        }
+    }
+
     fn leaf(&self) -> Option<LeafRef<T>> {
-        (!O::as_ref(&self.tree).is_empty())
+        self.tree()
+            .is_not_empty()
             .then(|| unsafe { LeafRef::new(self.leaf.assume_init()) })
     }
 
+    fn tree(&self) -> &BVec<T> {
+        unsafe { self.tree.as_ref() }
+    }
+
     pub(crate) fn len(&self) -> usize {
-        O::as_ref(&self.tree).len()
+        self.tree().len()
     }
 }
 
 impl<'a, T> CursorInner<'a, ownership::Immut<'a>, T> {
-    #[must_use]
-    pub fn get(&self) -> Option<&'a T> {
-        (!self.tree.is_empty())
-            .then(|| unsafe { LeafRef::new(self.leaf.assume_init()) }.value(self.leaf_index))
-            .flatten()
-    }
-
     #[must_use]
     pub unsafe fn get_unchecked(&self) -> &'a T {
         unsafe { LeafRef::new(self.leaf.assume_init()).value_unchecked(self.leaf_index) }
@@ -221,16 +412,28 @@ impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
     where
         T: 'b,
     {
-        (!self.tree.is_empty()).then(|| unsafe { LeafMut::new(self.leaf.assume_init()) })
+        self.tree()
+            .is_not_empty()
+            .then(|| unsafe { LeafMut::new(self.leaf.assume_init()) })
     }
 
-    fn root_mut(&mut self) -> &mut Option<NodePtr<T>> {
-        &mut self.tree.root
+    fn root_mut(&mut self) -> &mut MaybeUninit<NodePtr<T>> {
+        unsafe { &mut self.tree.as_mut().root }
     }
 
     #[must_use]
-    pub fn get(&self) -> Option<&T> {
-        self.leaf().and_then(|leaf| leaf.value(self.leaf_index))
+    pub unsafe fn get_unchecked(&self) -> &T {
+        unsafe { LeafRef::new(self.leaf.assume_init()).value_unchecked(self.leaf_index) }
+    }
+
+    #[must_use]
+    pub unsafe fn get_unchecked_mut(&mut self) -> &mut T {
+        unsafe { LeafMut::new(self.leaf.assume_init()).into_value_unchecked_mut(self.leaf_index) }
+    }
+
+    #[must_use]
+    pub unsafe fn into_unchecked_mut(self) -> &'a mut T {
+        unsafe { LeafMut::new(self.leaf.assume_init()).into_value_unchecked_mut(self.leaf_index) }
     }
 
     unsafe fn add_path_lengths_wrapping(&mut self, amount: usize) {
@@ -241,30 +444,35 @@ impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
                 parent.add_length_wrapping(index, amount);
                 new_parent = parent.into_parent_and_index2();
             }
+
+            let tree = self.tree.as_mut();
+            tree.len = tree.len.wrapping_add(amount);
         }
     }
 
     unsafe fn insert_to_empty(&mut self, value: T) {
         let new_root = NodeBase::new_leaf();
         unsafe { LeafMut::new(new_root).values_mut().insert(0, value) };
-        *self.root_mut() = Some(new_root);
+        self.root_mut().write(new_root);
         self.leaf.write(new_root);
     }
 
     unsafe fn split_root(&mut self, new_node: RawNodeWithLen<T>) {
-        let old_root = self.root_mut().unwrap();
-        let old_root_len = self.tree.len();
-        *self.root_mut() = Some(InternalNode::from_child_array([
+        let old_root = self.tree().root().unwrap();
+        let old_root_len = self.tree().len() - new_node.0;
+        self.root_mut().write(InternalNode::from_child_array([
             RawNodeWithLen(old_root_len, old_root),
             new_node,
         ]));
     }
 
     pub fn insert(&mut self, value: T) {
+        let maybe_leaf = self.leaf_mut();
+
         unsafe { self.add_path_lengths_wrapping(1) };
 
         let leaf_index = self.leaf_index;
-        let Some(mut leaf) = self.leaf_mut() else {
+        let Some(mut leaf) = maybe_leaf else {
             unsafe { self.insert_to_empty(value) };
             return;
         };
@@ -299,13 +507,13 @@ impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
         // if self.index >= self.tree.len() {
         //     panic!("index out of bounds");
         // }
+        let mut leaf = self
+            .leaf_mut()
+            .expect("attempting to remove from empty tree");
 
         unsafe { self.add_path_lengths_wrapping(1_usize.wrapping_neg()) };
 
         let mut leaf_index = self.leaf_index;
-        let mut leaf = self
-            .leaf_mut()
-            .expect("attempting to remove from empty tree");
         assert!(leaf_index < leaf.len(), "out of bounds");
         let ret = leaf.remove_child(leaf_index);
 
@@ -315,9 +523,8 @@ impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
         let Some((mut parent, mut self_index)) = (unsafe { leaf.into_parent_and_index3() }) else {
             // height is 1
             if leaf_is_empty {
-                unsafe { Leaf::new(self.root_mut().take().unwrap()).free() };
+                unsafe { Leaf::new(self.tree().root.assume_init()).free() };
             }
-            // debug_assert_eq!(self.leaf_index, self.index);
             return ret;
         };
 
@@ -351,14 +558,14 @@ impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
 
         // move the root one level lower if needed
         unsafe {
-            let mut old_root = InternalMut::new(self.root_mut().unwrap());
+            let mut old_root = InternalMut::new(self.tree().root().unwrap());
 
             if old_root.is_singleton() {
-                let mut new_root = old_root.children().pop_back();
+                let mut new_root = old_root.children().remove(0);
                 new_root.as_mut().parent = None;
                 // `old_root` points to the `root` field of `self` so it must be freed before assigning a new root
-                Internal::new(self.root_mut().unwrap()).free();
-                *self.root_mut() = Some(new_root);
+                Internal::new(self.tree().root().unwrap()).free();
+                self.root_mut().write(new_root);
             }
         }
 

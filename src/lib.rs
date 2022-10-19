@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use core::{fmt, mem::size_of};
+use core::{fmt, mem::MaybeUninit};
 
 mod cursor;
 pub mod iter;
@@ -14,6 +14,7 @@ mod ownership;
 mod panics;
 mod utils;
 
+use cursor::CursorInner;
 pub use cursor::{Cursor, CursorMut};
 
 use iter::{Drain, Iter};
@@ -22,111 +23,89 @@ use node::{
     NodePtr,
 };
 
-pub fn foo(b: &BVec<i32>, x: usize) -> Option<&i32> {
-    b.get(x)
+pub fn foo<'a>(b: &'a BVec<i32>, i: usize) -> Option<&'a i32> {
+    b.get(i)
 }
 
 pub struct BVec<T> {
-    root: Option<NodePtr<T>>,
+    root: MaybeUninit<NodePtr<T>>,
+    len: usize,
 }
 
 impl<T> BVec<T> {
     #[must_use]
     #[inline]
     pub const fn new() -> Self {
-        Self { root: None }
+        Self {
+            root: MaybeUninit::uninit(),
+            len: 0,
+        }
     }
 
     #[must_use]
     #[inline]
     pub fn len(&self) -> usize {
-        if size_of::<T>() == 0 {
-            return self.root.map_or(0, |p| p.as_ptr() as usize);
-        }
-
-        self.root.map_or(0, |r| unsafe {
-            if r.as_ref().height() == 0 {
-                LeafRef::new(r).len()
-            } else {
-                InternalRef::new(r).len()
-            }
-        })
-    }
-
-    fn height(&self) -> u8 {
-        self.root.map_or(0, |r| unsafe { r.as_ref().height() })
+        self.len
     }
 
     #[must_use]
     #[inline]
     pub const fn is_empty(&self) -> bool {
-        self.root.is_none()
+        self.len == 0
+    }
+
+    // TODO: should this be pub
+    const fn is_not_empty(&self) -> bool {
+        self.len != 0
+    }
+
+    fn root(&self) -> Option<NodePtr<T>> {
+        self.is_not_empty()
+            .then(|| unsafe { self.root.assume_init() })
     }
 
     #[must_use]
-    pub fn get(&self, mut index: usize) -> Option<&T> {
-        let mut cur_node = match self.root {
-            Some(root) if index < self.len() => root,
-            _ => return None,
-        };
-
-        for _ in 0..self.height() {
-            let handle = unsafe { InternalRef::new(cur_node) };
-            cur_node = unsafe { handle.child_containing_index(&mut index) };
-        }
-
-        // SAFETY: the height of `cur_node` is 0
-        let leaf = unsafe { LeafRef::new(cur_node) };
-        // SAFETY: from `get_child_containing_index` we know that index < leaf.len()
-        unsafe { Some(leaf.value_unchecked(index)) }
+    pub fn get(&self, index: usize) -> Option<&T> {
+        (index < self.len()).then(|| unsafe {
+            CursorInner::<ownership::Immut, T>::new_inbounds_unchecked(
+                self,
+                index,
+                self.root.assume_init(),
+                self.root.assume_init().as_ref().height(),
+            )
+            .get_unchecked()
+        })
     }
 
     #[must_use]
-    pub fn get_mut(&mut self, mut index: usize) -> Option<&mut T> {
-        let mut cur_node = match self.root {
-            Some(root) if index < self.len() => root,
-            _ => return None,
-        };
-
-        // decrement the height of `cur_node` `self.height() - 1` times
-        while unsafe { cur_node.as_ref().height() > 0 } {
-            let handle = unsafe { InternalMut::new(cur_node) };
-            cur_node = unsafe { handle.into_child_containing_index(&mut index) };
-        }
-
-        // SAFETY: the height of `cur_node` is 0
-        let leaf = unsafe { LeafMut::new(cur_node) };
-        // SAFETY: from `into_child_containing_index` we know that index < leaf.len()
-        unsafe { Some(leaf.into_value_unchecked_mut(index)) }
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        (index < self.len()).then(|| unsafe {
+            CursorInner::<ownership::Mut, T>::new_inbounds_unchecked(
+                self,
+                index,
+                self.root.assume_init(),
+                self.root.assume_init().as_ref().height(),
+            )
+            .into_unchecked_mut()
+        })
     }
 
     #[must_use]
     pub fn first(&self) -> Option<&T> {
-        let mut cur_node = self.root?;
-
-        while unsafe { cur_node.as_ref().height() > 0 } {
-            let mut handle = unsafe { InternalRef::new(cur_node) };
-            cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
-        }
-
-        unsafe { Some(LeafRef::<T>::new(cur_node).value_unchecked(0)) }
+        self.is_not_empty().then(|| unsafe {
+            CursorInner::<ownership::Immut, T>::new_first_unchecked(self).get_unchecked()
+        })
     }
 
     #[must_use]
     pub fn first_mut(&mut self) -> Option<&mut T> {
-        let mut cur_node = self.root?;
-
-        while unsafe { cur_node.as_ref().height() > 0 } {
-            let mut handle = unsafe { InternalMut::new(cur_node) };
-            cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };
-        }
-
-        unsafe { Some(LeafMut::<T>::new(cur_node).into_value_unchecked_mut(0)) }
+        self.is_not_empty()
+            .then(|| unsafe { CursorInner::new_first_unchecked(self).into_unchecked_mut() })
     }
 
     #[must_use]
     pub fn last(&self) -> Option<&T> {
-        let mut cur_node = self.root?;
+        let mut cur_node = self.root()?;
 
         while unsafe { cur_node.as_ref().height() > 0 } {
             let mut handle = unsafe { InternalRef::new(cur_node) };
@@ -141,7 +120,7 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn last_mut(&mut self) -> Option<&mut T> {
-        let mut cur_node = self.root?;
+        let mut cur_node = self.root()?;
 
         while unsafe { cur_node.as_ref().height() > 0 } {
             let mut handle = unsafe { InternalMut::new(cur_node) };
@@ -223,6 +202,27 @@ impl<T: fmt::Debug> fmt::Debug for BVec<T> {
 mod tests {
     use super::*;
 
+    fn _assert_cursor_mut_lifetime_covariant<'a, 'b>(x: CursorMut<'a, i32>) -> CursorMut<'b, i32>
+    where
+        'a: 'b,
+    {
+        x
+    }
+
+    fn _assert_cursor_lifetime_covariant<'a, 'b>(x: Cursor<'a, i32>) -> Cursor<'b, i32>
+    where
+        'a: 'b,
+    {
+        x
+    }
+
+    fn _assert_cursor_value_covariant<'a, 'b, 'c>(x: Cursor<'a, &'b str>) -> Cursor<'a, &'c str>
+    where
+        'b: 'c,
+    {
+        x
+    }
+
     #[test]
     fn test_new() {
         const _: BVec<i32> = BVec::new();
@@ -239,7 +239,10 @@ mod tests {
     fn test_bvec_size() {
         use core::mem::size_of;
 
-        assert_eq!(size_of::<BVec<i32>>(), size_of::<*mut ()>())
+        assert_eq!(
+            size_of::<BVec<i32>>(),
+            size_of::<*mut ()>() + size_of::<usize>()
+        )
     }
 
     #[test]
@@ -529,12 +532,13 @@ mod tests {
 
     #[test]
     fn test_bvec_iter() {
+        let n = 1000;
         let mut b = BVec::new();
-        for x in 0..1000 {
+        for x in 0..n {
             b.push_back(x);
         }
 
-        assert!(b.iter().copied().eq(0..1000));
+        assert!(b.iter().copied().eq(0..n));
     }
 
     #[test]
