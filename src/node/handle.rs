@@ -34,23 +34,6 @@ impl<'a, T: 'a> LeafRef<'a, T> {
     }
 }
 
-impl<'a, T: 'a> InternalRef<'a, T> {
-    pub unsafe fn child_containing_index(&self, index: &mut usize) -> NodePtr<T> {
-        let mut i = 0;
-        for shift in 1..=BRANCH_FACTOR.trailing_zeros() {
-            let offset = BRANCH_FACTOR >> shift;
-            let v = unsafe { self.node.cast::<InternalNode<T>>().as_mut().lengths[i + offset - 1] };
-            if v <= *index {
-                *index -= v;
-                i += offset;
-            }
-        }
-
-        debug_assert!(i < self.len_children());
-        unsafe { self.node.cast::<InternalNode<T>>().as_mut().children[i].assume_init() }
-    }
-}
-
 pub mod height {
     pub struct Zero;
     pub struct One;

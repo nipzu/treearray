@@ -5,7 +5,7 @@
 
 extern crate alloc;
 
-use core::{fmt, mem::MaybeUninit};
+use core::{fmt, mem::MaybeUninit, ops::{RangeBounds, Index, IndexMut}, hash::Hash};
 
 mod cursor;
 pub mod iter;
@@ -18,13 +18,10 @@ use cursor::CursorInner;
 pub use cursor::{Cursor, CursorMut};
 
 use iter::{Drain, Iter};
-use node::{
-    handle::{InternalMut, InternalRef, LeafMut, LeafRef},
-    NodePtr,
-};
+use node::NodePtr;
 
-pub fn foo<'a>(b: &'a BVec<i32>, i: usize) -> Option<&'a i32> {
-    b.get(i)
+pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize, y: i32) {
+    b.insert(x, y)
 }
 
 pub struct BVec<T> {
@@ -66,28 +63,14 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&T> {
-        (index < self.len()).then(|| unsafe {
-            CursorInner::<ownership::Immut, T>::new_inbounds_unchecked(
-                self,
-                index,
-                self.root.assume_init(),
-                self.root.assume_init().as_ref().height(),
-            )
-            .get_unchecked()
-        })
+        CursorInner::<ownership::Immut, T>::try_new_inbounds(self, index)
+            .map(|c| unsafe { c.get_unchecked() })
     }
 
     #[must_use]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        (index < self.len()).then(|| unsafe {
-            CursorInner::<ownership::Mut, T>::new_inbounds_unchecked(
-                self,
-                index,
-                self.root.assume_init(),
-                self.root.assume_init().as_ref().height(),
-            )
-            .into_unchecked_mut()
-        })
+        CursorInner::<ownership::Mut, T>::try_new_inbounds(self, index)
+            .map(|c| unsafe { c.into_unchecked_mut() })
     }
 
     #[must_use]
@@ -105,32 +88,16 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn last(&self) -> Option<&T> {
-        let mut cur_node = self.root()?;
-
-        while unsafe { cur_node.as_ref().height() > 0 } {
-            let mut handle = unsafe { InternalRef::new(cur_node) };
-            let len_children = handle.len_children();
-            cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
-        }
-
-        let leaf = unsafe { LeafRef::<T>::new(cur_node) };
-        let len_values = leaf.len();
-        unsafe { Some(leaf.value_unchecked(len_values - 1)) }
+        self.is_not_empty().then(|| unsafe {
+            CursorInner::<ownership::Immut, T>::new_last_unchecked(self).get_unchecked()
+        })
     }
 
     #[must_use]
     pub fn last_mut(&mut self) -> Option<&mut T> {
-        let mut cur_node = self.root()?;
-
-        while unsafe { cur_node.as_ref().height() > 0 } {
-            let mut handle = unsafe { InternalMut::new(cur_node) };
-            let len_children = handle.len_children();
-            cur_node = unsafe { (*handle.internal_ptr()).children[len_children - 1].assume_init() };
-        }
-
-        let leaf = unsafe { LeafMut::<T>::new(cur_node) };
-        let len_values = leaf.len();
-        unsafe { Some(leaf.into_value_unchecked_mut(len_values - 1)) }
+        self.is_not_empty().then(|| unsafe {
+            CursorInner::<ownership::Mut, T>::new_last_unchecked(self).into_unchecked_mut()
+        })
     }
 
     #[inline]
@@ -145,7 +112,7 @@ impl<T> BVec<T> {
 
     #[inline]
     pub fn clear(&mut self) {
-        self.drain();
+        self.drain(..);
     }
 
     /// # Panics
@@ -165,8 +132,11 @@ impl<T> BVec<T> {
         unsafe { Iter::new(self, 0, self.len()) }
     }
 
-    pub fn drain(&mut self) -> Drain<T> {
-        Drain::new(self)
+    pub fn drain<R>(&mut self, range: R) -> Drain<T>
+    where
+        R: RangeBounds<usize>,
+    {
+        Drain::new(self, range)
     }
 
     #[must_use]
@@ -198,8 +168,44 @@ impl<T: fmt::Debug> fmt::Debug for BVec<T> {
     }
 }
 
+impl<T: Hash> Hash for BVec<T> {
+    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+        self.len().hash(state);
+        self.iter().for_each(|elem| elem.hash(state));
+    }
+}
+
+impl<T> Extend<T> for BVec<T> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        let mut cursor = CursorInner::new_past_the_end(self);
+        let mut iter = iter.into_iter();
+        while let Some(v) = iter.next() {
+            cursor.insert(v);
+            cursor.leaf_index += 1;
+        }
+    }
+}
+
+impl<T> Index<usize> for BVec<T> {
+    type Output = T;
+    fn index(&self, index: usize) -> &Self::Output {
+        self.get(index).unwrap_or_else(|| panic!())
+    }
+
+}
+
+impl<T> IndexMut<usize> for BVec<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.get_mut(index).unwrap_or_else(|| panic!())
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    extern crate std;
+
+    use core::hash::Hasher;
+
     use super::*;
 
     fn _assert_cursor_mut_lifetime_covariant<'a, 'b>(x: CursorMut<'a, i32>) -> CursorMut<'b, i32>
@@ -539,6 +545,38 @@ mod tests {
         }
 
         assert!(b.iter().copied().eq(0..n));
+    }
+
+    #[test]
+    fn test_bvec_extend() {
+        let n = 500;
+        let mut b = BVec::new();
+        for x in 0..n {
+            b.push_back(x);
+        }
+
+        b.extend(n..2*n);
+
+        assert!(b.iter().copied().eq(0..2*n));
+    }
+
+    #[test]
+    fn test_bvec_hash() {
+        let n = 1000;
+        let mut b = BVec::new();
+        b.extend(0..n);
+
+        let v = alloc::vec::Vec::from_iter(0..n);
+
+        let mut v_hasher = std::collections::hash_map::DefaultHasher::new();
+        v.hash(&mut v_hasher);
+        let v_hash = v_hasher.finish();
+
+        let mut b_hasher = std::collections::hash_map::DefaultHasher::new();
+        b.hash(&mut b_hasher);
+        let b_hash = b_hasher.finish();
+
+        assert_eq!(v_hash, b_hash);
     }
 
     #[test]

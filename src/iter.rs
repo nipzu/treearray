@@ -2,7 +2,7 @@
 
 // TODO: impl FusedIterator
 
-use core::iter::FusedIterator;
+use core::{iter::FusedIterator, ops::Bound, ops::RangeBounds};
 
 use crate::{cursor::CursorInner, ownership, BVec, CursorMut};
 
@@ -49,9 +49,8 @@ impl<'a, T> Iterator for Iter<'a, T> {
             self.remaining_count = 0;
             None
         } else {
-            self.cursor.move_(n as isize);
-            self.remaining_count -= n;
-            self.remaining_count -= 1;
+            unsafe { self.cursor.move_inbounds_unchecked(n as isize) };
+            self.remaining_count -= n + 1;
             unsafe { Some(self.cursor.get_unchecked()) }
         }
     }
@@ -64,12 +63,29 @@ impl<'a, T> FusedIterator for Iter<'a, T> {}
 
 pub struct Drain<'a, T> {
     cursor: CursorMut<'a, T>,
+    remaining_count: usize,
 }
 
 impl<'a, T> Drain<'a, T> {
-    pub(crate) fn new(t: &'a mut BVec<T>) -> Self {
+    pub(crate) fn new<R>(t: &'a mut BVec<T>, range: R) -> Self
+    where
+        R: RangeBounds<usize>,
+    {
+        let start = match range.start_bound() {
+            Bound::Unbounded => 0,
+            Bound::Included(s) => *s,
+            Bound::Excluded(s) => s + 1,
+        };
+        let end = match range.end_bound() {
+            Bound::Unbounded => t.len(),
+            Bound::Included(s) => s + 1,
+            Bound::Excluded(s) => *s,
+        };
+        assert!(end <= t.len());
+        // TODO: start out of bounds
         Self {
-            cursor: t.cursor_at_mut(0),
+            cursor: t.cursor_at_mut(start),
+            remaining_count: end - start,
         }
     }
 }
@@ -78,7 +94,10 @@ impl<'a, T> Iterator for Drain<'a, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
-        (self.cursor.len() > 0).then(|| self.cursor.remove())
+        (self.remaining_count > 0).then(|| {
+            self.remaining_count -= 1;
+            self.cursor.remove()
+        })
     }
 }
 
