@@ -5,7 +5,12 @@
 
 extern crate alloc;
 
-use core::{fmt, mem::MaybeUninit, ops::{RangeBounds, Index, IndexMut}, hash::Hash};
+use core::{
+    fmt,
+    hash::Hash,
+    mem::MaybeUninit,
+    ops::{Index, IndexMut, RangeBounds},
+};
 
 mod cursor;
 pub mod iter;
@@ -178,8 +183,7 @@ impl<T: Hash> Hash for BVec<T> {
 impl<T> Extend<T> for BVec<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         let mut cursor = CursorInner::new_past_the_end(self);
-        let mut iter = iter.into_iter();
-        while let Some(v) = iter.next() {
+        for v in iter {
             cursor.insert(v);
             cursor.leaf_index += 1;
         }
@@ -191,7 +195,6 @@ impl<T> Index<usize> for BVec<T> {
     fn index(&self, index: usize) -> &Self::Output {
         self.get(index).unwrap_or_else(|| panic!())
     }
-
 }
 
 impl<T> IndexMut<usize> for BVec<T> {
@@ -555,9 +558,9 @@ mod tests {
             b.push_back(x);
         }
 
-        b.extend(n..2*n);
+        b.extend(n..2 * n);
 
-        assert!(b.iter().copied().eq(0..2*n));
+        assert!(b.iter().copied().eq(0..2 * n));
     }
 
     #[test]

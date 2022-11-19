@@ -215,8 +215,8 @@ where
         if O::as_ref(&tree).is_empty() {
             return Self {
                 tree: tree.into(),
-                leaf_index:0,
-                leaf:MaybeUninit::uninit(),
+                leaf_index: 0,
+                leaf: MaybeUninit::uninit(),
                 _marker: PhantomData,
             };
         };
@@ -522,11 +522,11 @@ impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
         let mut leaf = self
             .leaf_mut()
             .expect("attempting to remove from empty tree");
+        let mut leaf_index = self.leaf_index;
+        assert!(leaf_index < leaf.len(), "out of bounds");
 
         unsafe { self.add_path_lengths_wrapping(1_usize.wrapping_neg()) };
 
-        let mut leaf_index = self.leaf_index;
-        assert!(leaf_index < leaf.len(), "out of bounds");
         let ret = leaf.remove_child(leaf_index);
 
         let leaf_underfull = leaf.is_underfull();
