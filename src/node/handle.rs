@@ -1,5 +1,6 @@
 use core::{
     marker::PhantomData,
+    mem,
     ops::RangeFrom,
     ptr::{self, addr_of_mut},
 };
@@ -11,6 +12,8 @@ use crate::{
     ownership,
     utils::ArrayVecMut,
 };
+
+use super::fenwick::FenwickTree;
 
 impl<'a, T: 'a> LeafRef<'a, T> {
     pub unsafe fn value_unchecked(&self, index: usize) -> &'a T {
@@ -425,17 +428,11 @@ where
     }
 
     pub fn len(&self) -> usize {
-        self.node().lengths[BRANCH_FACTOR - 1]
+        self.node().lengths.total_len()
     }
 
-    pub unsafe fn sum_lens_below(&self, mut index: usize) -> usize {
-        let mut sum = 0;
-        // assert!(index <= self.node().lengths.len());
-        while index != 0 {
-            sum += unsafe { *self.node().lengths.get_unchecked(index - 1) };
-            index &= index - 1;
-        }
-        sum
+    pub unsafe fn sum_lens_below(&self, index: usize) -> usize {
+        unsafe { self.node().lengths.prefix_sum(index) }
     }
 }
 
@@ -481,7 +478,7 @@ where
         unsafe { self.node.cast().as_mut() }
     }
 
-    fn lengths_mut(&mut self) -> &mut [usize; BRANCH_FACTOR] {
+    fn lengths_mut(&mut self) -> &mut FenwickTree {
         &mut self.internal_mut().lengths
     }
 
@@ -499,38 +496,19 @@ where
         }
     }
 
-    unsafe fn init(&mut self) {
-        for index in 0..self.lengths_mut().len() {
-            let j = index | (index + 1);
-            if j < self.lengths_mut().len() {
-                self.lengths_mut()[j] += self.lengths_mut()[index];
-            }
-        }
-    }
-
-    unsafe fn fini(&mut self) {
-        for index in (0..self.lengths_mut().len()).rev() {
-            let j = index | (index + 1);
-            if j < self.lengths_mut().len() {
-                self.lengths_mut()[j] -= self.lengths_mut()[index];
-            }
-        }
-    }
-
     unsafe fn append_lengths<'b>(&'b mut self, mut other: Node<ownership::Mut<'b>, H, T>) {
-        unsafe { self.fini() };
-        unsafe { other.fini() };
-        let len_children = self.len_children();
-        for i in 0..other.len_children() {
-            self.lengths_mut()[len_children + i] = other.lengths_mut()[i];
-        }
-        unsafe { self.init() };
+        let self_len_children = self.len_children();
+        let other_len_children = other.len_children();
+        let other_lens = other.lengths_mut().clone().into_array();
+        self.lengths_mut().with_flat_lens(|lens| {
+            lens[self_len_children..self_len_children + other_len_children]
+                .copy_from_slice(&other_lens[..other_len_children])
+        });
     }
 
     unsafe fn merge_length_from_next(&mut self, index: usize) {
-        unsafe {
-            self.fini();
-            let lens_ptr = self.lengths_mut().as_mut_ptr();
+        self.lengths_mut().with_flat_lens(|lens| unsafe {
+            let lens_ptr = lens.as_mut_ptr();
             let next_len = lens_ptr.add(index + 1).read();
             (*lens_ptr.add(index)) += next_len;
             ptr::copy(
@@ -538,81 +516,69 @@ where
                 lens_ptr.add(index + 1),
                 BRANCH_FACTOR - index - 2,
             );
-            self.lengths_mut()[BRANCH_FACTOR - 1] = 0;
-            self.init();
-        }
+            lens[BRANCH_FACTOR - 1] = 0;
+        });
     }
 
     unsafe fn insert_length(&mut self, index: usize, len: usize) {
-        unsafe { self.fini() };
-        for i in (index..self.len_children()).rev() {
-            self.lengths_mut()[i + 1] = self.lengths_mut()[i];
-        }
-        self.lengths_mut()[index] = len;
-
-        unsafe { self.init() };
+        let len_children = self.len_children();
+        self.lengths_mut().with_flat_lens(|lens| {
+            for i in (index..len_children).rev() {
+                lens[i + 1] = lens[i];
+            }
+            lens[index] = len;
+        });
     }
 
-    unsafe fn split_lengths<'b>(
-        &'b mut self,
-        index: usize,
-        mut other: Node<ownership::Mut<'b>, H, T>,
-    ) {
-        unsafe { self.fini() };
-        for i in index..self.len_children() {
-            other.lengths_mut()[i - index] = self.lengths_mut()[i];
-            self.lengths_mut()[i] = 0;
-        }
-        unsafe { other.init() };
-        unsafe { self.init() };
+    unsafe fn split_lengths<'b>(&'b mut self, index: usize) -> FenwickTree {
+        let len_children = self.len_children();
+        self.lengths_mut().with_flat_lens(|lens| {
+            let mut other_array = [0; BRANCH_FACTOR];
+            for i in index..len_children {
+                other_array[i - index] = lens[i];
+                lens[i] = 0;
+            }
+            FenwickTree::from_array(other_array)
+        })
     }
 
     unsafe fn pop_front_length(&mut self) -> usize {
-        unsafe {
-            self.fini();
-            let lens_ptr = self.lengths_mut().as_mut_ptr();
-            let first_len = lens_ptr.read();
-            for i in 1..self.len_children() {
-                self.lengths_mut()[i - 1] = self.lengths_mut()[i];
+        let len_children = self.len_children();
+        self.lengths_mut().with_flat_lens(|lens| {
+            let first_len = lens[0];
+            for i in 1..len_children {
+                lens[i - 1] = lens[i];
             }
-            let len_children = self.len_children();
-            self.lengths_mut()[len_children - 1] = 0;
-            self.init();
+            *lens.last_mut().unwrap() = 0;
             first_len
-        }
+        })
     }
 
     unsafe fn pop_back_length(&mut self) -> usize {
-        unsafe { self.fini() };
-        let len = self.len_children();
-        let ret = core::mem::take(&mut self.lengths_mut()[len - 1]);
-        unsafe { self.init() };
-        ret
+        let len_children = self.len_children();
+        self.lengths_mut()
+            .with_flat_lens(|lens| mem::take(&mut lens[len_children - 1]))
     }
 
     unsafe fn push_back_length(&mut self, len: usize) {
-        unsafe {
-            self.fini();
-            let children_len = self.len_children();
-            self.lengths_mut()[children_len] = len;
-            self.init();
-        }
+        let len_children = self.len_children();
+        self.lengths_mut().with_flat_lens(|lens| {
+            lens[len_children] = len;
+        });
     }
 
     unsafe fn push_front_length(&mut self, len: usize) {
-        unsafe { self.fini() };
-        for i in (0..self.len_children()).rev() {
-            self.lengths_mut()[i + 1] = self.lengths_mut()[i];
-        }
-        self.lengths_mut()[0] = len;
-        unsafe { self.init() };
+        let len_children = self.len_children();
+        self.lengths_mut().with_flat_lens(|lens| {
+            for i in (0..len_children).rev() {
+                lens[i + 1] = lens[i];
+            }
+            lens[0] = len;
+        })
     }
 
-    pub unsafe fn add_length_wrapping(&mut self, mut index: usize, amount: usize) {
-        while let Some(v) = self.lengths_mut().get_mut(index) {
-            *v = v.wrapping_add(amount);
-            index |= index + 1;
-        }
+    pub unsafe fn add_length_wrapping(&mut self, index: usize, amount: usize) {
+        self.lengths_mut().add_wrapping(index, amount);
     }
 
     fn node_mut(&mut self) -> &mut InternalNode<T> {
@@ -646,16 +612,7 @@ where
     }
 
     pub unsafe fn into_child_containing_index(mut self, index: &mut usize) -> NodePtr<T> {
-        let mut i = 0;
-        for shift in 1..=BRANCH_FACTOR.trailing_zeros() {
-            let offset = BRANCH_FACTOR >> shift;
-            let v = self.lengths_mut()[i + offset - 1];
-            if v <= *index {
-                *index -= v;
-                i += offset;
-            }
-        }
-
+        let i = self.node().lengths.child_containing_index(index);
         debug_assert!(i < self.len_children());
         unsafe { self.internal_mut().children[i].assume_init() }
     }
@@ -700,7 +657,7 @@ where
         let mut new_sibling = unsafe { Node::<ownership::Mut, H, T>::new(new_sibling_node) };
 
         unsafe {
-            self.split_lengths(split_index, new_sibling.reborrow());
+            *new_sibling.lengths_mut() = self.split_lengths(split_index);
             self.children().split(split_index, new_sibling.children());
             self.insert_fitting(index, node);
         };
@@ -721,7 +678,7 @@ where
         let mut new_sibling = unsafe { Node::<ownership::Mut, H, T>::new(new_sibling_node) };
 
         unsafe {
-            self.split_lengths(split_index, new_sibling.reborrow());
+            *new_sibling.lengths_mut() = self.split_lengths(split_index);
             self.children().split(split_index, new_sibling.children());
             new_sibling.insert_fitting(index - split_index, node);
         }

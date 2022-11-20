@@ -1,3 +1,5 @@
+mod fenwick;
+
 use core::{
     alloc::Layout,
     marker::PhantomData,
@@ -10,7 +12,7 @@ use alloc::{
     boxed::Box,
 };
 
-use self::handle::InternalMut;
+use self::{fenwick::FenwickTree, handle::InternalMut};
 
 // use crate::panics::panic_length_overflow;
 
@@ -43,7 +45,7 @@ pub struct NodeBase<T> {
 #[repr(C)]
 pub struct InternalNode<T> {
     base: NodeBase<T>,
-    lengths: [usize; BRANCH_FACTOR],
+    lengths: FenwickTree,
     pub children: [MaybeUninit<NodePtr<T>>; BRANCH_FACTOR],
 }
 
@@ -105,7 +107,7 @@ impl<T> InternalNode<T> {
     pub fn new(height: u8) -> NodePtr<T> {
         NonNull::from(Box::leak(Box::new(Self {
             base: NodeBase::new(height),
-            lengths: [0; BRANCH_FACTOR],
+            lengths: FenwickTree::new(),
             children: [Self::UNINIT_NODE; BRANCH_FACTOR],
         })))
         .cast()
