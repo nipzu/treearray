@@ -19,8 +19,8 @@ mod ownership;
 mod panics;
 mod utils;
 
-pub use cursor::{Cursor, CursorMut, InboundsCursor, InboundsCursorMut};
 use cursor::CursorInner;
+pub use cursor::{Cursor, CursorMut, InboundsCursor, InboundsCursorMut};
 
 use iter::{Drain, Iter};
 use node::NodePtr;

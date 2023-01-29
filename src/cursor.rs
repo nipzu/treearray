@@ -7,7 +7,9 @@ use crate::{
         },
         InternalNode, NodeBase, NodePtr, RawNodeWithLen,
     },
-    ownership, BVec, panics::panic_length_overflow,
+    ownership,
+    panics::panic_length_overflow,
+    BVec,
 };
 
 // TODO: auto traits: Send, Sync, Unpin, UnwindSafe?
@@ -45,7 +47,8 @@ impl<'a, T> Cursor<'a, T> {
 
     #[must_use]
     pub fn get(&self) -> Option<&'a T> {
-        self.is_inbounds().then(|| unsafe { self.inner.get_unchecked() })
+        self.is_inbounds()
+            .then(|| unsafe { self.inner.get_unchecked() })
     }
 
     #[must_use]
@@ -99,12 +102,14 @@ impl<'a, T> CursorMut<'a, T> {
 
     #[must_use]
     pub fn get(&self) -> Option<&T> {
-        self.is_inbounds().then(|| unsafe { self.inner.get_unchecked() })
+        self.is_inbounds()
+            .then(|| unsafe { self.inner.get_unchecked() })
     }
 
     #[must_use]
     pub fn get_mut(&mut self) -> Option<&mut T> {
-        self.is_inbounds().then(|| unsafe { self.inner.get_unchecked_mut() })
+        self.is_inbounds()
+            .then(|| unsafe { self.inner.get_unchecked_mut() })
     }
 
     #[must_use]
@@ -597,13 +602,13 @@ pub struct InboundsCursor<'a, T> {
 
 impl<'a, T> InboundsCursor<'a, T> {
     pub(crate) fn try_new(tree: &'a BVec<T>, index: usize) -> Option<Self> {
-        CursorInner::try_new_inbounds(tree, index).map(|inner| Self {inner})
+        CursorInner::try_new_inbounds(tree, index).map(|inner| Self { inner })
     }
 
     pub(crate) fn try_new_first(tree: &'a BVec<T>) -> Option<Self> {
-            Some(Self {
-                inner: CursorInner::try_new_inbounds_first(tree)?,
-            })
+        Some(Self {
+            inner: CursorInner::try_new_inbounds_first(tree)?,
+        })
     }
 
     pub(crate) fn try_new_last(tree: &'a BVec<T>) -> Option<Self> {
@@ -627,7 +632,7 @@ pub struct InboundsCursorMut<'a, T> {
 
 impl<'a, T> InboundsCursorMut<'a, T> {
     pub(crate) fn try_new(tree: &'a mut BVec<T>, index: usize) -> Option<Self> {
-        CursorInner::try_new_inbounds(tree, index).map(|inner| Self {inner})
+        CursorInner::try_new_inbounds(tree, index).map(|inner| Self { inner })
     }
 
     pub(crate) fn try_new_first(tree: &'a mut BVec<T>) -> Option<Self> {

@@ -1,5 +1,5 @@
-pub mod handle;
 mod fenwick;
+pub mod handle;
 
 use core::{
     alloc::Layout,
