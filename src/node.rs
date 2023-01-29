@@ -1,3 +1,4 @@
+pub mod handle;
 mod fenwick;
 
 use core::{
@@ -14,8 +15,6 @@ use alloc::{
 
 use self::{fenwick::FenwickTree, handle::InternalMut};
 
-// use crate::panics::panic_length_overflow;
-
 /// SAFETY: BRANCH_FACTOR must be less than u8::MAX.
 #[cfg(miri)]
 const BRANCH_FACTOR: usize = 4;
@@ -27,8 +26,6 @@ const BRANCH_FACTOR: usize = 32;
 const LEAF_CAP_BYTES: usize = 16;
 #[cfg(not(miri))]
 const LEAF_CAP_BYTES: usize = 256;
-
-pub mod handle;
 
 pub struct RawNodeWithLen<T>(pub usize, pub NodePtr<T>);
 
@@ -74,6 +71,7 @@ impl<T> NodeBase<T> {
 impl<T> NodeBase<T> {
     const LEAF_CAP: usize = if size_of::<T>() <= LEAF_CAP_BYTES {
         if size_of::<T>() == 0 {
+            // TODO: should this be 0?
             1
         } else {
             LEAF_CAP_BYTES / size_of::<T>()

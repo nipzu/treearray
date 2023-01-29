@@ -7,7 +7,7 @@ extern crate alloc;
 
 use core::{
     fmt,
-    hash::Hash,
+    hash::{Hash, Hasher},
     mem::MaybeUninit,
     ops::{Index, IndexMut, RangeBounds},
 };
@@ -19,15 +19,16 @@ mod ownership;
 mod panics;
 mod utils;
 
+pub use cursor::{Cursor, CursorMut, InboundsCursor, InboundsCursorMut};
 use cursor::CursorInner;
-pub use cursor::{Cursor, CursorMut};
 
 use iter::{Drain, Iter};
 use node::NodePtr;
+use panics::panic_out_of_bounds;
 
-pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize, y: i32) {
-    b.insert(x, y)
-}
+//pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize)-> alloc::vec::Vec<i32> {
+//    b.iter().copied().collect()
+//}
 
 pub struct BVec<T> {
     root: MaybeUninit<NodePtr<T>>,
@@ -56,7 +57,7 @@ impl<T> BVec<T> {
         self.len == 0
     }
 
-    // TODO: should this be pub
+    // TODO: should this be pub?
     const fn is_not_empty(&self) -> bool {
         self.len != 0
     }
@@ -68,41 +69,32 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&T> {
-        CursorInner::<ownership::Immut, T>::try_new_inbounds(self, index)
-            .map(|c| unsafe { c.get_unchecked() })
+        InboundsCursor::try_new(self, index).map(InboundsCursor::get)
     }
 
     #[must_use]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        CursorInner::<ownership::Mut, T>::try_new_inbounds(self, index)
-            .map(|c| unsafe { c.into_unchecked_mut() })
+        InboundsCursorMut::try_new(self, index).map(InboundsCursorMut::into_mut)
     }
 
     #[must_use]
     pub fn first(&self) -> Option<&T> {
-        self.is_not_empty().then(|| unsafe {
-            CursorInner::<ownership::Immut, T>::new_first_unchecked(self).get_unchecked()
-        })
+        InboundsCursor::try_new_first(self).map(InboundsCursor::get)
     }
 
     #[must_use]
     pub fn first_mut(&mut self) -> Option<&mut T> {
-        self.is_not_empty()
-            .then(|| unsafe { CursorInner::new_first_unchecked(self).into_unchecked_mut() })
+        InboundsCursorMut::try_new_first(self).map(InboundsCursorMut::into_mut)
     }
 
     #[must_use]
     pub fn last(&self) -> Option<&T> {
-        self.is_not_empty().then(|| unsafe {
-            CursorInner::<ownership::Immut, T>::new_last_unchecked(self).get_unchecked()
-        })
+        InboundsCursor::try_new_last(self).map(InboundsCursor::get)
     }
 
     #[must_use]
     pub fn last_mut(&mut self) -> Option<&mut T> {
-        self.is_not_empty().then(|| unsafe {
-            CursorInner::<ownership::Mut, T>::new_last_unchecked(self).into_unchecked_mut()
-        })
+        InboundsCursorMut::try_new_last(self).map(InboundsCursorMut::into_mut)
     }
 
     #[inline]
@@ -112,7 +104,7 @@ impl<T> BVec<T> {
 
     #[inline]
     pub fn push_back(&mut self, value: T) {
-        self.insert(self.len(), value);
+        CursorInner::new_past_the_end(self).insert(value);
     }
 
     #[inline]
@@ -174,7 +166,7 @@ impl<T: fmt::Debug> fmt::Debug for BVec<T> {
 }
 
 impl<T: Hash> Hash for BVec<T> {
-    fn hash<H: core::hash::Hasher>(&self, state: &mut H) {
+    fn hash<H: Hasher>(&self, state: &mut H) {
         self.len().hash(state);
         self.iter().for_each(|elem| elem.hash(state));
     }
@@ -193,13 +185,16 @@ impl<T> Extend<T> for BVec<T> {
 impl<T> Index<usize> for BVec<T> {
     type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
-        self.get(index).unwrap_or_else(|| panic!())
+        self.get(index)
+            .unwrap_or_else(|| panic_out_of_bounds(index, self.len()))
     }
 }
 
 impl<T> IndexMut<usize> for BVec<T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        self.get_mut(index).unwrap_or_else(|| panic!())
+        let len = self.len();
+        self.get_mut(index)
+            .unwrap_or_else(|| panic_out_of_bounds(index, len))
     }
 }
 
