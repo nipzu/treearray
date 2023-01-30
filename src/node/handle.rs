@@ -120,7 +120,7 @@ impl<'a, O, T: 'a> Node<O, height::Zero, T>
 where
     O: ownership::Reference<'a, T>,
 {
-    pub unsafe fn into_parent_and_index3(mut self) -> Option<(Node<O, height::One, T>, usize)> {
+    pub fn into_parent_and_index3(mut self) -> Option<(Node<O, height::One, T>, usize)> {
         unsafe {
             let parent = Node::<O, height::One, T>::new((*self.node_ptr().as_ptr()).parent?);
             Some((
@@ -502,7 +502,7 @@ where
         let other_lens = other.lengths_mut().clone().into_array();
         self.lengths_mut().with_flat_lens(|lens| {
             lens[self_len_children..self_len_children + other_len_children]
-                .copy_from_slice(&other_lens[..other_len_children])
+                .copy_from_slice(&other_lens[..other_len_children]);
         });
     }
 
@@ -530,7 +530,7 @@ where
         });
     }
 
-    unsafe fn split_lengths<'b>(&'b mut self, index: usize) -> FenwickTree {
+    unsafe fn split_lengths(&mut self, index: usize) -> FenwickTree {
         let len_children = self.len_children();
         self.lengths_mut().with_flat_lens(|lens| {
             let mut other_array = [0; BRANCH_FACTOR];
@@ -574,7 +574,7 @@ where
                 lens[i + 1] = lens[i];
             }
             lens[0] = len;
-        })
+        });
     }
 
     pub unsafe fn add_length_wrapping(&mut self, index: usize, amount: usize) {
@@ -595,9 +595,7 @@ where
         }
     }
 
-    pub unsafe fn into_parent_and_index<'a>(
-        mut self,
-    ) -> Option<(Node<O, height::TwoOrMore, T>, usize)>
+    pub fn into_parent_and_index<'a>(mut self) -> Option<(Node<O, height::TwoOrMore, T>, usize)>
     where
         T: 'a,
         O: ownership::Reference<'a, T>,

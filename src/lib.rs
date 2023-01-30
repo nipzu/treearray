@@ -559,6 +559,13 @@ mod tests {
     }
 
     #[test]
+    fn test_bvec_move_empty_cursor() {
+        let mut b = BVec::<i32>::new();
+        let mut c = b.cursor_at_mut(0);
+        c.move_(0);
+    }
+
+    #[test]
     fn test_bvec_hash() {
         let n = 1000;
         let mut b = BVec::new();

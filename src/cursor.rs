@@ -71,13 +71,13 @@ impl<'a, T> Cursor<'a, T> {
 
     pub fn move_(&mut self, offset: isize) {
         self.index = self.index.wrapping_add(offset as usize);
+
         if self.index < self.len() {
             unsafe {
                 self.inner.move_inbounds_unchecked(offset);
             }
         } else if self.index == self.len() {
-            self.inner = unsafe { CursorInner::new_last_unchecked(self.inner.tree.as_ref()) };
-            self.inner.leaf_index += 1;
+            self.inner = unsafe { CursorInner::new_past_the_end(self.inner.tree.as_ref()) };
         } else {
             panic!()
         }
@@ -99,6 +99,12 @@ impl<'a, T> CursorMut<'a, T> {
             _invariant: PhantomData,
         }
     }
+
+    // pub fn as_inbounds(&mut self) -> Option<InboundsCursorMut<T>> {
+    //     self.is_inbounds().then(|| 
+    //         InboundsCursorMut { inner: self.inner }
+    //     )
+    // }
 
     #[must_use]
     pub fn get(&self) -> Option<&T> {
@@ -123,7 +129,7 @@ impl<'a, T> CursorMut<'a, T> {
     }
 
     pub fn insert(&mut self, value: T) {
-        self.inner.insert(value)
+        self.inner.insert(value);
     }
 
     #[must_use]
@@ -143,8 +149,7 @@ impl<'a, T> CursorMut<'a, T> {
                 self.inner.move_inbounds_unchecked(offset);
             }
         } else if self.index == self.len() {
-            self.inner = unsafe { CursorInner::new_last_unchecked(self.inner.tree.as_mut()) };
-            self.inner.leaf_index += 1;
+            self.inner = unsafe { CursorInner::new_past_the_end(self.inner.tree.as_mut()) };
         } else {
             panic!()
         }
@@ -158,21 +163,9 @@ where
     pub(crate) fn new(tree: O::RefTy<'a, BVec<T>>, index: usize) -> Self {
         if let Some(c) = Self::try_new_inbounds(unsafe { core::ptr::read(&tree) }, index) {
             c
+        } else if index == O::as_ref(&tree).len() {
+            Self::new_past_the_end(tree)
         } else {
-            let len = O::as_ref(&tree).len();
-            if index == len {
-                if len == 0 {
-                    return Self {
-                        tree: tree.into(),
-                        leaf_index: 0,
-                        leaf: MaybeUninit::uninit(),
-                        _marker: PhantomData,
-                    };
-                }
-                let mut this = unsafe { Self::new_last_unchecked(tree) };
-                this.leaf_index += 1;
-                return this;
-            }
             panic!();
         }
     }
@@ -544,7 +537,7 @@ impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
         let leaf_underfull = leaf.is_underfull();
         let leaf_is_empty = leaf.len() == 0;
 
-        let Some((mut parent, mut self_index)) = (unsafe { leaf.into_parent_and_index3() }) else {
+        let Some((mut parent, mut self_index)) = leaf.into_parent_and_index3() else {
             // height is 1
             if leaf_is_empty {
                 unsafe { Leaf::new(self.tree().root.assume_init()).free() };
@@ -561,16 +554,14 @@ impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
                 parent.handle_underfull_leaf_child_head();
             }
 
-            let mut parent = unsafe { parent.into_parent_and_index() };
+            let mut parent = parent.into_parent_and_index();
 
             // merge nodes if needed
-            unsafe {
-                while let Some((mut parent_node, cur_index)) = parent {
-                    if !parent_node.maybe_handle_underfull_child(cur_index) {
-                        break;
-                    }
-                    parent = parent_node.into_parent_and_index();
+            while let Some((mut parent_node, cur_index)) = parent {
+                if !parent_node.maybe_handle_underfull_child(cur_index) {
+                    break;
                 }
+                parent = parent_node.into_parent_and_index();
             }
         }
 
@@ -621,6 +612,7 @@ impl<'a, T> InboundsCursor<'a, T> {
 }
 
 impl<'a, T> InboundsCursor<'a, T> {
+    #[must_use]
     pub fn get(self) -> &'a T {
         unsafe { self.inner.get_unchecked() }
     }

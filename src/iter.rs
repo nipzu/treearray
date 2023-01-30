@@ -85,7 +85,7 @@ impl<'a, T> Drain<'a, T> {
         // TODO: start out of bounds
         Self {
             cursor: t.cursor_at_mut(start),
-            remaining_count: end - start,
+            remaining_count: end.saturating_sub(start),
         }
     }
 }
