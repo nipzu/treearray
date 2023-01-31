@@ -26,14 +26,15 @@ impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        (self.remaining_count > 0).then(|| {
+        /*(self.remaining_count > 0).then(|| {
             let ret = unsafe { self.cursor.get_unchecked() };
             self.remaining_count -= 1;
             if self.remaining_count != 0 {
                 self.cursor.move_next_inbounds_unchecked();
             }
             ret
-        })
+        })*/
+        todo!()
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -44,7 +45,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
         self.remaining_count
     }
 
-    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+    /*fn nth(&mut self, n: usize) -> Option<Self::Item> {
         if n >= self.remaining_count {
             self.remaining_count = 0;
             None
@@ -53,7 +54,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
             self.remaining_count -= n + 1;
             unsafe { Some(self.cursor.get_unchecked()) }
         }
-    }
+    }*/
 
     // TODO: advance_by
 }
@@ -89,8 +90,7 @@ impl<'a, T> Drain<'a, T> {
         }
     }
 }
-
-impl<'a, T> Iterator for Drain<'a, T> {
+/*impl<'a, T> Iterator for Drain<'a, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -106,3 +106,4 @@ impl<'a, T> Drop for Drain<'a, T> {
         for _ in self {}
     }
 }
+*/

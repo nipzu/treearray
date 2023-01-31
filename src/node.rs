@@ -32,8 +32,6 @@ pub struct RawNodeWithLen<T>(pub usize, pub NodePtr<T>);
 pub type NodePtr<T> = NonNull<NodeBase<T>>;
 
 pub struct NodeBase<T> {
-    pub parent: Option<NodePtr<T>>,
-    pub parent_index: MaybeUninit<u8>,
     height: u8,
     children_len: u16,
     _marker: PhantomData<T>,
@@ -42,7 +40,7 @@ pub struct NodeBase<T> {
 #[repr(C)]
 pub struct InternalNode<T> {
     base: NodeBase<T>,
-    lengths: FenwickTree,
+    pub lengths: FenwickTree,
     pub children: [MaybeUninit<NodePtr<T>>; BRANCH_FACTOR],
 }
 
@@ -55,8 +53,6 @@ pub struct InternalNode<T> {
 impl<T> NodeBase<T> {
     pub const fn new(height: u8) -> Self {
         Self {
-            parent: None,
-            parent_index: MaybeUninit::uninit(),
             children_len: 0,
             height,
             _marker: PhantomData,

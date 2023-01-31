@@ -2,14 +2,10 @@ use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
     node::{
-        handle::{
-            height, Internal, InternalMut, InternalRef, Leaf, LeafMut, LeafRef, Node, SplitResult,
-        },
-        InternalNode, NodeBase, NodePtr, RawNodeWithLen,
+        handle::{InternalMut, InternalRef, LeafMut, LeafRef},
+        NodePtr,
     },
-    ownership,
-    panics::panic_length_overflow,
-    BVec,
+    ownership, BVec,
 };
 
 // TODO: auto traits: Send, Sync, Unpin, UnwindSafe?
@@ -69,7 +65,7 @@ impl<'a, T> Cursor<'a, T> {
         self.index
     }
 
-    pub fn move_(&mut self, offset: isize) {
+    /*pub fn move_(&mut self, offset: isize) {
         self.index = self.index.wrapping_add(offset as usize);
 
         if self.index < self.len() {
@@ -81,7 +77,7 @@ impl<'a, T> Cursor<'a, T> {
         } else {
             panic!()
         }
-    }
+    }*/
 }
 
 pub struct CursorMut<'a, T> {
@@ -101,7 +97,7 @@ impl<'a, T> CursorMut<'a, T> {
     }
 
     // pub fn as_inbounds(&mut self) -> Option<InboundsCursorMut<T>> {
-    //     self.is_inbounds().then(|| 
+    //     self.is_inbounds().then(||
     //         InboundsCursorMut { inner: self.inner }
     //     )
     // }
@@ -124,14 +120,6 @@ impl<'a, T> CursorMut<'a, T> {
         self.index < self.len()
     }
 
-    pub fn remove(&mut self) -> T {
-        self.inner.remove()
-    }
-
-    pub fn insert(&mut self, value: T) {
-        self.inner.insert(value);
-    }
-
     #[must_use]
     pub fn len(&self) -> usize {
         self.inner.len()
@@ -142,7 +130,7 @@ impl<'a, T> CursorMut<'a, T> {
         self.index
     }
 
-    pub fn move_(&mut self, offset: isize) {
+    /*pub fn move_(&mut self, offset: isize) {
         self.index = self.index.wrapping_add(offset as usize);
         if self.index < self.len() {
             unsafe {
@@ -153,7 +141,7 @@ impl<'a, T> CursorMut<'a, T> {
         } else {
             panic!()
         }
-    }
+    }*/
 }
 
 impl<'a, O, T> CursorInner<'a, O, T>
@@ -248,6 +236,7 @@ where
         })
     }
 
+    /*
     pub fn move_(&mut self, offset: isize) {
         // if (offset as usize) > self.len() - self.index {
         //     panic!();
@@ -396,12 +385,7 @@ where
             // (parent, index) = unsafe { parent.into_parent_and_index2().unwrap_unchecked() };
         }
     }
-
-    fn leaf(&self) -> Option<LeafRef<T>> {
-        self.tree()
-            .is_not_empty()
-            .then(|| unsafe { LeafRef::new(self.leaf.assume_init()) })
-    }
+    */
 
     fn tree(&self) -> &BVec<T> {
         unsafe { self.tree.as_ref() }
@@ -420,16 +404,6 @@ impl<'a, T> CursorInner<'a, ownership::Immut<'a>, T> {
 }
 
 impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
-    // TODO: this should not be unbounded?
-    fn leaf_mut<'b>(&mut self) -> Option<LeafMut<'b, T>>
-    where
-        T: 'b,
-    {
-        self.tree()
-            .is_not_empty()
-            .then(|| unsafe { LeafMut::new(self.leaf.assume_init()) })
-    }
-
     fn root_mut(&mut self) -> &mut MaybeUninit<NodePtr<T>> {
         unsafe { &mut self.tree.as_mut().root }
     }
@@ -449,75 +423,7 @@ impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
         unsafe { LeafMut::new(self.leaf.assume_init()).into_value_unchecked_mut(self.leaf_index) }
     }
 
-    unsafe fn add_path_lengths_wrapping(&mut self, amount: usize) -> bool {
-        unsafe {
-            let mut new_parent = self.leaf_mut().and_then(Node::into_parent_and_index2);
-
-            while let Some((mut parent, index)) = new_parent {
-                parent.add_length_wrapping(index, amount);
-                new_parent = parent.into_parent_and_index2();
-            }
-
-            let tree = self.tree.as_mut();
-            tree.len = tree.len.wrapping_add(amount);
-            tree.len > isize::MAX as usize
-        }
-    }
-
-    unsafe fn insert_to_empty(&mut self, value: T) {
-        let new_root = NodeBase::new_leaf();
-        unsafe { LeafMut::new(new_root).values_mut().insert(0, value) };
-        self.root_mut().write(new_root);
-        self.leaf.write(new_root);
-    }
-
-    unsafe fn split_root(&mut self, new_node: RawNodeWithLen<T>) {
-        let old_root = self.tree().root().unwrap();
-        let old_root_len = self.tree().len() - new_node.0;
-        self.root_mut().write(InternalNode::from_child_array([
-            RawNodeWithLen(old_root_len, old_root),
-            new_node,
-        ]));
-    }
-
-    pub fn insert(&mut self, value: T) {
-        let maybe_leaf = self.leaf_mut();
-
-        if unsafe { self.add_path_lengths_wrapping(1) } {
-            unsafe { self.tree.as_mut().len = 0 };
-            panic_length_overflow();
-        };
-
-        let leaf_index = self.leaf_index;
-        let Some(mut leaf) = maybe_leaf else {
-            unsafe { self.insert_to_empty(value) };
-            return;
-        };
-
-        let mut to_insert = leaf.insert_value(leaf_index, value).map(|res| match res {
-            SplitResult::Left(n) => n,
-            SplitResult::Right(n) => {
-                self.leaf_index -= leaf.len();
-                self.leaf.write(n.1);
-                n
-            }
-        });
-
-        let mut new_parent = leaf.into_parent_and_index2();
-
-        while let Some(new_node) = to_insert {
-            unsafe {
-                if let Some((mut parent, child_index)) = new_parent {
-                    to_insert = parent.insert_split_of_child(child_index, new_node);
-                    new_parent = parent.into_parent_and_index2();
-                } else {
-                    self.split_root(new_node);
-                    return;
-                }
-            }
-        }
-    }
-
+    /*
     /// # Panics
     /// panics if pointing past the end
     pub fn remove(&mut self) -> T {
@@ -577,14 +483,13 @@ impl<'a, T> CursorInner<'a, ownership::Mut<'a>, T> {
 
             if old_root.is_singleton() {
                 let mut new_root = old_root.children().remove(0);
-                new_root.as_mut().parent = None;
                 old_root.free();
                 self.root_mut().write(new_root);
             }
         }
 
         ret
-    }
+    }*/
 }
 
 pub struct InboundsCursor<'a, T> {

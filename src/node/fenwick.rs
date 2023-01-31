@@ -1,5 +1,15 @@
 use super::BRANCH_FACTOR;
 
+const OFFSETS: [usize; BRANCH_FACTOR.trailing_zeros() as usize] = {
+    let mut offsets = [0; BRANCH_FACTOR.trailing_zeros() as usize];
+    let mut i = 0;
+    while i < BRANCH_FACTOR.trailing_zeros() {
+        offsets[i as usize] = BRANCH_FACTOR >> (i + 1);
+        i += 1;
+    }
+    offsets
+};
+
 #[derive(Clone)]
 pub struct FenwickTree {
     inner: [usize; BRANCH_FACTOR],
@@ -23,19 +33,30 @@ impl FenwickTree {
         self.inner
     }
 
-    pub fn child_containing_index(&self, index: &mut usize) -> usize {
+    pub fn child_containing_index(&self, mut index: usize) -> (usize, usize) {
         let mut i = 0;
-        for shift in 1..=BRANCH_FACTOR.trailing_zeros() {
-            let offset = BRANCH_FACTOR >> shift;
+        for offset in &OFFSETS {
             let v = self.inner[i + offset - 1];
-            if v <= *index {
-                *index -= v;
+            if v <= index {
+                index -= v;
                 i += offset;
             }
         }
-        i
+        (index, i)
     }
 
+    pub fn child_containing_index_inclusive(&self, mut index: usize) -> (usize, usize) {
+        let mut i = 0;
+        for offset in &OFFSETS {
+            let v = self.inner[i + offset - 1];
+            if v < index {
+                index -= v;
+                i += offset;
+            }
+        }
+        (index, i)
+    }
+/*
     pub unsafe fn prefix_sum(&self, mut index: usize) -> usize {
         debug_assert!(index <= self.inner.len());
         let mut sum = 0;
@@ -45,7 +66,7 @@ impl FenwickTree {
         }
         sum
     }
-
+*/
     pub fn add_wrapping(&mut self, mut index: usize, amount: usize) {
         while let Some(v) = self.inner.get_mut(index) {
             *v = v.wrapping_add(amount);

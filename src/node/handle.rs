@@ -1,7 +1,6 @@
 use core::{
     marker::PhantomData,
     mem,
-    ops::RangeFrom,
     ptr::{self, addr_of_mut},
 };
 
@@ -81,10 +80,6 @@ where
             _marker: PhantomData,
         }
     }
-
-    pub fn node_ptr(&mut self) -> NodePtr<T> {
-        self.node
-    }
 }
 
 impl<O, H, T> Node<O, H, T>
@@ -96,40 +91,6 @@ where
         Node {
             node: self.node,
             _marker: PhantomData,
-        }
-    }
-}
-
-impl<'a, O, H, T: 'a> Node<O, H, T>
-where
-    H: height::Height,
-    O: ownership::Reference<'a, T>,
-{
-    pub fn into_parent_and_index2(mut self) -> Option<(Node<O, height::Positive, T>, usize)> {
-        unsafe {
-            let parent = Node::<O, height::Positive, T>::new(self.node_ptr().as_ref().parent?);
-            Some((
-                parent,
-                self.node_ptr().as_ref().parent_index.assume_init().into(),
-            ))
-        }
-    }
-}
-
-impl<'a, O, T: 'a> Node<O, height::Zero, T>
-where
-    O: ownership::Reference<'a, T>,
-{
-    pub fn into_parent_and_index3(mut self) -> Option<(Node<O, height::One, T>, usize)> {
-        unsafe {
-            let parent = Node::<O, height::One, T>::new((*self.node_ptr().as_ptr()).parent?);
-            Some((
-                parent,
-                (*self.node_ptr().as_ptr())
-                    .parent_index
-                    .assume_init()
-                    .into(),
-            ))
         }
     }
 }
@@ -176,14 +137,14 @@ impl<'a, T: 'a> LeafMut<'a, T> {
         self.len() == NodeBase::<T>::LEAF_CAP
     }
 
-    pub fn insert_value(&mut self, index: usize, value: T) -> Option<SplitResult<T>> {
+    pub fn insert_value(&mut self, index: usize, value: T) -> Option<RawNodeWithLen<T>> {
         assert!(index <= self.len());
 
         if self.is_full() {
             Some(if index <= NodeBase::<T>::LEAF_CAP / 2 {
-                SplitResult::Left(self.split_and_insert_left(index, value))
+                self.split_and_insert_left(index, value)
             } else {
-                SplitResult::Right(self.split_and_insert_right(index, value))
+                self.split_and_insert_right(index, value)
             })
         } else {
             self.values_mut().insert(index, value);
@@ -235,7 +196,6 @@ where
                 cur.values_mut().append(next.values_mut());
                 self.merge_length_from_next(0);
                 Leaf::new(self.children().remove(1)).free();
-                self.set_parent_links(1..);
             } else {
                 cur.push_back_child(next.pop_front_child());
                 self.steal_length_from_next(0, 1);
@@ -243,23 +203,17 @@ where
         }
     }
 
-    pub fn handle_underfull_leaf_child_tail(&mut self, index: &mut usize, child_index: &mut usize) {
-        let [mut prev, mut cur] = self.child_pair_at(*index - 1);
+    pub fn handle_underfull_leaf_child_tail(&mut self, index: usize) {
+        let [mut prev, mut cur] = self.child_pair_at(index - 1);
 
         unsafe {
             if prev.is_almost_underfull() {
-                let prev_children_len = prev.len();
                 prev.values_mut().append(cur.values_mut());
-                self.merge_length_from_next(*index - 1);
-                Leaf::new(self.children().remove(*index)).free();
-                self.set_parent_links(*index..);
-
-                *index -= 1;
-                *child_index += prev_children_len;
+                self.merge_length_from_next(index - 1);
+                Leaf::new(self.children().remove(index)).free();
             } else {
                 cur.push_front_child(prev.pop_back_child());
-                self.steal_length_from_previous(*index, 1);
-                *child_index += 1;
+                self.steal_length_from_previous(index, 1);
             }
         }
     }
@@ -323,7 +277,6 @@ where
                 cur.append_children(next);
                 self.merge_length_from_next(0);
                 Internal::new(self.children().remove(1)).free();
-                self.set_parent_links(1..);
             }
         } else {
             unsafe {
@@ -343,7 +296,6 @@ where
                 prev.append_children(cur);
                 self.merge_length_from_next(index - 1);
                 Internal::new(self.children().remove(index)).free();
-                self.set_parent_links(index..);
             }
         } else {
             unsafe {
@@ -403,7 +355,7 @@ where
 {
     pub const UNDERFULL_LEN: usize = (BRANCH_FACTOR - 1) / 2;
 
-    fn node(&self) -> &InternalNode<T> {
+    pub fn node(&self) -> &InternalNode<T> {
         unsafe { self.node.cast().as_ref() }
     }
 
@@ -430,10 +382,10 @@ where
     pub fn len(&self) -> usize {
         self.node().lengths.total_len()
     }
-
+/*
     pub unsafe fn sum_lens_below(&self, index: usize) -> usize {
         unsafe { self.node().lengths.prefix_sum(index) }
-    }
+    }*/
 }
 
 impl<O, H, T> Node<O, H, T>
@@ -445,18 +397,15 @@ where
         unsafe {
             self.push_front_length(child.0);
             self.children().insert(0, child.1);
-            self.set_parent_links(0..);
         }
     }
     pub unsafe fn push_back_child(&mut self, child: RawNodeWithLen<T>) {
         unsafe { self.push_back_length(child.0) };
         self.children().insert(self.len_children(), child.1);
-        self.set_parent_links(self.len_children() - 1..);
     }
     unsafe fn pop_front_child(&mut self) -> RawNodeWithLen<T> {
         let node_len = unsafe { self.pop_front_length() };
         let node = self.children().remove(0);
-        self.set_parent_links(0..);
         RawNodeWithLen(node_len, node)
     }
     unsafe fn pop_back_child(&mut self) -> RawNodeWithLen<T> {
@@ -468,10 +417,8 @@ where
         self.len_children() <= Self::UNDERFULL_LEN + 1
     }
     unsafe fn append_children(&mut self, mut other: Self) {
-        let self_old_len = self.len_children();
         unsafe { self.append_lengths(other.reborrow()) };
         self.children().append(other.children());
-        self.set_parent_links(self_old_len..);
     }
 
     pub fn internal_mut(&mut self) -> &mut InternalNode<T> {
@@ -581,7 +528,7 @@ where
         self.lengths_mut().add_wrapping(index, amount);
     }
 
-    fn node_mut(&mut self) -> &mut InternalNode<T> {
+    pub fn node_mut(&mut self) -> &mut InternalNode<T> {
         unsafe { self.node.cast().as_mut() }
     }
 
@@ -595,24 +542,11 @@ where
         }
     }
 
-    pub fn into_parent_and_index<'a>(mut self) -> Option<(Node<O, height::TwoOrMore, T>, usize)>
-    where
-        T: 'a,
-        O: ownership::Reference<'a, T>,
-    {
-        unsafe {
-            let parent = Node::new_parent_of_internal(self.node_mut().base.parent?);
-            Some((
-                parent,
-                self.node_mut().base.parent_index.assume_init().into(),
-            ))
-        }
-    }
-
-    pub unsafe fn into_child_containing_index(mut self, index: &mut usize) -> NodePtr<T> {
-        let i = self.node().lengths.child_containing_index(index);
-        debug_assert!(i < self.len_children());
-        unsafe { self.internal_mut().children[i].assume_init() }
+    pub unsafe fn into_child_containing_index(self, _index: &mut usize) -> NodePtr<T> {
+        todo!()
+        //let i = self.node().lengths.child_containing_index(index);
+        //debug_assert!(i < self.len_children());
+        //unsafe { self.internal_mut().children[i].assume_init() }
     }
 
     pub unsafe fn insert_split_of_child(
@@ -641,7 +575,6 @@ where
             self.insert_length(index, node.0);
         }
         self.children().insert(index, node.1);
-        self.set_parent_links(index..);
     }
 
     unsafe fn split_and_insert_left(
@@ -660,7 +593,6 @@ where
             self.insert_fitting(index, node);
         };
 
-        new_sibling.set_parent_links(0..);
         RawNodeWithLen(new_sibling.len(), new_sibling_node)
     }
 
@@ -681,21 +613,6 @@ where
             new_sibling.insert_fitting(index - split_index, node);
         }
 
-        new_sibling.set_parent_links(0..);
         RawNodeWithLen(new_sibling.len(), new_sibling_node)
     }
-
-    fn set_parent_links(&mut self, range: RangeFrom<usize>) {
-        for (i, n) in self.children()[range.clone()].iter_mut().enumerate() {
-            unsafe {
-                (*n.as_ptr()).parent = Some(self.node_ptr());
-                (*n.as_ptr()).parent_index.write((i + range.start) as u8);
-            }
-        }
-    }
-}
-
-pub enum SplitResult<T> {
-    Left(RawNodeWithLen<T>),
-    Right(RawNodeWithLen<T>),
 }
