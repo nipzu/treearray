@@ -25,7 +25,7 @@ use iter::{Drain, Iter};
 use node::{handle::LeafMut, InternalNode, NodeBase, NodePtr, RawNodeWithLen};
 use panics::panic_out_of_bounds;
 
-use crate::node::handle::{height, Internal, InternalMut, Node};
+use crate::node::handle::{height, Internal, InternalMut, Node, Leaf};
 
 pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize, y: i32) {
     b.insert(x, y);
@@ -34,6 +34,7 @@ pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize, y: i32) {
 pub struct BVec<T> {
     root: MaybeUninit<NodePtr<T>>,
     len: usize,
+    height: u16,
 }
 
 impl<T> BVec<T> {
@@ -43,6 +44,7 @@ impl<T> BVec<T> {
         Self {
             root: MaybeUninit::uninit(),
             len: 0,
+            height: 0,
         }
     }
 
@@ -128,6 +130,7 @@ impl<T> BVec<T> {
             unsafe { LeafMut::new(new_root).values_mut().insert(0, value) };
             self.root.write(new_root);
             self.len += 1;
+            debug_assert_eq!(self.height, 0);
             return;
         }
 
@@ -139,7 +142,7 @@ impl<T> BVec<T> {
             node: NodePtr<T>,
             index: usize,
             value: T,
-            h: u8,
+            h: u16,
         ) -> Option<RawNodeWithLen<T>> {
             if h == 0 {
                 let mut leaf = unsafe { LeafMut::new(node) };
@@ -161,7 +164,7 @@ impl<T> BVec<T> {
         }
 
         if let Some(new_node) =
-            unsafe { insert_to_node(root, index, value, root.as_ref().height()) }
+            unsafe { insert_to_node(root, index, value, self.height) }
         {
             let old_root = root;
             let old_root_len = self.len() - new_node.0;
@@ -169,6 +172,7 @@ impl<T> BVec<T> {
                 RawNodeWithLen(old_root_len, old_root),
                 new_node,
             ]));
+            self.height += 1;
         }
     }
 
@@ -179,7 +183,7 @@ impl<T> BVec<T> {
 
         self.len -= 1;
 
-        unsafe fn remove_from_node<T>(node: NodePtr<T>, index: usize, h: u8) -> T {
+        unsafe fn remove_from_node<T>(node: NodePtr<T>, index: usize, h: u16) -> T {
             match h {
                 0 => {
                     let mut leaf = unsafe { LeafMut::new(node) };
@@ -193,8 +197,8 @@ impl<T> BVec<T> {
                         .child_containing_index(index);
                     unsafe { internal.add_length_wrapping(child_index, 1_usize.wrapping_neg()) };
                     let child = unsafe { internal.node_mut().children[child_index].assume_init() };
-
                     let ret = unsafe { remove_from_node(child, new_index, 0) };
+
                     // TODO: LeafRef
                     if unsafe { LeafMut::new(child).is_underfull() } {
                         if child_index == 0 {
@@ -213,9 +217,8 @@ impl<T> BVec<T> {
                         .child_containing_index(index);
                     unsafe { internal.add_length_wrapping(child_index, 1_usize.wrapping_neg()) };
                     let child = unsafe { internal.node_mut().children[child_index].assume_init() };
-
                     let ret = unsafe { remove_from_node(child, new_index, h - 1) };
-                    // TODO: LeafRef
+
                     internal.maybe_handle_underfull_child(child_index);
                     ret
                 }
@@ -223,7 +226,7 @@ impl<T> BVec<T> {
         }
 
         let root = unsafe { self.root.assume_init() };
-        let h = unsafe { root.as_ref().height() };
+        let h = self.height;
         let ret = unsafe { remove_from_node(root, index, h) };
 
         if h > 0 {
@@ -234,8 +237,12 @@ impl<T> BVec<T> {
                     let new_root = old_root.children().remove(0);
                     old_root.free();
                     self.root.write(new_root);
+                    debug_assert_ne!(self.height, 0);
+                    self.height -= 1;
                 }
             }
+        } else if unsafe { LeafMut::new(root).len() == 0 } {
+            unsafe { Leaf::new(root).free() };
         }
 
         ret
@@ -362,7 +369,7 @@ mod tests {
 
         assert_eq!(
             size_of::<BVec<i32>>(),
-            size_of::<*mut ()>() + size_of::<usize>()
+            size_of::<*mut ()>() + 2 * size_of::<usize>()
         )
     }
     #[test]
@@ -424,16 +431,13 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
         let mut v = Vec::new();
-        let mut b_4_5 = BVec::<i32>::new();
-        let mut b_5_4 = BVec::<i32>::new();
+        let mut b = BVec::<i32>::new();
 
         for x in 0..1000 {
             let index = rng.gen_range(0..=v.len());
             v.insert(index, x);
-            b_4_5.insert(index, x);
-            b_5_4.insert(index, x);
-            assert_eq!(v.len(), b_4_5.len());
-            assert_eq!(v.len(), b_5_4.len());
+            b.insert(index, x);
+            assert_eq!(v.len(), b.len());
         }
 
         //assert_eq!(v, b_4_5.iter().copied().collect::<Vec<_>>());
@@ -448,28 +452,22 @@ mod tests {
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
         
         let mut v = Vec::new();
-        let mut b_4_2 = BVec::<i32>::new();
-        let mut b_5_1 = BVec::<i32>::new();
+        let mut b = BVec::<i32>::new();
         
         for x in 0..1000 {
             v.push(x);
-            b_4_2.push_back(x);
-            b_5_1.push_back(x);
+            b.push_back(x);
         }
         
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len());
             let v_rem = v.remove(index);
-            let b_4_2_rem = b_4_2.remove(index);
-            let b_5_1_rem = b_5_1.remove(index);
-            assert_eq!(v.len(), b_4_2.len());
-            assert_eq!(v.len(), b_5_1.len());
-            assert_eq!(v_rem, b_5_1_rem);
-            assert_eq!(v_rem, b_4_2_rem);
+            let b_rem = b.remove(index);
+            assert_eq!(v.len(), b.len());
+            assert_eq!(v_rem, b_rem);
         }
         
-        assert!(b_4_2.is_empty());
-        assert!(b_5_1.is_empty());
+        assert!(b.is_empty());
     }
     /*
 

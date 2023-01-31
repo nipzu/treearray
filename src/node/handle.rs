@@ -584,7 +584,7 @@ where
     ) -> RawNodeWithLen<T> {
         let split_index = Self::UNDERFULL_LEN;
 
-        let new_sibling_node = InternalNode::<T>::new(self.node().base.height);
+        let new_sibling_node = InternalNode::<T>::new();
         let mut new_sibling = unsafe { Node::<ownership::Mut, H, T>::new(new_sibling_node) };
 
         unsafe {
@@ -603,7 +603,7 @@ where
     ) -> RawNodeWithLen<T> {
         let split_index = Self::UNDERFULL_LEN + 1;
 
-        let new_sibling_node = InternalNode::<T>::new(self.node().base.height);
+        let new_sibling_node = InternalNode::<T>::new();
 
         let mut new_sibling = unsafe { Node::<ownership::Mut, H, T>::new(new_sibling_node) };
 

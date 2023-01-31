@@ -164,7 +164,7 @@ where
         }
 
         let mut cur_node = unsafe { O::as_ref(&tree).root.assume_init() };
-        let height = unsafe { cur_node.as_ref().height() };
+        let height = O::as_ref(&tree).height;
 
         // the height of `cur_node` is `height`
         // decrement the height of `cur_node` `height` times
@@ -185,7 +185,7 @@ where
         debug_assert!(O::as_ref(&tree).is_not_empty());
 
         let mut cur_node = unsafe { O::as_ref(&tree).root().unwrap_unchecked() };
-        let height = unsafe { cur_node.as_ref().height() };
+        let height = O::as_ref(&tree).height;
         for _ in 0..height {
             let mut handle = unsafe { InternalRef::new(cur_node) };
             let len_children = handle.len_children();
@@ -222,7 +222,7 @@ where
 
     pub(crate) fn try_new_inbounds_first(tree: O::RefTy<'a, BVec<T>>) -> Option<Self> {
         let mut cur_node = O::as_ref(&tree).root()?;
-        let height = unsafe { cur_node.as_ref().height() };
+        let height = O::as_ref(&tree).height;
         for _ in 0..height {
             let mut handle = unsafe { InternalRef::new(cur_node) };
             cur_node = unsafe { (*handle.internal_ptr()).children[0].assume_init() };

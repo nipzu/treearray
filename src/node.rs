@@ -32,7 +32,6 @@ pub struct RawNodeWithLen<T>(pub usize, pub NodePtr<T>);
 pub type NodePtr<T> = NonNull<NodeBase<T>>;
 
 pub struct NodeBase<T> {
-    height: u8,
     children_len: u16,
     _marker: PhantomData<T>,
 }
@@ -51,16 +50,11 @@ pub struct InternalNode<T> {
 // }
 
 impl<T> NodeBase<T> {
-    pub const fn new(height: u8) -> Self {
+    pub const fn new() -> Self {
         Self {
             children_len: 0,
-            height,
             _marker: PhantomData,
         }
-    }
-
-    pub const fn height(&self) -> u8 {
-        self.height
     }
 }
 
@@ -82,7 +76,7 @@ impl<T> NodeBase<T> {
         let Some(node_ptr) = NonNull::new(ptr) else {
             handle_alloc_error(layout);
         };
-        unsafe { node_ptr.as_ptr().write(NodeBase::new(0)) };
+        unsafe { node_ptr.as_ptr().write(NodeBase::new()) };
         node_ptr
     }
 
@@ -98,9 +92,9 @@ impl<T> NodeBase<T> {
 impl<T> InternalNode<T> {
     const UNINIT_NODE: MaybeUninit<NodePtr<T>> = MaybeUninit::uninit();
 
-    pub fn new(height: u8) -> NodePtr<T> {
+    pub fn new() -> NodePtr<T> {
         NonNull::from(Box::leak(Box::new(Self {
-            base: NodeBase::new(height),
+            base: NodeBase::new(),
             lengths: FenwickTree::new(),
             children: [Self::UNINIT_NODE; BRANCH_FACTOR],
         })))
@@ -108,8 +102,7 @@ impl<T> InternalNode<T> {
     }
 
     pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T>; N]) -> NodePtr<T> {
-        let height = unsafe { children[0].1.as_ref().height + 1 };
-        let boxed_children = Self::new(height);
+        let boxed_children = Self::new();
         let mut children_mut = unsafe { InternalMut::new(boxed_children) };
         for child in children {
             unsafe { children_mut.push_back_child(child) }
