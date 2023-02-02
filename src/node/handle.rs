@@ -384,7 +384,7 @@ where
     }
 
     pub fn len_children(&self) -> usize {
-        usize::from(self.node().base.children_len)
+        usize::from(self.node().children_len)
     }
 
     pub fn is_singleton(&self) -> bool {
@@ -560,7 +560,7 @@ where
         unsafe {
             ArrayVecMut::new(
                 addr_of_mut!((*self.internal_ptr()).children).cast(),
-                addr_of_mut!(self.node_mut().base.children_len).cast(),
+                addr_of_mut!(self.node_mut().children_len).cast(),
                 BRANCH_FACTOR as u16,
             )
         }

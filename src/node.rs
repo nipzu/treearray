@@ -32,13 +32,12 @@ pub struct RawNodeWithLen<T>(pub usize, pub NodePtr<T>);
 pub type NodePtr<T> = NonNull<NodeBase<T>>;
 
 pub struct NodeBase<T> {
-    children_len: u16,
     _marker: PhantomData<T>,
 }
 
 #[repr(C)]
 pub struct InternalNode<T> {
-    base: NodeBase<T>,
+    children_len: u16,
     pub lengths: FenwickTree,
     pub children: [MaybeUninit<NodePtr<T>>; BRANCH_FACTOR],
 }
@@ -65,15 +64,6 @@ impl LeafBase {
 //     base: LeafBase<T>,
 //     values: [MaybeUninit<T>; C],
 // }
-
-impl<T> NodeBase<T> {
-    pub const fn new() -> Self {
-        Self {
-            children_len: 0,
-            _marker: PhantomData,
-        }
-    }
-}
 
 impl<T> NodeBase<T> {
     const LEAF_CAP: usize = if size_of::<T>() <= LEAF_CAP_BYTES {
@@ -111,7 +101,7 @@ impl<T> InternalNode<T> {
 
     pub fn new() -> NodePtr<T> {
         NonNull::from(Box::leak(Box::new(Self {
-            base: NodeBase::new(),
+            children_len: 0,
             lengths: FenwickTree::new(),
             children: [Self::UNINIT_NODE; BRANCH_FACTOR],
         })))
