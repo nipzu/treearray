@@ -25,7 +25,7 @@ mod utils;
 use node::{handle::LeafMut, InternalNode, NodeBase, NodePtr, RawNodeWithLen};
 use panics::panic_out_of_bounds;
 
-use crate::node::handle::{free_internal, height, InternalMut, Leaf, Node};
+use crate::node::handle::{free_internal, height, Leaf, Node};
 
 pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize, y: i32) {
     b.insert(x, y);
@@ -154,13 +154,11 @@ impl<T> BVec<T> {
                 let mut leaf = unsafe { LeafMut::new(NodePtr { leaf: node.leaf }) };
                 leaf.insert_value(index, value)
             } else {
-                let mut internal = unsafe { InternalMut::new(node.internal_mut()) };
-                let (new_index, child_index) = internal
-                    .node
-                    .lengths
-                    .child_containing_index_inclusive(index);
+                let mut internal = unsafe { node.internal_mut() };
+                let (new_index, child_index) =
+                    internal.lengths.child_containing_index_inclusive(index);
                 unsafe { internal.add_length_wrapping(child_index, 1) };
-                let child = unsafe { internal.node_mut().children[child_index].assume_init_mut() };
+                let child = unsafe { internal.children[child_index].assume_init_mut() };
                 unsafe {
                     insert_to_node(child, new_index, value, h - 1)
                         .map(|r| internal.insert_split_of_child(child_index, r))
@@ -188,13 +186,13 @@ impl<T> BVec<T> {
         self.len -= 1;
 
         unsafe fn remove_from_internal<T>(node: &mut NodePtr<T>, index: usize, h: u16) -> T {
-            let mut internal = unsafe { InternalMut::new(node.internal_mut()) };
-            let (new_index, child_index) = internal.node.lengths.child_containing_index(index);
+            let mut internal = unsafe { node.internal_mut() };
+            let (new_index, child_index) = internal.lengths.child_containing_index(index);
             unsafe { internal.add_length_wrapping(child_index, 1_usize.wrapping_neg()) };
             debug_assert_ne!(h, 0);
             if h == 1 {
                 let mut child =
-                    unsafe { LeafMut::new(internal.node.children[child_index].assume_init_read()) };
+                    unsafe { LeafMut::new(internal.children[child_index].assume_init_read()) };
                 let ret = child.remove_child(new_index);
 
                 if child.is_underfull() {
@@ -206,7 +204,7 @@ impl<T> BVec<T> {
                 }
                 ret
             } else {
-                let child = unsafe { internal.node.children[child_index].assume_init_mut() };
+                let child = unsafe { internal.children[child_index].assume_init_mut() };
                 let ret = unsafe { remove_from_internal(child, new_index, h - 1) };
 
                 internal.maybe_handle_underfull_child(child_index);
@@ -221,7 +219,7 @@ impl<T> BVec<T> {
         if h > 0 {
             ret = unsafe { remove_from_internal(root, index, h) };
             unsafe {
-                let mut old_root = InternalMut::new(self.root.assume_init_mut().internal_mut());
+                let old_root = self.root.assume_init_mut().internal_mut();
 
                 if old_root.is_singleton() {
                     let new_root = old_root.children().remove(0);

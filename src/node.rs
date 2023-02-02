@@ -13,7 +13,7 @@ use alloc::{
     boxed::Box,
 };
 
-use self::{fenwick::FenwickTree, handle::InternalMut};
+use self::fenwick::FenwickTree;
 
 /// SAFETY: BRANCH_FACTOR must be less than u8::MAX.
 #[cfg(miri)]
@@ -126,7 +126,7 @@ impl<T> InternalNode<T> {
 
     pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T>; N]) -> NodePtr<T> {
         let mut boxed_children = Self::new();
-        let mut children_mut = unsafe { InternalMut::new(boxed_children.internal_mut()) };
+        let mut children_mut = unsafe { boxed_children.internal_mut() };
         for child in children {
             unsafe { children_mut.push_back_child(child) }
         }

@@ -58,20 +58,6 @@ where
     _marker: PhantomData<(H, O)>,
 }
 
-pub struct InternalMut<'a, T> {
-    pub node: &'a mut InternalNode<T>,
-}
-
-impl<'a, T> InternalMut<'a, T> {
-    pub fn new(node: &mut InternalNode<T>) -> InternalMut<T> {
-        InternalMut { node }
-    }
-}
-
-//pub type InternalRef<'a, T> = Node<ownership::Immut<'a>, height::Positive, T>;
-// pub type InternalMut<'a, T> = Node<ownership::Mut<'a>, height::Positive, T>;
-//pub type Internal<T> = Node<ownership::Owned, height::Positive, T>;
-
 pub type LeafRef<'a, T> = Node<ownership::Immut<'a>, height::Zero, T>;
 pub type LeafMut<'a, T> = Node<ownership::Mut<'a>, height::Zero, T>;
 pub type Leaf<T> = Node<ownership::Owned, height::Zero, T>;
@@ -182,14 +168,14 @@ impl<'a, T: 'a> LeafMut<'a, T> {
     }
 }
 
-impl<'a, T> InternalMut<'a, T> {
+impl<T> InternalNode<T> {
     /*pub unsafe fn child_mut(&mut self, index: usize) -> LeafMut<T> {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
         unsafe { LeafMut::new(ptr.add(index).read().assume_init()) }
     }*/
 
     pub unsafe fn child_pair_at(&mut self, index: usize) -> [NodePtr<T>; 2] {
-        let ptr = self.node.children.as_mut_ptr();
+        let ptr = self.children.as_mut_ptr();
         [unsafe { ptr.add(index).read().assume_init() }, unsafe {
             ptr.add(index + 1).read().assume_init()
         }]
@@ -228,10 +214,12 @@ impl<'a, T> InternalMut<'a, T> {
     }
 }
 
-impl<'a, T> InternalMut<'a, T> {
+impl<T> InternalNode<T> {
     pub fn maybe_handle_underfull_child(&mut self, index: usize) -> bool {
         let is_child_underfull = unsafe {
-            InternalMut::new(self.node.children[index].assume_init_mut().internal_mut())
+            self.children[index]
+                .assume_init_mut()
+                .internal_mut()
                 .is_underfull()
         };
 
@@ -273,12 +261,7 @@ impl<'a, T> InternalMut<'a, T> {
 
     fn handle_underfull_internal_child_head(&mut self) {
         let [mut cur, mut next] = unsafe { self.child_pair_at(0) };
-        let [mut cur, mut next] = unsafe {
-            [
-                InternalMut::new(cur.internal_mut()),
-                InternalMut::new(next.internal_mut()),
-            ]
-        };
+        let [mut cur, mut next] = unsafe { [cur.internal_mut(), next.internal_mut()] };
 
         if next.is_almost_underfull() {
             unsafe {
@@ -298,12 +281,7 @@ impl<'a, T> InternalMut<'a, T> {
 
     fn handle_underfull_internal_child_tail(&mut self, index: usize) {
         let [mut prev, mut cur] = unsafe { self.child_pair_at(index - 1) };
-        let [mut prev, mut cur] = unsafe {
-            [
-                InternalMut::new(prev.internal_mut()),
-                InternalMut::new(cur.internal_mut()),
-            ]
-        };
+        let [mut prev, mut cur] = unsafe { [prev.internal_mut(), cur.internal_mut()] };
 
         if prev.is_almost_underfull() {
             unsafe {
@@ -426,7 +404,7 @@ where
     }*/
 }
 */
-impl<'a, T> InternalMut<'a, T> {
+impl<T> InternalNode<T> {
     pub const UNDERFULL_LEN: usize = (BRANCH_FACTOR - 1) / 2;
 
     fn is_full(&self) -> bool {
@@ -442,15 +420,11 @@ impl<'a, T> InternalMut<'a, T> {
     }
 
     fn len(&self) -> usize {
-        self.node.lengths.total_len()
-    }
-
-    pub fn reborrow(&mut self) -> InternalMut<T> {
-        InternalMut { node: self.node }
+        self.lengths.total_len()
     }
 
     fn len_children(&self) -> usize {
-        self.node.children_len.into()
+        self.children_len.into()
     }
 
     unsafe fn push_front_child(&mut self, child: RawNodeWithLen<T>) {
@@ -478,17 +452,9 @@ impl<'a, T> InternalMut<'a, T> {
     fn is_almost_underfull(&self) -> bool {
         self.len_children() <= Self::UNDERFULL_LEN + 1
     }
-    unsafe fn append_children(&mut self, mut other: Self) {
-        unsafe { self.append_lengths(other.reborrow()) };
+    unsafe fn append_children(&mut self, mut other: &mut InternalNode<T>) {
+        unsafe { self.append_lengths(other) };
         self.children().append(other.children());
-    }
-
-    pub fn internal_mut(&mut self) -> &mut InternalNode<T> {
-        self.node
-    }
-
-    fn lengths_mut(&mut self) -> &mut FenwickTree {
-        &mut self.internal_mut().lengths
     }
 
     unsafe fn steal_length_from_next(&mut self, index: usize, amount: usize) {
@@ -505,18 +471,18 @@ impl<'a, T> InternalMut<'a, T> {
         }
     }
 
-    unsafe fn append_lengths(&mut self, mut other: InternalMut<T>) {
+    unsafe fn append_lengths(&mut self, other: &mut InternalNode<T>) {
         let self_len_children = self.len_children();
         let other_len_children = other.len_children();
-        let other_lens = other.lengths_mut().clone().into_array();
-        self.lengths_mut().with_flat_lens(|lens| {
+        let other_lens = other.lengths.clone().into_array();
+        self.lengths.with_flat_lens(|lens| {
             lens[self_len_children..self_len_children + other_len_children]
                 .copy_from_slice(&other_lens[..other_len_children]);
         });
     }
 
     unsafe fn merge_length_from_next(&mut self, index: usize) {
-        self.lengths_mut().with_flat_lens(|lens| unsafe {
+        self.lengths.with_flat_lens(|lens| unsafe {
             let lens_ptr = lens.as_mut_ptr();
             let next_len = lens_ptr.add(index + 1).read();
             (*lens_ptr.add(index)) += next_len;
@@ -531,7 +497,7 @@ impl<'a, T> InternalMut<'a, T> {
 
     unsafe fn insert_length(&mut self, index: usize, len: usize) {
         let len_children = self.len_children();
-        self.lengths_mut().with_flat_lens(|lens| {
+        self.lengths.with_flat_lens(|lens| {
             for i in (index..len_children).rev() {
                 lens[i + 1] = lens[i];
             }
@@ -541,7 +507,7 @@ impl<'a, T> InternalMut<'a, T> {
 
     unsafe fn split_lengths(&mut self, index: usize) -> FenwickTree {
         let len_children = self.len_children();
-        self.lengths_mut().with_flat_lens(|lens| {
+        self.lengths.with_flat_lens(|lens| {
             let mut other_array = [0; BRANCH_FACTOR];
             for i in index..len_children {
                 other_array[i - index] = lens[i];
@@ -553,7 +519,7 @@ impl<'a, T> InternalMut<'a, T> {
 
     unsafe fn pop_front_length(&mut self) -> usize {
         let len_children = self.len_children();
-        self.lengths_mut().with_flat_lens(|lens| {
+        self.lengths.with_flat_lens(|lens| {
             let first_len = lens[0];
             for i in 1..len_children {
                 lens[i - 1] = lens[i];
@@ -565,20 +531,20 @@ impl<'a, T> InternalMut<'a, T> {
 
     unsafe fn pop_back_length(&mut self) -> usize {
         let len_children = self.len_children();
-        self.lengths_mut()
+        self.lengths
             .with_flat_lens(|lens| mem::take(&mut lens[len_children - 1]))
     }
 
     unsafe fn push_back_length(&mut self, len: usize) {
         let len_children = self.len_children();
-        self.lengths_mut().with_flat_lens(|lens| {
+        self.lengths.with_flat_lens(|lens| {
             lens[len_children] = len;
         });
     }
 
     unsafe fn push_front_length(&mut self, len: usize) {
         let len_children = self.len_children();
-        self.lengths_mut().with_flat_lens(|lens| {
+        self.lengths.with_flat_lens(|lens| {
             for i in (0..len_children).rev() {
                 lens[i + 1] = lens[i];
             }
@@ -587,11 +553,7 @@ impl<'a, T> InternalMut<'a, T> {
     }
 
     pub unsafe fn add_length_wrapping(&mut self, index: usize, amount: usize) {
-        self.lengths_mut().add_wrapping(index, amount);
-    }
-
-    pub fn node_mut(&mut self) -> &mut InternalNode<T> {
-        self.node
+        self.lengths.add_wrapping(index, amount);
     }
 
     pub fn children(&mut self) -> ArrayVecMut<NodePtr<T>> {
@@ -600,7 +562,7 @@ impl<'a, T> InternalMut<'a, T> {
                 children_len,
                 children,
                 ..
-            } = self.node;
+            } = self;
             ArrayVecMut::new(children as *mut _ as _, children_len, BRANCH_FACTOR as u16)
         }
     }
@@ -648,10 +610,10 @@ impl<'a, T> InternalMut<'a, T> {
         let split_index = Self::UNDERFULL_LEN;
 
         let mut new_sibling_node = InternalNode::<T>::new();
-        let mut new_sibling = unsafe { InternalMut::new(new_sibling_node.internal_mut()) };
+        let mut new_sibling = unsafe { new_sibling_node.internal_mut() };
 
         unsafe {
-            *new_sibling.lengths_mut() = self.split_lengths(split_index);
+            new_sibling.lengths = self.split_lengths(split_index);
             self.children().split(split_index, new_sibling.children());
             self.insert_fitting(index, node);
         };
@@ -667,10 +629,10 @@ impl<'a, T> InternalMut<'a, T> {
         let split_index = Self::UNDERFULL_LEN + 1;
 
         let mut new_sibling_node = InternalNode::<T>::new();
-        let mut new_sibling = unsafe { InternalMut::new(new_sibling_node.internal_mut()) };
+        let mut new_sibling = unsafe { new_sibling_node.internal_mut() };
 
         unsafe {
-            *new_sibling.lengths_mut() = self.split_lengths(split_index);
+            new_sibling.lengths = self.split_lengths(split_index);
             self.children().split(split_index, new_sibling.children());
             new_sibling.insert_fitting(index - split_index, node);
         }
