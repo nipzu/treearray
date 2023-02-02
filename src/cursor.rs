@@ -2,7 +2,7 @@ use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 
 use crate::{
     node::{
-        handle::{InternalMut, InternalRef, LeafMut, LeafRef},
+        handle::{InternalMut, LeafMut, LeafRef},
         LeafBase, NodePtr,
     },
     ownership, BVec,
@@ -10,7 +10,7 @@ use crate::{
 
 pub struct CurosrMut2<'a, T> {
     tree: &'a mut BVec<T>,
-    leaf: *mut LeafBase,
+    leaf: *mut LeafBase<T>,
 }
 
 impl<'a, T> CurosrMut2<'a, T> {
@@ -31,7 +31,7 @@ impl<'a, T> CurosrMut2<'a, T> {
 
         CurosrMut2 {
             tree,
-            leaf: cur_node.as_ptr().cast(),
+            leaf: todo!(),
         }
     }
 }

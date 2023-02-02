@@ -1,21 +1,24 @@
 use core::{
+    marker::PhantomData,
     ops::{Index, IndexMut},
     ptr, slice,
 };
 
-pub struct ArrayVecMut<T> {
+pub struct ArrayVecMut<'a, T> {
     array: *mut T,
     len: *mut u16,
     cap: u16,
+    _p: PhantomData<&'a mut T>,
 }
 
-impl<T> ArrayVecMut<T> {
+impl<'a, T> ArrayVecMut<'a, T> {
     pub unsafe fn new(array: *mut T, len: *mut u16, cap: u16) -> Self {
         debug_assert!(unsafe { *len <= cap });
         Self {
             array: array.cast(),
             len,
             cap,
+            _p: PhantomData,
         }
     }
 
@@ -74,7 +77,7 @@ impl<T> ArrayVecMut<T> {
     }
 }
 
-impl<T, I> Index<I> for ArrayVecMut<T>
+impl<'a, T, I> Index<I> for ArrayVecMut<'a, T>
 where
     [T]: Index<I>,
 {
@@ -84,7 +87,7 @@ where
     }
 }
 
-impl<T, I> IndexMut<I> for ArrayVecMut<T>
+impl<'a, T, I> IndexMut<I> for ArrayVecMut<'a, T>
 where
     [T]: IndexMut<I>,
 {

@@ -4,7 +4,7 @@ pub mod handle;
 use core::{
     alloc::Layout,
     marker::PhantomData,
-    mem::{size_of, MaybeUninit},
+    mem::{size_of, ManuallyDrop, MaybeUninit},
     ptr::NonNull,
 };
 
@@ -29,7 +29,20 @@ const LEAF_CAP_BYTES: usize = 256;
 
 pub struct RawNodeWithLen<T>(pub usize, pub NodePtr<T>);
 
-pub type NodePtr<T> = NonNull<NodeBase<T>>;
+pub union NodePtr<T> {
+    internal: ManuallyDrop<Box<InternalNode<T>>>,
+    pub leaf: NonNull<LeafBase<T>>,
+}
+
+impl<T> NodePtr<T> {
+    pub unsafe fn internal_mut(&mut self) -> &mut InternalNode<T> {
+        unsafe { &mut *self.internal }
+    }
+
+    pub unsafe fn into_internal(self) -> Box<InternalNode<T>> {
+        unsafe { ManuallyDrop::into_inner(self.internal) }
+    }
+}
 
 pub struct NodeBase<T> {
     _marker: PhantomData<T>,
@@ -43,18 +56,20 @@ pub struct InternalNode<T> {
 }
 
 #[repr(C)]
-pub struct LeafBase {
-    next: Option<NonNull<LeafBase>>,
-    prev: Option<NonNull<LeafBase>>,
+pub struct LeafBase<T> {
+    next: Option<NonNull<LeafBase<T>>>,
+    prev: Option<NonNull<LeafBase<T>>>,
     len: u16,
+    _p: PhantomData<T>,
 }
 
-impl LeafBase {
+impl<T> LeafBase<T> {
     pub fn new() -> Self {
         Self {
             next: None,
             prev: None,
             len: 0,
+            _p: PhantomData,
         }
     }
 }
@@ -79,16 +94,16 @@ impl<T> NodeBase<T> {
 
     pub fn new_leaf() -> NodePtr<T> {
         let (layout, _) = Self::leaf_layout();
-        let ptr = unsafe { alloc(layout).cast::<LeafBase>() };
+        let ptr = unsafe { alloc(layout).cast::<LeafBase<T>>() };
         let Some(node_ptr) = NonNull::new(ptr) else {
             handle_alloc_error(layout);
         };
         unsafe { node_ptr.as_ptr().write(LeafBase::new()) };
-        node_ptr.cast()
+        NodePtr { leaf: node_ptr }
     }
 
     pub fn leaf_layout() -> (Layout, usize) {
-        let base = Layout::new::<LeafBase>();
+        let base = Layout::new::<LeafBase<T>>();
         let array = Layout::array::<T>(Self::LEAF_CAP).unwrap();
         let (layout, offset) = base.extend(array).unwrap();
         // Remember to finalize with `pad_to_align`!
@@ -100,17 +115,18 @@ impl<T> InternalNode<T> {
     const UNINIT_NODE: MaybeUninit<NodePtr<T>> = MaybeUninit::uninit();
 
     pub fn new() -> NodePtr<T> {
-        NonNull::from(Box::leak(Box::new(Self {
-            children_len: 0,
-            lengths: FenwickTree::new(),
-            children: [Self::UNINIT_NODE; BRANCH_FACTOR],
-        })))
-        .cast()
+        NodePtr {
+            internal: ManuallyDrop::new(Box::new(Self {
+                children_len: 0,
+                lengths: FenwickTree::new(),
+                children: [Self::UNINIT_NODE; BRANCH_FACTOR],
+            })),
+        }
     }
 
     pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T>; N]) -> NodePtr<T> {
-        let boxed_children = Self::new();
-        let mut children_mut = unsafe { InternalMut::new(boxed_children) };
+        let mut boxed_children = Self::new();
+        let mut children_mut = unsafe { InternalMut::new(boxed_children.internal_mut()) };
         for child in children {
             unsafe { children_mut.push_back_child(child) }
         }

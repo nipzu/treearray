@@ -12,20 +12,20 @@ use core::{
     ops::{Index, IndexMut, RangeBounds},
 };
 
-mod cursor;
-pub mod iter;
+//mod cursor;
+//pub mod iter;
 mod node;
 mod ownership;
 mod panics;
 mod utils;
 
-pub use cursor::{Cursor, CursorMut, InboundsCursor, InboundsCursorMut};
+//pub use cursor::{Cursor, CursorMut, InboundsCursor, InboundsCursorMut};
 
-use iter::{Drain, Iter};
+//use iter::{Drain, Iter};
 use node::{handle::LeafMut, InternalNode, NodeBase, NodePtr, RawNodeWithLen};
 use panics::panic_out_of_bounds;
 
-use crate::node::handle::{height, Internal, InternalMut, Leaf, Node};
+use crate::node::handle::{free_internal, height, InternalMut, Leaf, Node};
 
 pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize, y: i32) {
     b.insert(x, y);
@@ -65,41 +65,41 @@ impl<T> BVec<T> {
         self.len != 0
     }
 
-    fn root(&self) -> Option<NodePtr<T>> {
-        self.is_not_empty()
-            .then(|| unsafe { self.root.assume_init() })
-    }
+    /*
+        fn root(&self) -> Option<NodePtr<T>> {
+            self.is_not_empty()
+                .then(|| unsafe { self.root.assume_init() })
+        }
+        #[must_use]
+        pub fn get(&self, index: usize) -> Option<&T> {
+            InboundsCursor::try_new(self, index).map(InboundsCursor::get)
+        }
 
-    #[must_use]
-    pub fn get(&self, index: usize) -> Option<&T> {
-        InboundsCursor::try_new(self, index).map(InboundsCursor::get)
-    }
+        #[must_use]
+        pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+            InboundsCursorMut::try_new(self, index).map(InboundsCursorMut::into_mut)
+        }
 
-    #[must_use]
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        InboundsCursorMut::try_new(self, index).map(InboundsCursorMut::into_mut)
-    }
+        #[must_use]
+        pub fn first(&self) -> Option<&T> {
+            InboundsCursor::try_new_first(self).map(InboundsCursor::get)
+        }
 
-    #[must_use]
-    pub fn first(&self) -> Option<&T> {
-        InboundsCursor::try_new_first(self).map(InboundsCursor::get)
-    }
+        #[must_use]
+        pub fn first_mut(&mut self) -> Option<&mut T> {
+            InboundsCursorMut::try_new_first(self).map(InboundsCursorMut::into_mut)
+        }
 
-    #[must_use]
-    pub fn first_mut(&mut self) -> Option<&mut T> {
-        InboundsCursorMut::try_new_first(self).map(InboundsCursorMut::into_mut)
-    }
+        #[must_use]
+        pub fn last(&self) -> Option<&T> {
+            InboundsCursor::try_new_last(self).map(InboundsCursor::get)
+        }
 
-    #[must_use]
-    pub fn last(&self) -> Option<&T> {
-        InboundsCursor::try_new_last(self).map(InboundsCursor::get)
-    }
-
-    #[must_use]
-    pub fn last_mut(&mut self) -> Option<&mut T> {
-        InboundsCursorMut::try_new_last(self).map(InboundsCursorMut::into_mut)
-    }
-
+        #[must_use]
+        pub fn last_mut(&mut self) -> Option<&mut T> {
+            InboundsCursorMut::try_new_last(self).map(InboundsCursorMut::into_mut)
+        }
+    */
     #[inline]
     pub fn push_front(&mut self, value: T) {
         self.insert(0, value);
@@ -127,7 +127,13 @@ impl<T> BVec<T> {
 
         if self.is_empty() {
             let new_root = NodeBase::new_leaf();
-            unsafe { LeafMut::new(new_root).values_mut().insert(0, value) };
+            unsafe {
+                LeafMut::new(NodePtr {
+                    leaf: new_root.leaf,
+                })
+                .values_mut()
+                .insert(0, value)
+            };
             self.root.write(new_root);
             self.len += 1;
             debug_assert_eq!(self.height, 0);
@@ -136,25 +142,25 @@ impl<T> BVec<T> {
 
         self.len += 1;
         // TODO: if let
-        let root = unsafe { self.root.assume_init() };
+        let root = unsafe { self.root.assume_init_mut() };
 
         unsafe fn insert_to_node<T>(
-            node: NodePtr<T>,
+            node: &mut NodePtr<T>,
             index: usize,
             value: T,
             h: u16,
         ) -> Option<RawNodeWithLen<T>> {
             if h == 0 {
-                let mut leaf = unsafe { LeafMut::new(node) };
+                let mut leaf = unsafe { LeafMut::new(NodePtr { leaf: node.leaf }) };
                 leaf.insert_value(index, value)
             } else {
-                let mut internal = unsafe { InternalMut::new(node) };
+                let mut internal = unsafe { InternalMut::new(node.internal_mut()) };
                 let (new_index, child_index) = internal
-                    .node()
+                    .node
                     .lengths
                     .child_containing_index_inclusive(index);
                 unsafe { internal.add_length_wrapping(child_index, 1) };
-                let child = unsafe { internal.node_mut().children[child_index].assume_init() };
+                let child = unsafe { internal.node_mut().children[child_index].assume_init_mut() };
                 unsafe {
                     insert_to_node(child, new_index, value, h - 1)
                         .map(|r| internal.insert_split_of_child(child_index, r))
@@ -164,7 +170,7 @@ impl<T> BVec<T> {
         }
 
         if let Some(new_node) = unsafe { insert_to_node(root, index, value, self.height) } {
-            let old_root = root;
+            let old_root = unsafe { self.root.assume_init_read() };
             let old_root_len = self.len() - new_node.0;
             self.root.write(InternalNode::from_child_array([
                 RawNodeWithLen(old_root_len, old_root),
@@ -181,70 +187,62 @@ impl<T> BVec<T> {
 
         self.len -= 1;
 
-        unsafe fn remove_from_internal<T>(node: NodePtr<T>, index: usize, h: u16) -> T {
-            match h {
-                1 => {
-                    let mut internal = unsafe { Node::<ownership::Mut, height::One, T>::new(node) };
-                    let (new_index, child_index) =
-                        internal.node().lengths.child_containing_index(index);
-                    unsafe { internal.add_length_wrapping(child_index, 1_usize.wrapping_neg()) };
-                    let mut child = unsafe { internal.child_mut(child_index) };
-                    let ret = child.remove_child(new_index);
+        unsafe fn remove_from_internal<T>(node: &mut NodePtr<T>, index: usize, h: u16) -> T {
+            let mut internal = unsafe { InternalMut::new(node.internal_mut()) };
+            let (new_index, child_index) = internal.node.lengths.child_containing_index(index);
+            unsafe { internal.add_length_wrapping(child_index, 1_usize.wrapping_neg()) };
+            debug_assert_ne!(h, 0);
+            if h == 1 {
+                let mut child =
+                    unsafe { LeafMut::new(internal.node.children[child_index].assume_init_read()) };
+                let ret = child.remove_child(new_index);
 
-                    // TODO: LeafRef
-                    if child.is_underfull() {
-                        if child_index == 0 {
-                            internal.handle_underfull_leaf_child_head();
-                        } else {
-                            internal.handle_underfull_leaf_child_tail(child_index);
-                        }
+                if child.is_underfull() {
+                    if child_index == 0 {
+                        internal.handle_underfull_leaf_child_head();
+                    } else {
+                        internal.handle_underfull_leaf_child_tail(child_index);
                     }
-                    ret
                 }
-                _ => {
-                    let mut internal =
-                        unsafe { Node::<ownership::Mut, height::TwoOrMore, T>::new(node) };
-                    let (new_index, child_index) =
-                        internal.node().lengths.child_containing_index(index);
-                    unsafe { internal.add_length_wrapping(child_index, 1_usize.wrapping_neg()) };
-                    let child = unsafe { internal.node_mut().children[child_index].assume_init() };
-                    let ret = unsafe { remove_from_internal(child, new_index, h - 1) };
+                ret
+            } else {
+                let child = unsafe { internal.node.children[child_index].assume_init_mut() };
+                let ret = unsafe { remove_from_internal(child, new_index, h - 1) };
 
-                    internal.maybe_handle_underfull_child(child_index);
-                    ret
-                }
+                internal.maybe_handle_underfull_child(child_index);
+                ret
             }
         }
 
-        let root = unsafe { self.root.assume_init() };
+        let root = unsafe { self.root.assume_init_mut() };
         let h = self.height;
         let ret;
 
         if h > 0 {
             ret = unsafe { remove_from_internal(root, index, h) };
             unsafe {
-                let mut old_root = Internal::new(self.root.assume_init());
+                let mut old_root = InternalMut::new(self.root.assume_init_mut().internal_mut());
 
                 if old_root.is_singleton() {
                     let new_root = old_root.children().remove(0);
-                    old_root.free();
+                    free_internal(self.root.assume_init_read());
                     self.root.write(new_root);
                     debug_assert_ne!(self.height, 0);
                     self.height -= 1;
                 }
             }
         } else {
-            let mut leaf = unsafe { LeafMut::new(root) };
+            let mut leaf = unsafe { LeafMut::new(NodePtr { leaf: root.leaf }) };
             ret = leaf.remove_child(index);
             if leaf.len() == 0 {
-                unsafe { Leaf::new(root).free() };
+                unsafe { Leaf::new(NodePtr { leaf: root.leaf }).free() };
             }
         }
 
         ret
     }
 
-    #[must_use]
+    /*#[must_use]
     pub fn iter(&self) -> Iter<T> {
         unsafe { Iter::new(self, 0, self.len()) }
     }
@@ -264,7 +262,7 @@ impl<T> BVec<T> {
     #[must_use]
     pub fn cursor_at_mut(&mut self, index: usize) -> CursorMut<T> {
         CursorMut::new(self, index)
-    }
+    }*/
 }
 
 impl<T> Drop for BVec<T> {
@@ -279,6 +277,7 @@ impl<T> Default for BVec<T> {
     }
 }
 
+/*
 impl<T: fmt::Debug> fmt::Debug for BVec<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -291,7 +290,6 @@ impl<T: Hash> Hash for BVec<T> {
         self.iter().for_each(|elem| elem.hash(state));
     }
 }
-/*
 impl<T> Extend<T> for BVec<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         let mut cursor = CursorInner::new_past_the_end(self);
@@ -301,7 +299,7 @@ impl<T> Extend<T> for BVec<T> {
         }
     }
 }
-*/
+
 impl<T> Index<usize> for BVec<T> {
     type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
@@ -316,7 +314,7 @@ impl<T> IndexMut<usize> for BVec<T> {
         self.get_mut(index)
             .unwrap_or_else(|| panic_out_of_bounds(index, len))
     }
-}
+}*/
 
 #[cfg(test)]
 mod tests {
@@ -326,7 +324,7 @@ mod tests {
 
     use super::*;
 
-    fn _assert_cursor_mut_lifetime_covariant<'a, 'b>(x: CursorMut<'a, i32>) -> CursorMut<'b, i32>
+    /*fn _assert_cursor_mut_lifetime_covariant<'a, 'b>(x: CursorMut<'a, i32>) -> CursorMut<'b, i32>
     where
         'a: 'b,
     {
@@ -345,7 +343,7 @@ mod tests {
         'b: 'c,
     {
         x
-    }
+    }*/
 
     #[test]
     fn test_new() {
