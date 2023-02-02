@@ -25,7 +25,7 @@ use iter::{Drain, Iter};
 use node::{handle::LeafMut, InternalNode, NodeBase, NodePtr, RawNodeWithLen};
 use panics::panic_out_of_bounds;
 
-use crate::node::handle::{height, Internal, InternalMut, Node, Leaf};
+use crate::node::handle::{height, Internal, InternalMut, Leaf, Node};
 
 pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize, y: i32) {
     b.insert(x, y);
@@ -163,9 +163,7 @@ impl<T> BVec<T> {
             }
         }
 
-        if let Some(new_node) =
-            unsafe { insert_to_node(root, index, value, self.height) }
-        {
+        if let Some(new_node) = unsafe { insert_to_node(root, index, value, self.height) } {
             let old_root = root;
             let old_root_len = self.len() - new_node.0;
             self.root.write(InternalNode::from_child_array([
@@ -183,21 +181,20 @@ impl<T> BVec<T> {
 
         self.len -= 1;
 
-        unsafe fn remove_from_node<T>(node: NodePtr<T>, index: usize, h: u16) -> T {
+        unsafe fn remove_from_leaf<T>(node: NodePtr<T>, index: usize) -> T {
+            let mut leaf = unsafe { LeafMut::new(node) };
+            leaf.remove_child(index)
+        }
+
+        unsafe fn remove_from_internal<T>(node: NodePtr<T>, index: usize, h: u16) -> T {
             match h {
-                0 => {
-                    let mut leaf = unsafe { LeafMut::new(node) };
-                    leaf.remove_child(index)
-                }
                 1 => {
                     let mut internal = unsafe { Node::<ownership::Mut, height::One, T>::new(node) };
-                    let (new_index, child_index) = internal
-                        .node()
-                        .lengths
-                        .child_containing_index(index);
+                    let (new_index, child_index) =
+                        internal.node().lengths.child_containing_index(index);
                     unsafe { internal.add_length_wrapping(child_index, 1_usize.wrapping_neg()) };
                     let child = unsafe { internal.node_mut().children[child_index].assume_init() };
-                    let ret = unsafe { remove_from_node(child, new_index, 0) };
+                    let ret = unsafe { remove_from_leaf(child, new_index) };
 
                     // TODO: LeafRef
                     if unsafe { LeafMut::new(child).is_underfull() } {
@@ -210,14 +207,13 @@ impl<T> BVec<T> {
                     ret
                 }
                 _ => {
-                    let mut internal = unsafe { Node::<ownership::Mut, height::TwoOrMore, T>::new(node) };
-                    let (new_index, child_index) = internal
-                        .node()
-                        .lengths
-                        .child_containing_index(index);
+                    let mut internal =
+                        unsafe { Node::<ownership::Mut, height::TwoOrMore, T>::new(node) };
+                    let (new_index, child_index) =
+                        internal.node().lengths.child_containing_index(index);
                     unsafe { internal.add_length_wrapping(child_index, 1_usize.wrapping_neg()) };
                     let child = unsafe { internal.node_mut().children[child_index].assume_init() };
-                    let ret = unsafe { remove_from_node(child, new_index, h - 1) };
+                    let ret = unsafe { remove_from_internal(child, new_index, h - 1) };
 
                     internal.maybe_handle_underfull_child(child_index);
                     ret
@@ -227,9 +223,10 @@ impl<T> BVec<T> {
 
         let root = unsafe { self.root.assume_init() };
         let h = self.height;
-        let ret = unsafe { remove_from_node(root, index, h) };
+        let ret;
 
         if h > 0 {
+            ret = unsafe { remove_from_internal(root, index, h) };
             unsafe {
                 let mut old_root = Internal::new(self.root.assume_init());
 
@@ -241,8 +238,11 @@ impl<T> BVec<T> {
                     self.height -= 1;
                 }
             }
-        } else if unsafe { LeafMut::new(root).len() == 0 } {
-            unsafe { Leaf::new(root).free() };
+        } else {
+            ret = unsafe { remove_from_leaf(root, index) };
+            if unsafe { LeafMut::new(root).len() == 0 } {
+                unsafe { Leaf::new(root).free() };
+            }
         }
 
         ret
@@ -374,56 +374,56 @@ mod tests {
     }
     #[test]
     fn test_push_front_back() {
-            let mut b = BVec::<i32>::new();
-            let mut l = 0;
-            for x in 0..500 {
+        let mut b = BVec::<i32>::new();
+        let mut l = 0;
+        for x in 0..500 {
+            b.push_back(x);
+            l += 1;
+            assert_eq!(l, b.len());
+        }
+
+        for x in (-500..0).rev() {
+            b.push_front(x);
+            l += 1;
+            assert_eq!(l, b.len());
+        }
+
+        //for (a, b) in b.iter().zip(-500..) {
+        //    assert_eq!(*a, b);
+        //}
+    }
+
+    #[test]
+    fn test_push_pop_front_back() {
+        use alloc::vec::Vec;
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+
+        let mut b = BVec::<i32>::new();
+        let mut v = Vec::new();
+        for x in 0..1000 {
+            if rng.gen() {
                 b.push_back(x);
-                l += 1;
-                assert_eq!(l, b.len());
-            }
-
-            for x in (-500..0).rev() {
+                v.push(x);
+            } else {
                 b.push_front(x);
-                l += 1;
-                assert_eq!(l, b.len());
-            }
-            
-            //for (a, b) in b.iter().zip(-500..) {
-            //    assert_eq!(*a, b);
-            //}
-        }
-        
-        #[test]
-        fn test_push_pop_front_back() {
-            use alloc::vec::Vec;
-            use rand::{Rng, SeedableRng};
-            
-            let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
-            
-            let mut b = BVec::<i32>::new();
-            let mut v = Vec::new();
-            for x in 0..1000 {
-                if rng.gen() {
-                    b.push_back(x);
-                    v.push(x);
-                } else {
-                    b.push_front(x);
-                    v.insert(0, x);
-                }
-            }
-            
-            for _ in 0..1000 {
-                let (x, y) = if rng.gen() {
-                    (b.remove(b.len() - 1), v.pop().unwrap())
-                } else {
-                    (b.remove(0), v.remove(0))
-                };
-                assert_eq!(x, y);
-                assert_eq!(b.len(), v.len());
+                v.insert(0, x);
             }
         }
 
-        #[test]
+        for _ in 0..1000 {
+            let (x, y) = if rng.gen() {
+                (b.remove(b.len() - 1), v.pop().unwrap())
+            } else {
+                (b.remove(0), v.remove(0))
+            };
+            assert_eq!(x, y);
+            assert_eq!(b.len(), v.len());
+        }
+    }
+
+    #[test]
     fn test_random_insertions() {
         use alloc::vec::Vec;
         use rand::{Rng, SeedableRng};
@@ -448,17 +448,17 @@ mod tests {
     fn test_random_removals() {
         use alloc::vec::Vec;
         use rand::{Rng, SeedableRng};
-        
+
         let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
-        
+
         let mut v = Vec::new();
         let mut b = BVec::<i32>::new();
-        
+
         for x in 0..1000 {
             v.push(x);
             b.push_back(x);
         }
-        
+
         while !v.is_empty() {
             let index = rng.gen_range(0..v.len());
             let v_rem = v.remove(index);
@@ -466,7 +466,7 @@ mod tests {
             assert_eq!(v.len(), b.len());
             assert_eq!(v_rem, b_rem);
         }
-        
+
         assert!(b.is_empty());
     }
     /*

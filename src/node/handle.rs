@@ -7,12 +7,13 @@ use core::{
 use alloc::boxed::Box;
 
 use crate::{
-    node::{InternalNode, NodeBase, NodePtr, RawNodeWithLen, BRANCH_FACTOR},
+    node::{
+        fenwick::FenwickTree, InternalNode, LeafBase, NodeBase, NodePtr, RawNodeWithLen,
+        BRANCH_FACTOR,
+    },
     ownership,
     utils::ArrayVecMut,
 };
-
-use super::fenwick::FenwickTree;
 
 impl<'a, T: 'a> LeafRef<'a, T> {
     pub unsafe fn value_unchecked(&self, index: usize) -> &'a T {
@@ -100,7 +101,7 @@ where
     O: ownership::Ownership<T>,
 {
     pub fn len(&self) -> usize {
-        unsafe { usize::from(self.node.as_ref().children_len) }
+        unsafe { usize::from(self.node.cast::<LeafBase>().as_ref().len) }
     }
 }
 
@@ -111,7 +112,7 @@ impl<'a, T: 'a> LeafMut<'a, T> {
             let array = self.node.as_ptr().cast::<u8>().add(offset).cast();
             ArrayVecMut::new(
                 array,
-                addr_of_mut!((*self.node.as_ptr()).children_len).cast(),
+                addr_of_mut!((*self.node.cast::<LeafBase>().as_ptr()).len),
                 NodeBase::<T>::LEAF_CAP as u16,
             )
         }
@@ -382,7 +383,7 @@ where
     pub fn len(&self) -> usize {
         self.node().lengths.total_len()
     }
-/*
+    /*
     pub unsafe fn sum_lens_below(&self, index: usize) -> usize {
         unsafe { self.node().lengths.prefix_sum(index) }
     }*/
