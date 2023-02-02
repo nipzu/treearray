@@ -3,10 +3,38 @@ use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
 use crate::{
     node::{
         handle::{InternalMut, InternalRef, LeafMut, LeafRef},
-        NodePtr,
+        LeafBase, NodePtr,
     },
     ownership, BVec,
 };
+
+pub struct CurosrMut2<'a, T> {
+    tree: &'a mut BVec<T>,
+    leaf: *mut LeafBase,
+}
+
+impl<'a, T> CurosrMut2<'a, T> {
+    fn new(tree: &mut BVec<T>, mut index: usize) -> CurosrMut2<T> {
+        if index >= tree.len() {
+            panic!();
+        }
+
+        let mut cur_node = unsafe { tree.root.assume_init() };
+        let height = tree.height;
+
+        // the height of `cur_node` is `height`
+        // decrement the height of `cur_node` `height` times
+        for _ in 0..height {
+            let handle = unsafe { InternalMut::new(cur_node) };
+            cur_node = unsafe { handle.into_child_containing_index(&mut index) };
+        }
+
+        CurosrMut2 {
+            tree,
+            leaf: cur_node.as_ptr().cast(),
+        }
+    }
+}
 
 // TODO: auto traits: Send, Sync, Unpin, UnwindSafe?
 pub struct CursorInner<'a, O, T: 'a>
