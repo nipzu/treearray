@@ -181,11 +181,6 @@ impl<T> BVec<T> {
 
         self.len -= 1;
 
-        unsafe fn remove_from_leaf<T>(node: NodePtr<T>, index: usize) -> T {
-            let mut leaf = unsafe { LeafMut::new(node) };
-            leaf.remove_child(index)
-        }
-
         unsafe fn remove_from_internal<T>(node: NodePtr<T>, index: usize, h: u16) -> T {
             match h {
                 1 => {
@@ -193,11 +188,11 @@ impl<T> BVec<T> {
                     let (new_index, child_index) =
                         internal.node().lengths.child_containing_index(index);
                     unsafe { internal.add_length_wrapping(child_index, 1_usize.wrapping_neg()) };
-                    let child = unsafe { internal.node_mut().children[child_index].assume_init() };
-                    let ret = unsafe { remove_from_leaf(child, new_index) };
+                    let mut child = unsafe { internal.child_mut(child_index) };
+                    let ret = child.remove_child(new_index);
 
                     // TODO: LeafRef
-                    if unsafe { LeafMut::new(child).is_underfull() } {
+                    if child.is_underfull() {
                         if child_index == 0 {
                             internal.handle_underfull_leaf_child_head();
                         } else {
@@ -239,8 +234,9 @@ impl<T> BVec<T> {
                 }
             }
         } else {
-            ret = unsafe { remove_from_leaf(root, index) };
-            if unsafe { LeafMut::new(root).len() == 0 } {
+            let mut leaf = unsafe { LeafMut::new(root) };
+            ret = leaf.remove_child(index);
+            if leaf.len() == 0 {
                 unsafe { Leaf::new(root).free() };
             }
         }

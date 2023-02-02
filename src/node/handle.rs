@@ -142,11 +142,19 @@ impl<'a, T: 'a> LeafMut<'a, T> {
         assert!(index <= self.len());
 
         if self.is_full() {
-            Some(if index <= NodeBase::<T>::LEAF_CAP / 2 {
+            let new_node = if index <= NodeBase::<T>::LEAF_CAP / 2 {
                 self.split_and_insert_left(index, value)
             } else {
                 self.split_and_insert_right(index, value)
-            })
+            };
+            unsafe {
+                let old_next = (*self.node.cast::<LeafBase>().as_ptr()).next;
+                (*self.node.cast::<LeafBase>().as_ptr()).next = Some(new_node.1.cast());
+                new_node.1.cast::<LeafBase>().as_mut().next = old_next;
+                new_node.1.cast::<LeafBase>().as_mut().prev = Some(self.node.cast());
+            };
+
+            Some(new_node)
         } else {
             self.values_mut().insert(index, value);
             None
@@ -176,12 +184,12 @@ impl<O, T> Node<O, height::One, T>
 where
     O: ownership::Mutable<T>,
 {
-    pub fn child_mut(&mut self, index: usize) -> LeafMut<T> {
+    pub unsafe fn child_mut(&mut self, index: usize) -> LeafMut<T> {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
         unsafe { LeafMut::new(ptr.add(index).read().assume_init()) }
     }
 
-    pub fn child_pair_at(&mut self, index: usize) -> [LeafMut<T>; 2] {
+    pub unsafe fn child_pair_at(&mut self, index: usize) -> [LeafMut<T>; 2] {
         let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
         [
             unsafe { LeafMut::new(ptr.add(index).read().assume_init()) },
@@ -190,7 +198,7 @@ where
     }
 
     pub fn handle_underfull_leaf_child_head(&mut self) {
-        let [mut cur, mut next] = self.child_pair_at(0);
+        let [mut cur, mut next] = unsafe { self.child_pair_at(0) };
 
         unsafe {
             if next.is_almost_underfull() {
@@ -205,7 +213,7 @@ where
     }
 
     pub fn handle_underfull_leaf_child_tail(&mut self, index: usize) {
-        let [mut prev, mut cur] = self.child_pair_at(index - 1);
+        let [mut prev, mut cur] = unsafe { self.child_pair_at(index - 1) };
 
         unsafe {
             if prev.is_almost_underfull() {
@@ -312,7 +320,22 @@ where
 impl<T> Leaf<T> {
     pub fn free(self) {
         let (layout, _) = NodeBase::<T>::leaf_layout();
-        unsafe { alloc::alloc::dealloc(self.node.cast().as_ptr(), layout) }
+        unsafe {
+            let ptr = self.node.cast::<LeafBase>();
+            let next = ptr.as_ref().next;
+            let prev = ptr.as_ref().prev;
+
+            if let Some(p_next) = next {
+                // TODO: can we take mut ref?
+                (*p_next.as_ptr()).prev = prev;
+            }
+
+            if let Some(p_prev) = prev {
+                (*p_prev.as_ptr()).next = next;
+            }
+
+            alloc::alloc::dealloc(self.node.cast().as_ptr(), layout)
+        }
     }
 }
 
