@@ -2,7 +2,7 @@
 
 // TODO: impl FusedIterator
 
-use core::{iter::FusedIterator, ops::Bound, ops::RangeBounds};
+use core::iter::FusedIterator;
 
 use crate::{cursor::Cursor, BVec};
 
@@ -53,9 +53,9 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
     // TODO: advance_by
 }
-/*
-impl<'a, T> ExactSizeIterator for Iter<'a, T> {}
 impl<'a, T> FusedIterator for Iter<'a, T> {}
+// impl<'a, T> ExactSizeIterator for Iter<'a, T> {}
+/*
 
 pub struct Drain<'a, T> {
     cursor: CursorMut<'a, T>,

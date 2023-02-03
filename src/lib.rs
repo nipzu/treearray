@@ -9,7 +9,7 @@ use core::{
     fmt,
     hash::{Hash, Hasher},
     mem::MaybeUninit,
-    ops::{Index, IndexMut, RangeBounds},
+    ops::{Index, IndexMut},
 };
 
 mod cursor;
@@ -19,13 +19,13 @@ mod ownership;
 mod panics;
 mod utils;
 
-pub use cursor::Cursor;
+pub use cursor::{Cursor, CursorMut};
 
-//use iter::{Drain, Iter};
+use iter::Iter;
 use node::{handle::LeafMut, InternalNode, NodeBase, NodePtr, RawNodeWithLen};
 use panics::panic_out_of_bounds;
 
-use crate::node::handle::{free_internal, height, Leaf, LeafPtr};
+use crate::node::handle::{free_internal, Leaf};
 
 pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize, y: i32) {
     b.insert(x, y);
@@ -60,11 +60,6 @@ impl<T> BVec<T> {
         self.len == 0
     }
 
-    // TODO: should this be pub?
-    const fn is_not_empty(&self) -> bool {
-        self.len != 0
-    }
-
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&T> {
         Cursor::try_new_inbounds(self, index)
@@ -72,12 +67,13 @@ impl<T> BVec<T> {
             .and_then(Cursor::get)
     }
 
-    /*
-        #[must_use]
-        pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-            InboundsCursorMut::try_new(self, index).map(InboundsCursorMut::into_mut)
-        }
+    #[must_use]
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        CursorMut::try_new_inbounds(self, index)
+            .and_then(CursorMut::into_current)
+    }
 
+    /*
         #[must_use]
         pub fn first(&self) -> Option<&T> {
             InboundsCursor::try_new_first(self).map(InboundsCursor::get)
@@ -231,11 +227,11 @@ impl<T> BVec<T> {
         ret
     }
 
-    /*#[must_use]
+    #[must_use]
     pub fn iter(&self) -> Iter<T> {
-        unsafe { Iter::new(self, 0, self.len()) }
+        unsafe { Iter::new(self) }
     }
-
+/*
     pub fn drain<R>(&mut self, range: R) -> Drain<T>
     where
         R: RangeBounds<usize>,
@@ -266,7 +262,6 @@ impl<T> Default for BVec<T> {
     }
 }
 
-/*
 impl<T: fmt::Debug> fmt::Debug for BVec<T> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_list().entries(self.iter()).finish()
@@ -279,6 +274,7 @@ impl<T: Hash> Hash for BVec<T> {
         self.iter().for_each(|elem| elem.hash(state));
     }
 }
+/*
 impl<T> Extend<T> for BVec<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         let mut cursor = CursorInner::new_past_the_end(self);
@@ -288,7 +284,7 @@ impl<T> Extend<T> for BVec<T> {
         }
     }
 }
-
+*/
 impl<T> Index<usize> for BVec<T> {
     type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
@@ -303,7 +299,7 @@ impl<T> IndexMut<usize> for BVec<T> {
         self.get_mut(index)
             .unwrap_or_else(|| panic_out_of_bounds(index, len))
     }
-}*/
+}
 
 #[cfg(test)]
 mod tests {
@@ -371,9 +367,9 @@ mod tests {
             assert_eq!(l, b.len());
         }
 
-        //for (a, b) in b.iter().zip(-500..) {
-        //    assert_eq!(*a, b);
-        //}
+        for (a, b) in b.iter().zip(-500..) {
+           assert_eq!(*a, b);
+        }
     }
 
     #[test]
@@ -423,8 +419,7 @@ mod tests {
             assert_eq!(v.len(), b.len());
         }
 
-        //assert_eq!(v, b_4_5.iter().copied().collect::<Vec<_>>());
-        //assert_eq!(v, b_5_4.iter().copied().collect::<Vec<_>>());
+        assert_eq!(v, b.iter().copied().collect::<Vec<_>>());
     }
 
     #[test]
@@ -535,7 +530,7 @@ mod tests {
         assert!(b_4_4.is_empty());
         assert!(b_5_5.is_empty());
     }
-
+*/
     #[test]
     fn test_bvec_debug() {
         use alloc::format;
@@ -550,6 +545,7 @@ mod tests {
         assert_eq!(format!("{v:?}"), format!("{b:?}"));
     }
 
+    /*
     #[test]
     fn test_random_double_removals() {
         use alloc::vec::Vec;
@@ -631,7 +627,7 @@ mod tests {
             assert_eq!(y, *b_5_5.cursor_at_mut(i).get().unwrap());
         }
     }
-
+*/
     #[test]
     fn test_bvec_iter() {
         let n = 1000;
@@ -642,7 +638,7 @@ mod tests {
 
         assert!(b.iter().copied().eq(0..n));
     }
-
+/*
     #[test]
     fn test_bvec_extend() {
         let n = 500;
@@ -662,12 +658,14 @@ mod tests {
         let mut c = b.cursor_at_mut(0);
         c.move_(0);
     }
-
+*/
     #[test]
     fn test_bvec_hash() {
         let n = 1000;
         let mut b = BVec::new();
-        b.extend(0..n);
+        for x in 0..n {
+            b.push_back(x);
+        }
 
         let v = alloc::vec::Vec::from_iter(0..n);
 
@@ -681,7 +679,7 @@ mod tests {
 
         assert_eq!(v_hash, b_hash);
     }
-
+/*
     #[test]
     fn test_empty_cursor() {
         let mut bvec = BVec::<i32>::new();

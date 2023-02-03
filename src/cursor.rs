@@ -1,23 +1,20 @@
-use core::{marker::PhantomData, mem::MaybeUninit, ptr::NonNull};
-
 use crate::{
     node::{
         handle::{LeafMut, LeafRef},
-        LeafBase, NodeBase, NodePtr,
     },
-    ownership, BVec,
+    BVec,
 };
 
-pub struct CurosrMut2<'a, T> {
+pub struct CursorMut<'a, T> {
     tree: &'a mut BVec<T>,
     leaf: Option<LeafMut<'a, T>>,
     leaf_index: usize,
 }
 
-impl<'a, T> CurosrMut2<'a, T> {
-    fn new_inbounds(tree: &mut BVec<T>, mut index: usize) -> CurosrMut2<T> {
+impl<'a, T> CursorMut<'a, T> {
+    pub(crate) fn try_new_inbounds(tree: &mut BVec<T>, mut index: usize) -> Option<CursorMut<T>> {
         if index >= tree.len() {
-            panic!();
+            return None;
         }
 
         let mut cur_node = unsafe { tree.root.assume_init_mut() };
@@ -32,17 +29,23 @@ impl<'a, T> CurosrMut2<'a, T> {
             cur_node = unsafe { internal.children[child_index].assume_init_mut() };
         }
 
-        CurosrMut2 {
+        Some(CursorMut {
             leaf: unsafe { Some(LeafMut::new(cur_node.leaf)) },
             tree,
             leaf_index: index,
-        }
+        })
     }
 
     pub fn get_mut(&mut self) -> Option<&mut T> {
         let index = self.leaf_index;
         // TODO: HACK: fix this
         let leaf = unsafe { core::ptr::read(self.leaf.as_mut()?) };
+        unsafe { Some(leaf.into_value_unchecked_mut(index)) }
+    }
+
+    pub fn into_current(self) -> Option<&'a mut T> {
+        let index = self.leaf_index;
+        let leaf = self.leaf?;
         unsafe { Some(leaf.into_value_unchecked_mut(index)) }
     }
 }
@@ -91,10 +94,11 @@ impl<'a, T> Cursor<'a, T> {
         if let Some(leaf) = &self.leaf {
             self.leaf_index += 1;
             if leaf.len() == self.leaf_index {
+                self.leaf_index = 0;
                 self.leaf = unsafe { leaf.node.as_ref().next.map(|n| LeafRef::new(n)) };
             }
         } else {
-            todo!()
+            *self = Self::new_ghost(self.tree);
         }
     }
 

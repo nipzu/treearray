@@ -1,7 +1,6 @@
 use core::{
     marker::PhantomData,
-    ops::{Index, IndexMut},
-    ptr, slice,
+    ptr,
 };
 
 pub struct ArrayVecMut<'a, T> {
@@ -74,28 +73,5 @@ impl<'a, T> ArrayVecMut<'a, T> {
             *self.len += *other.len;
             *other.len = 0;
         }
-    }
-
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        (index < self.len()).then(|| unsafe { &mut *self.array.add(index) })
-    }
-}
-
-impl<'a, T, I> Index<I> for ArrayVecMut<'a, T>
-where
-    [T]: Index<I>,
-{
-    type Output = <[T] as Index<I>>::Output;
-    fn index(&self, index: I) -> &Self::Output {
-        unsafe { slice::from_raw_parts(self.array, (*self.len).into()).index(index) }
-    }
-}
-
-impl<'a, T, I> IndexMut<I> for ArrayVecMut<'a, T>
-where
-    [T]: IndexMut<I>,
-{
-    fn index_mut(&mut self, index: I) -> &mut Self::Output {
-        unsafe { slice::from_raw_parts_mut(self.array, (*self.len).into()).index_mut(index) }
     }
 }
