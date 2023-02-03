@@ -75,6 +75,10 @@ impl<'a, T> ArrayVecMut<'a, T> {
             *other.len = 0;
         }
     }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        (index < self.len()).then(|| unsafe { &mut *self.array.add(index) })
+    }
 }
 
 impl<'a, T, I> Index<I> for ArrayVecMut<'a, T>

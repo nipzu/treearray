@@ -35,8 +35,12 @@ pub union NodePtr<T> {
 }
 
 impl<T> NodePtr<T> {
+    pub unsafe fn internal_ref(&self) -> &InternalNode<T> {
+        unsafe { &self.internal }
+    }
+
     pub unsafe fn internal_mut(&mut self) -> &mut InternalNode<T> {
-        unsafe { &mut *self.internal }
+        unsafe { &mut self.internal }
     }
 
     pub unsafe fn into_internal(self) -> Box<InternalNode<T>> {
@@ -57,9 +61,9 @@ pub struct InternalNode<T> {
 
 #[repr(C)]
 pub struct LeafBase<T> {
-    next: Option<NonNull<LeafBase<T>>>,
+    pub next: Option<NonNull<LeafBase<T>>>,
     prev: Option<NonNull<LeafBase<T>>>,
-    len: u16,
+    pub len: u16,
     _p: PhantomData<T>,
 }
 
@@ -126,7 +130,7 @@ impl<T> InternalNode<T> {
 
     pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T>; N]) -> NodePtr<T> {
         let mut boxed_children = Self::new();
-        let mut children_mut = unsafe { boxed_children.internal_mut() };
+        let children_mut = unsafe { boxed_children.internal_mut() };
         for child in children {
             unsafe { children_mut.push_back_child(child) }
         }

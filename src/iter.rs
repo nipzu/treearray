@@ -4,20 +4,18 @@
 
 use core::{iter::FusedIterator, ops::Bound, ops::RangeBounds};
 
-use crate::{cursor::CursorInner, ownership, BVec, CursorMut};
+use crate::{cursor::Cursor, BVec};
 
 #[derive(Clone)]
 pub struct Iter<'a, T> {
-    cursor: CursorInner<'a, ownership::Immut<'a>, T>,
-    remaining_count: usize,
+    cursor: Cursor<'a, T>,
 }
 
 impl<'a, T> Iter<'a, T> {
     #[must_use]
-    pub(crate) unsafe fn new(v: &'a BVec<T>, start: usize, end: usize) -> Self {
+    pub(crate) unsafe fn new(v: &'a BVec<T>) -> Self {
         Self {
-            cursor: CursorInner::new(v, start),
-            remaining_count: end - start,
+            cursor: Cursor::try_new_inbounds(v, 0).unwrap_or_else(|| Cursor::new_ghost(v)),
         }
     }
 }
@@ -26,17 +24,14 @@ impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        /*(self.remaining_count > 0).then(|| {
-            let ret = unsafe { self.cursor.get_unchecked() };
-            self.remaining_count -= 1;
-            if self.remaining_count != 0 {
-                self.cursor.move_next_inbounds_unchecked();
-            }
-            ret
-        })*/
-        todo!()
+        let res = self.cursor.get();
+        if res.is_some() {
+            self.cursor.move_right();
+        }
+        res
     }
 
+    /*
     fn size_hint(&self) -> (usize, Option<usize>) {
         (self.remaining_count, Some(self.remaining_count))
     }
@@ -45,7 +40,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
         self.remaining_count
     }
 
-    /*fn nth(&mut self, n: usize) -> Option<Self::Item> {
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
         if n >= self.remaining_count {
             self.remaining_count = 0;
             None
@@ -58,7 +53,7 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
     // TODO: advance_by
 }
-
+/*
 impl<'a, T> ExactSizeIterator for Iter<'a, T> {}
 impl<'a, T> FusedIterator for Iter<'a, T> {}
 
@@ -89,7 +84,7 @@ impl<'a, T> Drain<'a, T> {
             remaining_count: end.saturating_sub(start),
         }
     }
-}
+}*/
 /*impl<'a, T> Iterator for Drain<'a, T> {
     type Item = T;
 
