@@ -1,6 +1,6 @@
 //! Iterator `struct`s for `BVec`.
 
-// TODO: impl FusedIterator
+// TODO: impl ExactSized and Fused
 
 use core::iter::FusedIterator;
 

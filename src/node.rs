@@ -87,7 +87,7 @@ impl<T> LeafBase<T> {
 impl<T> NodeBase<T> {
     const LEAF_CAP: usize = if size_of::<T>() <= LEAF_CAP_BYTES {
         if size_of::<T>() == 0 {
-            // TODO: should this be 0?
+            // TODO: what should this be?
             1
         } else {
             LEAF_CAP_BYTES / size_of::<T>()

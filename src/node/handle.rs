@@ -124,6 +124,9 @@ impl<'a, T: 'a> LeafMut<'a, T> {
                 (*self.node.as_ptr()).next = Some(new_node.1.leaf);
                 new_node.1.leaf.as_mut().next = old_next;
                 new_node.1.leaf.as_mut().prev = Some(self.node);
+                if let Some(next_of_next) = old_next {
+                    (*next_of_next.as_ptr()).prev = Some(new_node.1.leaf);
+                }
             };
 
             Some(new_node)
@@ -266,10 +269,12 @@ impl<T> Leaf<T> {
 
             if let Some(p_next) = next {
                 // TODO: can we take mut ref?
+                debug_assert_eq!((*p_next.as_ptr()).prev, Some(self.node));
                 (*p_next.as_ptr()).prev = prev;
             }
 
             if let Some(p_prev) = prev {
+                debug_assert_eq!((*p_prev.as_ptr()).next, Some(self.node));
                 (*p_prev.as_ptr()).next = next;
             }
 

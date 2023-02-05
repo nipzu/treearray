@@ -355,6 +355,7 @@ mod tests {
             size_of::<*mut ()>() + 2 * size_of::<usize>()
         )
     }
+
     #[test]
     fn test_push_front_back() {
         let mut b = BVec::<i32>::new();
@@ -485,6 +486,72 @@ mod tests {
 
         assert!(b.is_empty());
     }
+
+    #[test]
+    fn test_everything() {
+        use alloc::vec::Vec;
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+
+        let mut v = Vec::new();
+        let mut b = BVec::<i32>::new();
+
+        for x in 0..1000 {
+            let index = rng.gen_range(0..=v.len());
+            v.insert(index, x);
+            b.insert(index, x);
+        }
+
+        for i in 0..1000 {
+            assert_eq!(v.get(i), b.get(i));
+        }
+
+        assert_eq!(v, b.iter().copied().collect::<Vec<_>>());
+
+        while !v.is_empty() {
+            let index = rng.gen_range(0..v.len());
+            let v_rem = v.remove(index);
+            let b_rem = b.remove(index);
+            assert_eq!(v.len(), b.len());
+            assert_eq!(v_rem, b_rem);
+        }
+
+        assert!(b.is_empty());
+    }
+
+    #[test]
+    fn test_zst_bvec() {
+        use alloc::vec::Vec;
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+
+        let mut v = Vec::new();
+        let mut b = BVec::<()>::new();
+
+        for _ in 0..1000 {
+            let index = rng.gen_range(0..=v.len());
+            v.insert(index, ());
+            b.insert(index, ());
+        }
+
+        for i in 0..1000 {
+            assert_eq!(v.get(i), b.get(i));
+        }
+        assert_eq!(v, b.iter().copied().collect::<Vec<_>>());
+
+        while !v.is_empty() {
+            let index = rng.gen_range(0..v.len());
+            let v_rem = v.remove(index);
+            let b_rem = b.remove(index);
+            assert_eq!(v.len(), b.len());
+            assert_eq!(v_rem, b_rem);
+        }
+
+        assert!(b.is_empty());
+    }
+
     /*
 
         #[test]

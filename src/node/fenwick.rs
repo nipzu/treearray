@@ -56,17 +56,7 @@ impl FenwickTree {
         }
         (index, i)
     }
-    /*
-        pub unsafe fn prefix_sum(&self, mut index: usize) -> usize {
-            debug_assert!(index <= self.inner.len());
-            let mut sum = 0;
-            while index != 0 {
-                sum += unsafe { *self.inner.get_unchecked(index - 1) };
-                index &= index - 1;
-            }
-            sum
-        }
-    */
+
     pub fn add_wrapping(&mut self, mut index: usize, amount: usize) {
         while let Some(v) = self.inner.get_mut(index) {
             *v = v.wrapping_add(amount);
