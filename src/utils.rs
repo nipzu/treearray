@@ -1,7 +1,4 @@
-use core::{
-    marker::PhantomData,
-    ptr,
-};
+use core::{marker::PhantomData, ptr};
 
 pub struct ArrayVecMut<'a, T> {
     array: *mut T,

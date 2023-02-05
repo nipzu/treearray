@@ -35,22 +35,6 @@ impl<'a, T: 'a> LeafRef<'a, T> {
     }
 }
 
-pub mod height {
-    pub struct Zero;
-    pub struct One;
-    pub struct Positive;
-    pub struct TwoOrMore;
-
-    pub unsafe trait Internal {}
-    unsafe impl Internal for One {}
-    unsafe impl Internal for Positive {}
-    unsafe impl Internal for TwoOrMore {}
-
-    pub unsafe trait Height {}
-    unsafe impl Height for Zero {}
-    unsafe impl<H: Internal> Height for H {}
-}
-
 pub struct LeafPtr<O, T>
 where
     O: ownership::Ownership<T>,
@@ -302,11 +286,10 @@ impl<T> InternalNode<T> {
 
 impl<T> Leaf<T> {
     pub fn free(self) {
-        let (layout, _) = NodeBase::<T>::leaf_layout();
         unsafe {
-            let ptr = self.node;
-            let next = ptr.as_ref().next;
-            let prev = ptr.as_ref().prev;
+            let ptr = self.node.as_ref();
+            let next = ptr.next;
+            let prev = ptr.prev;
 
             if let Some(p_next) = next {
                 // TODO: can we take mut ref?
@@ -317,6 +300,7 @@ impl<T> Leaf<T> {
                 (*p_prev.as_ptr()).next = next;
             }
 
+            let (layout, _) = NodeBase::<T>::leaf_layout();
             alloc::alloc::dealloc(self.node.as_ptr().cast(), layout);
         }
     }
@@ -363,47 +347,7 @@ impl<'a, T: 'a> LeafMut<'a, T> {
         self.len() <= Self::UNDERFULL_LEN + 1
     }
 }
-/*
-impl<O, H, T> Node<O, H, T>
-where
-    H: height::Internal,
-    O: ownership::Ownership<T>,
-{
-    pub const UNDERFULL_LEN: usize = (BRANCH_FACTOR - 1) / 2;
 
-    pub fn node(&self) -> &InternalNode<T> {
-        unsafe { self.node.internal_mut() }
-    }
-
-    pub fn len_children(&self) -> usize {
-        usize::from(self.node().children_len)
-    }
-
-    pub fn is_singleton(&self) -> bool {
-        self.len_children() == 1
-    }
-
-    fn is_full(&self) -> bool {
-        self.len_children() == BRANCH_FACTOR
-    }
-
-    pub fn is_underfull(&self) -> bool {
-        self.len_children() <= Self::UNDERFULL_LEN
-    }
-
-    pub fn internal_ptr(&mut self) -> *mut InternalNode<T> {
-        unsafe { self.node.internal_mut() }
-    }
-
-    pub fn len(&self) -> usize {
-        self.node().lengths.total_len()
-    }
-    /*
-    pub unsafe fn sum_lens_below(&self, index: usize) -> usize {
-        unsafe { self.node().lengths.prefix_sum(index) }
-    }*/
-}
-*/
 impl<T> InternalNode<T> {
     pub const UNDERFULL_LEN: usize = (BRANCH_FACTOR - 1) / 2;
 
@@ -565,13 +509,6 @@ impl<T> InternalNode<T> {
             } = self;
             ArrayVecMut::new(children as *mut _ as _, children_len, BRANCH_FACTOR as u16)
         }
-    }
-
-    pub unsafe fn into_child_containing_index(self, _index: &mut usize) -> &mut NodePtr<T> {
-        todo!()
-        //let i = self.node().lengths.child_containing_index(index);
-        //debug_assert!(i < self.len_children());
-        //unsafe { self.internal_mut().children[i].assume_init() }
     }
 
     pub unsafe fn insert_split_of_child(

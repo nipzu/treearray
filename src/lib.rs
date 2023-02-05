@@ -27,8 +27,8 @@ use panics::panic_out_of_bounds;
 
 use crate::node::handle::{free_internal, Leaf};
 
-pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize, y: i32) {
-    b.insert(x, y);
+pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize) -> Option<&i32> {
+    b.get(x)
 }
 
 pub struct BVec<T> {
@@ -69,8 +69,7 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        CursorMut::try_new_inbounds(self, index)
-            .and_then(CursorMut::into_current)
+        CursorMut::try_new_inbounds(self, index).and_then(CursorMut::into_current)
     }
 
     /*
@@ -231,7 +230,7 @@ impl<T> BVec<T> {
     pub fn iter(&self) -> Iter<T> {
         unsafe { Iter::new(self) }
     }
-/*
+    /*
     pub fn drain<R>(&mut self, range: R) -> Drain<T>
     where
         R: RangeBounds<usize>,
@@ -368,7 +367,7 @@ mod tests {
         }
 
         for (a, b) in b.iter().zip(-500..) {
-           assert_eq!(*a, b);
+            assert_eq!(*a, b);
         }
     }
 
@@ -449,88 +448,88 @@ mod tests {
     }
     /*
 
-    #[test]
-    fn test_random_double_insertions() {
-        use alloc::vec::Vec;
-        use rand::{Rng, SeedableRng};
+        #[test]
+        fn test_random_double_insertions() {
+            use alloc::vec::Vec;
+            use rand::{Rng, SeedableRng};
 
-        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+            let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
-        let mut v = Vec::new();
-        let mut b_7_3 = BVec::<i32>::new();
-        let mut b_5_5 = BVec::<i32>::new();
+            let mut v = Vec::new();
+            let mut b_7_3 = BVec::<i32>::new();
+            let mut b_5_5 = BVec::<i32>::new();
 
-        for x in 0..500 {
-            let index = rng.gen_range(0..=v.len());
-            v.insert(index, 2 * x);
-            v.insert(index, 2 * x + 1);
-            let mut cursor_7_3 = b_7_3.cursor_at_mut(index);
-            let mut cursor_5_5 = b_5_5.cursor_at_mut(index);
-            cursor_7_3.insert(2 * x);
-            cursor_7_3.insert(2 * x + 1);
-            cursor_5_5.insert(2 * x);
-            cursor_5_5.insert(2 * x + 1);
-            assert_eq!(v.len(), b_7_3.len());
-            assert_eq!(v.len(), b_5_5.len());
+            for x in 0..500 {
+                let index = rng.gen_range(0..=v.len());
+                v.insert(index, 2 * x);
+                v.insert(index, 2 * x + 1);
+                let mut cursor_7_3 = b_7_3.cursor_at_mut(index);
+                let mut cursor_5_5 = b_5_5.cursor_at_mut(index);
+                cursor_7_3.insert(2 * x);
+                cursor_7_3.insert(2 * x + 1);
+                cursor_5_5.insert(2 * x);
+                cursor_5_5.insert(2 * x + 1);
+                assert_eq!(v.len(), b_7_3.len());
+                assert_eq!(v.len(), b_5_5.len());
+            }
+
+            assert_eq!(v, b_7_3.iter().copied().collect::<Vec<_>>());
+            assert_eq!(v, b_5_5.iter().copied().collect::<Vec<_>>());
         }
 
-        assert_eq!(v, b_7_3.iter().copied().collect::<Vec<_>>());
-        assert_eq!(v, b_5_5.iter().copied().collect::<Vec<_>>());
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_remove_past_end() {
-        let mut v = BVec::<i32>::new();
-        for x in 0..10 {
-            v.push_back(x);
-        }
-        let mut c = v.cursor_at_mut(10);
-        c.remove();
-    }
-
-    #[test]
-    #[should_panic]
-    fn test_remove_past_end_root() {
-        let mut v = BVec::<i32>::new();
-        for x in 0..10 {
-            v.push_back(x);
-        }
-        let mut c = v.cursor_at_mut(10);
-        c.remove();
-    }
-
-    #[test]
-    fn test_random_removals2() {
-        use alloc::vec::Vec;
-        use rand::{Rng, SeedableRng};
-
-        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
-
-        let mut v = Vec::new();
-        let mut b_4_4 = BVec::<i32>::new();
-        let mut b_5_5 = BVec::<i32>::new();
-
-        for x in 0..1000 {
-            v.push(x);
-            b_4_4.push_back(x);
-            b_5_5.push_back(x);
+        #[test]
+        #[should_panic]
+        fn test_remove_past_end() {
+            let mut v = BVec::<i32>::new();
+            for x in 0..10 {
+                v.push_back(x);
+            }
+            let mut c = v.cursor_at_mut(10);
+            c.remove();
         }
 
-        while !v.is_empty() {
-            let index = rng.gen_range(0..v.len());
-            let v_rem = v.remove(index);
-            let b_4_4_rem = b_4_4.remove(index);
-            let b_5_5_rem = b_5_5.remove(index);
-            assert_eq!(v.len(), b_4_4.len());
-            assert_eq!(v.len(), b_5_5.len());
-            assert_eq!(v_rem, b_5_5_rem);
-            assert_eq!(v_rem, b_4_4_rem);
+        #[test]
+        #[should_panic]
+        fn test_remove_past_end_root() {
+            let mut v = BVec::<i32>::new();
+            for x in 0..10 {
+                v.push_back(x);
+            }
+            let mut c = v.cursor_at_mut(10);
+            c.remove();
         }
-        assert!(b_4_4.is_empty());
-        assert!(b_5_5.is_empty());
-    }
-*/
+
+        #[test]
+        fn test_random_removals2() {
+            use alloc::vec::Vec;
+            use rand::{Rng, SeedableRng};
+
+            let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+
+            let mut v = Vec::new();
+            let mut b_4_4 = BVec::<i32>::new();
+            let mut b_5_5 = BVec::<i32>::new();
+
+            for x in 0..1000 {
+                v.push(x);
+                b_4_4.push_back(x);
+                b_5_5.push_back(x);
+            }
+
+            while !v.is_empty() {
+                let index = rng.gen_range(0..v.len());
+                let v_rem = v.remove(index);
+                let b_4_4_rem = b_4_4.remove(index);
+                let b_5_5_rem = b_5_5.remove(index);
+                assert_eq!(v.len(), b_4_4.len());
+                assert_eq!(v.len(), b_5_5.len());
+                assert_eq!(v_rem, b_5_5_rem);
+                assert_eq!(v_rem, b_4_4_rem);
+            }
+            assert!(b_4_4.is_empty());
+            assert!(b_5_5.is_empty());
+        }
+    */
     #[test]
     fn test_bvec_debug() {
         use alloc::format;
@@ -546,88 +545,88 @@ mod tests {
     }
 
     /*
-    #[test]
-    fn test_random_double_removals() {
-        use alloc::vec::Vec;
-        use rand::{Rng, SeedableRng};
+        #[test]
+        fn test_random_double_removals() {
+            use alloc::vec::Vec;
+            use rand::{Rng, SeedableRng};
 
-        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+            let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
 
-        let mut v = Vec::new();
-        let mut b_4_4 = BVec::<i32>::new();
-        let mut b_5_5 = BVec::<i32>::new();
+            let mut v = Vec::new();
+            let mut b_4_4 = BVec::<i32>::new();
+            let mut b_5_5 = BVec::<i32>::new();
 
-        for x in 0..1000 {
-            v.push(x);
-            b_4_4.push_back(x);
-            b_5_5.push_back(x);
-        }
-
-        while !v.is_empty() {
-            let index = rng.gen_range(0..v.len() - 1);
-            let v1 = v.remove(index);
-            let v2 = v.remove(index);
-            {
-                let mut cursor_5_5 = b_5_5.cursor_at_mut(index);
-                let b1 = cursor_5_5.remove();
-                let b2 = cursor_5_5.remove();
-                assert_eq!(b1, v1);
-                assert_eq!(b2, v2);
-                assert_eq!(v.len(), b_5_5.len());
+            for x in 0..1000 {
+                v.push(x);
+                b_4_4.push_back(x);
+                b_5_5.push_back(x);
             }
-            {
-                let mut cursor_4_4 = b_4_4.cursor_at_mut(index);
-                let b1 = cursor_4_4.remove();
-                let b2 = cursor_4_4.remove();
-                assert_eq!(b1, v1);
-                assert_eq!(b2, v2);
-                assert_eq!(v.len(), b_4_4.len());
+
+            while !v.is_empty() {
+                let index = rng.gen_range(0..v.len() - 1);
+                let v1 = v.remove(index);
+                let v2 = v.remove(index);
+                {
+                    let mut cursor_5_5 = b_5_5.cursor_at_mut(index);
+                    let b1 = cursor_5_5.remove();
+                    let b2 = cursor_5_5.remove();
+                    assert_eq!(b1, v1);
+                    assert_eq!(b2, v2);
+                    assert_eq!(v.len(), b_5_5.len());
+                }
+                {
+                    let mut cursor_4_4 = b_4_4.cursor_at_mut(index);
+                    let b1 = cursor_4_4.remove();
+                    let b2 = cursor_4_4.remove();
+                    assert_eq!(b1, v1);
+                    assert_eq!(b2, v2);
+                    assert_eq!(v.len(), b_4_4.len());
+                }
             }
         }
-    }
 
-    #[test]
-    fn test_random_cursor_move_right() {
-        use rand::{Rng, SeedableRng};
+        #[test]
+        fn test_random_cursor_move_right() {
+            use rand::{Rng, SeedableRng};
 
-        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
-        let mut b = BVec::<i32>::new();
-        let n = 1000;
+            let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+            let mut b = BVec::<i32>::new();
+            let n = 1000;
 
-        for x in 0..n as i32 {
-            b.push_back(x);
+            for x in 0..n as i32 {
+                b.push_back(x);
+            }
+
+            for _ in 0..n {
+                let (start, end) = (rng.gen_range(0..b.len()), rng.gen_range(0..b.len()));
+
+                let mut c = b.cursor_at_mut(start);
+                c.move_(end as isize - start as isize);
+                assert_eq!(Some(&(end as i32)), c.get());
+            }
         }
 
-        for _ in 0..n {
-            let (start, end) = (rng.gen_range(0..b.len()), rng.gen_range(0..b.len()));
+        #[test]
+        fn test_random_cursor_get() {
+            let mut b_4_4 = BVec::<i32>::new();
+            let mut b_5_5 = BVec::<i32>::new();
+            let n = 1000;
 
-            let mut c = b.cursor_at_mut(start);
-            c.move_(end as isize - start as isize);
-            assert_eq!(Some(&(end as i32)), c.get());
+            for x in 0..n as i32 {
+                b_4_4.push_back(x);
+                b_5_5.push_back(x);
+            }
+
+            for i in 0..n {
+                let x = *b_4_4.get(i).unwrap();
+                let y = *b_5_5.get(i).unwrap();
+
+                assert_eq!(x, y);
+                assert_eq!(x, *b_4_4.cursor_at_mut(i).get().unwrap());
+                assert_eq!(y, *b_5_5.cursor_at_mut(i).get().unwrap());
+            }
         }
-    }
-
-    #[test]
-    fn test_random_cursor_get() {
-        let mut b_4_4 = BVec::<i32>::new();
-        let mut b_5_5 = BVec::<i32>::new();
-        let n = 1000;
-
-        for x in 0..n as i32 {
-            b_4_4.push_back(x);
-            b_5_5.push_back(x);
-        }
-
-        for i in 0..n {
-            let x = *b_4_4.get(i).unwrap();
-            let y = *b_5_5.get(i).unwrap();
-
-            assert_eq!(x, y);
-            assert_eq!(x, *b_4_4.cursor_at_mut(i).get().unwrap());
-            assert_eq!(y, *b_5_5.cursor_at_mut(i).get().unwrap());
-        }
-    }
-*/
+    */
     #[test]
     fn test_bvec_iter() {
         let n = 1000;
@@ -638,27 +637,27 @@ mod tests {
 
         assert!(b.iter().copied().eq(0..n));
     }
-/*
-    #[test]
-    fn test_bvec_extend() {
-        let n = 500;
-        let mut b = BVec::new();
-        for x in 0..n {
-            b.push_back(x);
+    /*
+        #[test]
+        fn test_bvec_extend() {
+            let n = 500;
+            let mut b = BVec::new();
+            for x in 0..n {
+                b.push_back(x);
+            }
+
+            b.extend(n..2 * n);
+
+            assert!(b.iter().copied().eq(0..2 * n));
         }
 
-        b.extend(n..2 * n);
-
-        assert!(b.iter().copied().eq(0..2 * n));
-    }
-
-    #[test]
-    fn test_bvec_move_empty_cursor() {
-        let mut b = BVec::<i32>::new();
-        let mut c = b.cursor_at_mut(0);
-        c.move_(0);
-    }
-*/
+        #[test]
+        fn test_bvec_move_empty_cursor() {
+            let mut b = BVec::<i32>::new();
+            let mut c = b.cursor_at_mut(0);
+            c.move_(0);
+        }
+    */
     #[test]
     fn test_bvec_hash() {
         let n = 1000;
@@ -679,7 +678,7 @@ mod tests {
 
         assert_eq!(v_hash, b_hash);
     }
-/*
+    /*
     #[test]
     fn test_empty_cursor() {
         let mut bvec = BVec::<i32>::new();

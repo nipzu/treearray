@@ -1,7 +1,5 @@
 use crate::{
-    node::{
-        handle::{LeafMut, LeafRef},
-    },
+    node::handle::{LeafMut, LeafRef},
     BVec,
 };
 
