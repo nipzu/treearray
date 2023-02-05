@@ -1,3 +1,5 @@
+use core::marker::PhantomData;
+
 use crate::{
     node::handle::{LeafMut, LeafRef},
     BVec,
@@ -104,6 +106,107 @@ impl<'a, T> Cursor<'a, T> {
     pub fn get(&self) -> Option<&'a T> {
         let leaf = self.leaf.as_ref()?;
         unsafe { Some(leaf.value_unchecked(self.leaf_index)) }
+    }
+}
+
+#[derive(Clone)]
+pub struct InboundsCursor<'a, T> {
+    leaf: LeafRef<'a, T>,
+    leaf_index: usize,
+    marker: PhantomData<&'a T>,
+}
+
+impl<'a, T> InboundsCursor<'a, T> {
+    pub(crate) fn try_new_inbounds(tree: &BVec<T>, mut index: usize) -> Option<InboundsCursor<T>> {
+        if index >= tree.len() {
+            return None;
+        }
+
+        let mut cur_node = unsafe { tree.root.assume_init_ref() };
+        let height = tree.height;
+
+        // the height of `cur_node` is `height`
+        // decrement the height of `cur_node` `height` times
+        for _ in 0..height {
+            let internal = unsafe { cur_node.internal_ref() };
+            let (new_index, child_index) = internal.lengths.child_containing_index(index);
+            index = new_index;
+            cur_node = unsafe { internal.children[child_index].assume_init_ref() };
+        }
+
+        Some(InboundsCursor {
+            leaf: unsafe { LeafRef::new(cur_node.leaf) },
+            marker: PhantomData,
+            leaf_index: index,
+        })
+    }
+
+    pub(crate) fn try_new_first(tree: &BVec<T>) -> Option<InboundsCursor<T>> {
+        if tree.is_empty() {
+            return None;
+        }
+
+        let mut cur_node = unsafe { tree.root.assume_init_ref() };
+        let height = tree.height;
+
+        // the height of `cur_node` is `height`
+        // decrement the height of `cur_node` `height` times
+        for _ in 0..height {
+            let internal = unsafe { cur_node.internal_ref() };
+            cur_node = unsafe { internal.children[0].assume_init_ref() };
+        }
+
+        Some(InboundsCursor {
+            leaf: unsafe { LeafRef::new(cur_node.leaf) },
+            marker: PhantomData,
+            leaf_index: 0,
+        })
+    }
+
+    pub(crate) fn try_new_last(tree: &BVec<T>) -> Option<InboundsCursor<T>> {
+        if tree.is_empty() {
+            return None;
+        }
+
+        let mut cur_node = unsafe { tree.root.assume_init_ref() };
+        let height = tree.height;
+
+        // the height of `cur_node` is `height`
+        // decrement the height of `cur_node` `height` times
+        for _ in 0..height {
+            let internal = unsafe { cur_node.internal_ref() };
+            let len = internal.children_len as usize;
+            cur_node = unsafe { internal.children[len - 1].assume_init_ref() };
+        }
+
+        let leaf = unsafe { LeafRef::new(cur_node.leaf) };
+
+        Some(InboundsCursor {
+            leaf_index: leaf.len() - 1,
+            leaf,
+            marker: PhantomData,
+        })
+    }
+
+    pub fn move_next(mut self) -> Option<Self> {
+        self.leaf_index += 1;
+        if self.leaf.len() == self.leaf_index {
+            unsafe {
+                let next = self.leaf.node.as_ref().next?;
+                Some(Self {
+                    leaf: LeafRef::new(next),
+                    leaf_index: 0,
+                    marker: PhantomData,
+                })
+            }
+        } else {
+            Some(self)
+        }
+    }
+
+    #[must_use]
+    pub fn get(&self) -> &'a T {
+        unsafe { self.leaf.value_unchecked(self.leaf_index) }
     }
 }
 

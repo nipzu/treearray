@@ -18,7 +18,7 @@ impl<'a, T> ArrayVecMut<'a, T> {
         }
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         unsafe { usize::from(*self.len) }
     }
 

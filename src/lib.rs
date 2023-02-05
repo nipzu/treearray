@@ -19,6 +19,7 @@ mod ownership;
 mod panics;
 mod utils;
 
+use cursor::InboundsCursor;
 pub use cursor::{Cursor, CursorMut};
 
 use iter::Iter;
@@ -62,9 +63,9 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn get(&self, index: usize) -> Option<&T> {
-        Cursor::try_new_inbounds(self, index)
+        InboundsCursor::try_new_inbounds(self, index)
             .as_ref()
-            .and_then(Cursor::get)
+            .map(InboundsCursor::get)
     }
 
     #[must_use]
@@ -72,20 +73,24 @@ impl<T> BVec<T> {
         CursorMut::try_new_inbounds(self, index).and_then(CursorMut::into_current)
     }
 
-    /*
-        #[must_use]
-        pub fn first(&self) -> Option<&T> {
-            InboundsCursor::try_new_first(self).map(InboundsCursor::get)
-        }
+    #[must_use]
+    pub fn first(&self) -> Option<&T> {
+        InboundsCursor::try_new_first(self)
+            .as_ref()
+            .map(InboundsCursor::get)
+    }
 
+    #[must_use]
+    pub fn last(&self) -> Option<&T> {
+        InboundsCursor::try_new_last(self)
+            .as_ref()
+            .map(InboundsCursor::get)
+    }
+
+    /*
         #[must_use]
         pub fn first_mut(&mut self) -> Option<&mut T> {
             InboundsCursorMut::try_new_first(self).map(InboundsCursorMut::into_mut)
-        }
-
-        #[must_use]
-        pub fn last(&self) -> Option<&T> {
-            InboundsCursor::try_new_last(self).map(InboundsCursor::get)
         }
 
         #[must_use]
@@ -398,6 +403,40 @@ mod tests {
             };
             assert_eq!(x, y);
             assert_eq!(b.len(), v.len());
+        }
+    }
+
+    #[test]
+    fn test_first_last() {
+        use alloc::vec::Vec;
+        use rand::{Rng, SeedableRng};
+
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+
+        let mut b = BVec::<i32>::new();
+        let mut v = Vec::new();
+        for x in 0..1000 {
+            if rng.gen() {
+                b.push_back(x);
+                v.push(x);
+            } else {
+                b.push_front(x);
+                v.insert(0, x);
+            }
+            assert_eq!(b.first(), v.first());
+            assert_eq!(b.last(), v.last());
+        }
+
+        for _ in 0..1000 {
+            let (x, y) = if rng.gen() {
+                (b.remove(b.len() - 1), v.pop().unwrap())
+            } else {
+                (b.remove(0), v.remove(0))
+            };
+            assert_eq!(x, y);
+            assert_eq!(b.len(), v.len());
+            assert_eq!(b.first(), v.first());
+            assert_eq!(b.last(), v.last());
         }
     }
 

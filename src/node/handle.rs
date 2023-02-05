@@ -196,9 +196,7 @@ impl<T> InternalNode<T> {
             }
         }
     }
-}
 
-impl<T> InternalNode<T> {
     pub fn maybe_handle_underfull_child(&mut self, index: usize) -> bool {
         let is_child_underfull = unsafe {
             self.children[index]
@@ -217,31 +215,6 @@ impl<T> InternalNode<T> {
 
         is_child_underfull
     }
-
-    /*pub fn child_mut(&mut self, index: usize) -> Node<ownership::Mut, height::Positive, T> {
-        let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
-        Node {
-            node: unsafe { ptr.add(index).read().assume_init() },
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn child_pair_at(
-        &mut self,
-        index: usize,
-    ) -> [Node<ownership::Mut, height::Positive, T>; 2] {
-        let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
-        [
-            Node {
-                node: unsafe { ptr.add(index).read().assume_init() },
-                _marker: PhantomData,
-            },
-            Node {
-                node: unsafe { ptr.add(index + 1).read().assume_init() },
-                _marker: PhantomData,
-            },
-        ]
-    }*/
 
     fn handle_underfull_internal_child_head(&mut self) {
         let [mut cur, mut next] = unsafe { self.child_pair_at(0) };
@@ -313,14 +286,6 @@ pub unsafe fn free_internal<T>(mut ptr: NodePtr<T>) {
         drop(ptr.into_internal());
     }
 }
-
-/*impl<T> Internal<T> {
-    pub fn free(self) {
-        // debug_assert_eq!(self.node.base.children_len, 0);
-        // debug_assert_eq!(self.node.len(), 0);
-        unsafe { self.node.into_internal() };
-    }
-}*/
 
 impl<'a, T: 'a> LeafMut<'a, T> {
     const UNDERFULL_LEN: usize = (NodeBase::<T>::LEAF_CAP - 1) / 2;

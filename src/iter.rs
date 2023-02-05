@@ -4,18 +4,18 @@
 
 use core::iter::FusedIterator;
 
-use crate::{cursor::Cursor, BVec};
+use crate::{cursor::InboundsCursor, BVec};
 
 #[derive(Clone)]
 pub struct Iter<'a, T> {
-    cursor: Cursor<'a, T>,
+    cursor: Option<InboundsCursor<'a, T>>,
 }
 
 impl<'a, T> Iter<'a, T> {
     #[must_use]
     pub(crate) unsafe fn new(v: &'a BVec<T>) -> Self {
         Self {
-            cursor: Cursor::try_new_inbounds(v, 0).unwrap_or_else(|| Cursor::new_ghost(v)),
+            cursor: InboundsCursor::try_new_inbounds(v, 0),
         }
     }
 }
@@ -24,11 +24,10 @@ impl<'a, T> Iterator for Iter<'a, T> {
     type Item = &'a T;
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        let res = self.cursor.get();
-        if res.is_some() {
-            self.cursor.move_right();
-        }
-        res
+        let cursor = self.cursor.take()?;
+        let res = cursor.get();
+        self.cursor = cursor.move_next();
+        Some(res)
     }
 
     /*

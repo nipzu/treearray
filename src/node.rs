@@ -54,7 +54,7 @@ pub struct NodeBase<T> {
 
 #[repr(C)]
 pub struct InternalNode<T> {
-    children_len: u16,
+    pub children_len: u16,
     pub lengths: FenwickTree,
     pub children: [MaybeUninit<NodePtr<T>>; BRANCH_FACTOR],
 }
