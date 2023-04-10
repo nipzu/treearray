@@ -152,8 +152,10 @@ impl<T> BVec<T> {
                 unsafe { internal.add_length_wrapping(child_index, 1) };
                 let child = unsafe { internal.children[child_index].assume_init_mut() };
                 unsafe {
-                    insert_to_node(child, new_index, value, h - 1)
-                        .and_then(|r| internal.insert_split_of_child(child_index, r))
+                    insert_to_node(child, new_index, value, h - 1).and_then(|r| {
+                        internal.add_length_wrapping(child_index, r.0.wrapping_neg());
+                        internal.insert_child(child_index + 1, r)
+                    })
                 }
             }
         }

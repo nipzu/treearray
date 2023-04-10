@@ -113,45 +113,40 @@ impl<'a, T: 'a> LeafMut<'a, T> {
     pub fn insert_value(&mut self, index: usize, value: T) -> Option<RawNodeWithLen<T>> {
         assert!(index <= self.len());
 
-        if self.is_full() {
-            let mut new_node = if index <= NodeBase::<T>::LEAF_CAP / 2 {
-                self.split_and_insert_left(index, value)
+        if let Some(mut new_sibling_node) = self.split_if_full() {
+            if index <= self.len() {
+                self.values_mut().insert(index, value);
             } else {
-                self.split_and_insert_right(index, value)
-            };
-            unsafe {
-                let old_next = (*self.node.as_ptr()).next;
-                (*self.node.as_ptr()).next = Some(new_node.1.leaf);
-                new_node.1.leaf.as_mut().next = old_next;
-                new_node.1.leaf.as_mut().prev = Some(self.node);
-                if let Some(next_of_next) = old_next {
-                    (*next_of_next.as_ptr()).prev = Some(new_node.1.leaf);
-                }
-            };
+                unsafe { LeafMut::new(new_sibling_node.1.leaf).values_mut().insert(index - self.len(), value) };
+                new_sibling_node.0 += 1;
+            }
 
-            Some(new_node)
+            Some(new_sibling_node)
         } else {
             self.values_mut().insert(index, value);
             None
         }
     }
 
-    fn split_and_insert_left(&mut self, index: usize, value: T) -> RawNodeWithLen<T> {
-        let split_index = NodeBase::<T>::LEAF_CAP / 2;
-        let new_node = NodeBase::new_leaf();
-        let mut new_leaf = unsafe { LeafMut::new(new_node.leaf) };
-        self.values_mut().split(split_index, new_leaf.values_mut());
-        self.values_mut().insert(index, value);
-        RawNodeWithLen(new_leaf.len(), new_node)
-    }
+    fn split_if_full(&mut self) -> Option<RawNodeWithLen<T>> {
+        self.is_full().then(|| {
+            let split_index = NodeBase::<T>::LEAF_CAP / 2;
+            let mut new_node = NodeBase::new_leaf();
+            let mut new_leaf = unsafe { LeafMut::new(new_node.leaf) };
+            self.values_mut().split(split_index, new_leaf.values_mut());
 
-    fn split_and_insert_right(&mut self, index: usize, value: T) -> RawNodeWithLen<T> {
-        let split_index = (NodeBase::<T>::LEAF_CAP - 1) / 2 + 1;
-        let new_node = NodeBase::new_leaf();
-        let mut new_leaf = unsafe { LeafMut::new(new_node.leaf) };
-        self.values_mut().split(split_index, new_leaf.values_mut());
-        new_leaf.values_mut().insert(index - self.len(), value);
-        RawNodeWithLen(new_leaf.len(), new_node)
+            unsafe {
+                let old_next = (*self.node.as_ptr()).next;
+                (*self.node.as_ptr()).next = Some(new_node.leaf);
+                new_node.leaf.as_mut().next = old_next;
+                new_node.leaf.as_mut().prev = Some(self.node);
+                if let Some(next_of_next) = old_next {
+                    (*next_of_next.as_ptr()).prev = Some(new_node.leaf);
+                }
+            };
+
+            RawNodeWithLen(new_leaf.len(), new_node)
+        })
     }
 }
 
@@ -481,21 +476,23 @@ impl<T> InternalNode<T> {
         }
     }
 
-    pub unsafe fn insert_split_of_child(
+    pub unsafe fn insert_child(
         &mut self,
         index: usize,
         node: RawNodeWithLen<T>,
     ) -> Option<RawNodeWithLen<T>> {
         unsafe {
-            self.add_length_wrapping(index, node.0.wrapping_neg());
-            if self.is_full() {
-                use core::cmp::Ordering::Less;
-                Some(match index.cmp(&Self::UNDERFULL_LEN) {
-                    Less => self.split_and_insert_left(index + 1, node),
-                    _ => self.split_and_insert_right(index + 1, node),
-                })
+            if let Some(mut new_next_sibling) = self.split_if_full() {
+                if index <= usize::from(self.children_len) {
+                    self.insert_fitting(index, node);
+                } else {
+                    let n = new_next_sibling.1.internal_mut();
+                    n.insert_fitting(index - usize::from(self.children_len), node);
+                    new_next_sibling.0 = n.len();
+                }
+                Some(new_next_sibling)
             } else {
-                self.insert_fitting(index + 1, node);
+                self.insert_fitting(index, node);
                 None
             }
         }
@@ -503,47 +500,26 @@ impl<T> InternalNode<T> {
 
     unsafe fn insert_fitting(&mut self, index: usize, node: RawNodeWithLen<T>) {
         debug_assert!(!self.is_full());
+        debug_assert!(index <= usize::from(self.children_len));
         unsafe {
             self.insert_length(index, node.0);
         }
         self.children().insert(index, node.1);
     }
 
-    unsafe fn split_and_insert_left(
-        &mut self,
-        index: usize,
-        node: RawNodeWithLen<T>,
-    ) -> RawNodeWithLen<T> {
-        let split_index = Self::UNDERFULL_LEN;
+    fn split_if_full(&mut self) -> Option<RawNodeWithLen<T>> {
+        self.is_full().then(|| {
+            let split_index = Self::UNDERFULL_LEN + 1;
 
-        let mut new_sibling_node = InternalNode::<T>::new();
-        let mut new_sibling = unsafe { new_sibling_node.internal_mut() };
+            let mut new_sibling_node = InternalNode::<T>::new();
+            let mut new_sibling = unsafe { new_sibling_node.internal_mut() };
 
-        unsafe {
-            new_sibling.lengths = self.split_lengths(split_index);
-            self.children().split(split_index, new_sibling.children());
-            self.insert_fitting(index, node);
-        };
+            unsafe {
+                new_sibling.lengths = self.split_lengths(split_index);
+                self.children().split(split_index, new_sibling.children());
+            };
 
-        RawNodeWithLen(new_sibling.len(), new_sibling_node)
-    }
-
-    unsafe fn split_and_insert_right(
-        &mut self,
-        index: usize,
-        node: RawNodeWithLen<T>,
-    ) -> RawNodeWithLen<T> {
-        let split_index = Self::UNDERFULL_LEN + 1;
-
-        let mut new_sibling_node = InternalNode::<T>::new();
-        let mut new_sibling = unsafe { new_sibling_node.internal_mut() };
-
-        unsafe {
-            new_sibling.lengths = self.split_lengths(split_index);
-            self.children().split(split_index, new_sibling.children());
-            new_sibling.insert_fitting(index - split_index, node);
-        }
-
-        RawNodeWithLen(new_sibling.len(), new_sibling_node)
+            RawNodeWithLen(new_sibling.len(), new_sibling_node)
+        })
     }
 }

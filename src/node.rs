@@ -16,15 +16,15 @@ use alloc::{
 use self::fenwick::FenwickTree;
 
 /// SAFETY: BRANCH_FACTOR must be less than u8::MAX.
-#[cfg(miri)]
+#[cfg(test)]
 const BRANCH_FACTOR: usize = 4;
-#[cfg(not(miri))]
+#[cfg(not(test))]
 const BRANCH_FACTOR: usize = 32;
 
 /// SAFETY: LEAF_CAP_BYTES must be less than u16::MAX.
-#[cfg(miri)]
+#[cfg(test)]
 const LEAF_CAP_BYTES: usize = 16;
-#[cfg(not(miri))]
+#[cfg(not(test))]
 const LEAF_CAP_BYTES: usize = 256;
 
 pub struct RawNodeWithLen<T>(pub usize, pub NodePtr<T>);
@@ -85,7 +85,8 @@ impl<T> LeafBase<T> {
 // }
 
 impl<T> NodeBase<T> {
-    const LEAF_CAP: usize = if size_of::<T>() <= LEAF_CAP_BYTES {
+    // TODO: does this have to be even (for split)
+    const LEAF_CAP: usize = 2 * if size_of::<T>() <= LEAF_CAP_BYTES {
         if size_of::<T>() == 0 {
             // TODO: what should this be?
             1
