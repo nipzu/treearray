@@ -5,10 +5,7 @@ use core::{
 };
 
 use crate::{
-    node::{
-        fenwick::FenwickTree, InternalNode, LeafBase, NodeBase, NodePtr, RawNodeWithLen,
-        BRANCH_FACTOR,
-    },
+    node::{InternalNode, LeafBase, NodeBase, NodePtr, RawNodeWithLen, BRANCH_FACTOR},
     ownership,
     utils::ArrayVecMut,
 };
@@ -117,7 +114,11 @@ impl<'a, T: 'a> LeafMut<'a, T> {
             if index <= self.len() {
                 self.values_mut().insert(index, value);
             } else {
-                unsafe { LeafMut::new(new_sibling_node.1.leaf).values_mut().insert(index - self.len(), value) };
+                unsafe {
+                    LeafMut::new(new_sibling_node.1.leaf)
+                        .values_mut()
+                        .insert(index - self.len(), value)
+                };
                 new_sibling_node.0 += 1;
             }
 
@@ -414,18 +415,6 @@ impl<T> InternalNode<T> {
         });
     }
 
-    unsafe fn split_lengths(&mut self, index: usize) -> FenwickTree {
-        let len_children = self.len_children();
-        self.lengths.with_flat_lens(|lens| {
-            let mut other_array = [0; BRANCH_FACTOR];
-            for i in index..len_children {
-                other_array[i - index] = lens[i];
-                lens[i] = 0;
-            }
-            FenwickTree::from_array(other_array)
-        })
-    }
-
     unsafe fn pop_front_length(&mut self) -> usize {
         let len_children = self.len_children();
         self.lengths.with_flat_lens(|lens| {
@@ -514,10 +503,8 @@ impl<T> InternalNode<T> {
             let mut new_sibling_node = InternalNode::<T>::new();
             let mut new_sibling = unsafe { new_sibling_node.internal_mut() };
 
-            unsafe {
-                new_sibling.lengths = self.split_lengths(split_index);
-                self.children().split(split_index, new_sibling.children());
-            };
+            new_sibling.lengths = self.lengths.split();
+            self.children().split(split_index, new_sibling.children());
 
             RawNodeWithLen(new_sibling.len(), new_sibling_node)
         })

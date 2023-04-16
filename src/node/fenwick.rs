@@ -22,12 +22,6 @@ impl FenwickTree {
         }
     }
 
-    pub fn from_array(array: [usize; BRANCH_FACTOR]) -> Self {
-        let mut this = Self { inner: array };
-        this.init();
-        this
-    }
-
     pub fn into_array(mut self) -> [usize; BRANCH_FACTOR] {
         self.fini();
         self.inner
@@ -94,5 +88,47 @@ impl FenwickTree {
         let ret = f(&mut self.inner);
         self.init();
         ret
+    }
+
+    pub fn split(&mut self) -> Self {
+        let mut other = Self {
+            inner: [0; BRANCH_FACTOR],
+        };
+
+        other.inner[..BRANCH_FACTOR / 2].copy_from_slice(&mut self.inner[BRANCH_FACTOR / 2..]);
+        self.inner[BRANCH_FACTOR / 2..].fill(0);
+    
+        self.inner[BRANCH_FACTOR - 1] = self.inner[BRANCH_FACTOR / 2 - 1];
+        other.inner[BRANCH_FACTOR / 2 - 1] -= self.inner[BRANCH_FACTOR - 1];
+        other.inner[BRANCH_FACTOR - 1] = other.inner[BRANCH_FACTOR / 2 - 1];
+
+        other
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_fenwick_split() {
+        let mut a = FenwickTree::new();
+        for i in 0..BRANCH_FACTOR {
+            a.add_wrapping(i, i);
+        }
+
+        let b = a.split();
+        let a_array = a.into_array();
+        let b_array = b.into_array();
+        let mut a_correct = [0; BRANCH_FACTOR];
+        let mut b_correct = [0; BRANCH_FACTOR];
+        for i in 0..BRANCH_FACTOR / 2 {
+            a_correct[i] = i;
+        }
+        for i in BRANCH_FACTOR / 2..BRANCH_FACTOR {
+            b_correct[i - BRANCH_FACTOR / 2] = i;
+        }
+        assert_eq!(a_array, a_correct);
+        assert_eq!(b_array, b_correct);
     }
 }

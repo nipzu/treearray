@@ -50,8 +50,7 @@ impl<'a, T> ArrayVecMut<'a, T> {
     pub fn split(&mut self, index: usize, other: Self) {
         let len = self.len();
         assert!(index <= len);
-        let mut tail_len = len;
-        tail_len -= index;
+        let tail_len = len - index;
         let src = unsafe { self.array.add(index) };
         let dst = other.array;
         unsafe {
