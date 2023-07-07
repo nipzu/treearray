@@ -13,11 +13,11 @@ use alloc::{
     boxed::Box,
 };
 
-use self::fenwick::FenwickTree;
+use self::fenwick::{FenwickTree as FenwickTree};
 
 /// SAFETY: BRANCH_FACTOR must be less than u8::MAX.
 #[cfg(test)]
-const BRANCH_FACTOR: usize = 4;
+const BRANCH_FACTOR: usize = 8;
 #[cfg(not(test))]
 const BRANCH_FACTOR: usize = 32;
 
