@@ -213,7 +213,6 @@ impl<T> BVec<T> {
             ret = unsafe { remove_from_internal(root, index, h) };
             unsafe {
                 let old_root = self.root.assume_init_mut().internal_mut();
-
                 if old_root.is_singleton() {
                     let new_root = old_root.children().remove(0);
                     free_internal(self.root.assume_init_read());

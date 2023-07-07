@@ -47,16 +47,16 @@ impl<'a, T> ArrayVecMut<'a, T> {
         }
     }
 
-    pub fn split(&mut self, index: usize, other: Self) {
+    pub fn split(&mut self, other: Self) {
         let len = self.len();
-        assert!(index <= len);
-        let tail_len = len - index;
-        let src = unsafe { self.array.add(index) };
+        assert_eq!(len % 2, 0);
+        let half_len = len / 2;
+        let src = unsafe { self.array.add(half_len) };
         let dst = other.array;
         unsafe {
-            ptr::copy_nonoverlapping(src, dst, tail_len);
-            *self.len = index as u16;
-            *other.len = tail_len as u16;
+            ptr::copy_nonoverlapping(src, dst, half_len);
+            *self.len = half_len as u16;
+            *other.len = half_len as u16;
         }
     }
 

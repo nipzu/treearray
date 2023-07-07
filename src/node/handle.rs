@@ -131,10 +131,9 @@ impl<'a, T: 'a> LeafMut<'a, T> {
 
     fn split_if_full(&mut self) -> Option<RawNodeWithLen<T>> {
         self.is_full().then(|| {
-            let split_index = NodeBase::<T>::LEAF_CAP / 2;
             let mut new_node = NodeBase::new_leaf();
             let mut new_leaf = unsafe { LeafMut::new(new_node.leaf) };
-            self.values_mut().split(split_index, new_leaf.values_mut());
+            self.values_mut().split(new_leaf.values_mut());
 
             unsafe {
                 let old_next = (*self.node.as_ptr()).next;
@@ -498,13 +497,11 @@ impl<T> InternalNode<T> {
 
     fn split_if_full(&mut self) -> Option<RawNodeWithLen<T>> {
         self.is_full().then(|| {
-            let split_index = Self::UNDERFULL_LEN + 1;
-
             let mut new_sibling_node = InternalNode::<T>::new();
             let mut new_sibling = unsafe { new_sibling_node.internal_mut() };
 
             new_sibling.lengths = self.lengths.split();
-            self.children().split(split_index, new_sibling.children());
+            self.children().split(new_sibling.children());
 
             RawNodeWithLen(new_sibling.len(), new_sibling_node)
         })
