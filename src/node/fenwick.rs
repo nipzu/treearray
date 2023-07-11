@@ -97,7 +97,7 @@ impl FenwickTree {
 
         other.inner[..BRANCH_FACTOR / 2].copy_from_slice(&self.inner[BRANCH_FACTOR / 2..]);
         self.inner[BRANCH_FACTOR / 2..].fill(0);
-    
+
         self.inner[BRANCH_FACTOR - 1] = self.inner[BRANCH_FACTOR / 2 - 1];
         other.inner[BRANCH_FACTOR / 2 - 1] -= self.inner[BRANCH_FACTOR - 1];
         other.inner[BRANCH_FACTOR - 1] = other.inner[BRANCH_FACTOR / 2 - 1];
@@ -108,7 +108,7 @@ impl FenwickTree {
 
 #[cfg(test)]
 mod tests {
-    use super::{BRANCH_FACTOR, FenwickTree};
+    use super::{FenwickTree, BRANCH_FACTOR};
 
     #[test]
     fn test_fenwick_into_array() {
@@ -142,7 +142,6 @@ mod tests {
             assert_eq!((rem, c), a.child_containing_index(i), "{i}");
         }
     }
-
 
     #[test]
     fn test_fenwick_split() {
@@ -226,20 +225,3 @@ mod tests {
         }
     }
 }
-
-// 0000 1111
-// 0001 0111
-// 0010 0011
-// 0011 1011
-// 0100 0001
-// 0101 0101
-// 0110 1001
-// 0111 1101
-// 1000 0000
-// 1001 0010
-// 1010 0100
-// 1011 0110
-// 1100 1000
-// 1101 1010
-// 1110 1100
-// 1111 1110

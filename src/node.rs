@@ -1,5 +1,7 @@
 mod fenwick;
 pub mod handle;
+mod insert;
+mod remove;
 
 use core::{
     alloc::Layout,

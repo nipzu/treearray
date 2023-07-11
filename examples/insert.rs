@@ -1,5 +1,5 @@
 use bvec::BVec;
-use rand::{SeedableRng, rngs::SmallRng, Rng};
+use rand::{rngs::SmallRng, Rng, SeedableRng};
 
 fn main() {
     let start = std::time::Instant::now();
