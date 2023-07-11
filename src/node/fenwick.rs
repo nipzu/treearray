@@ -95,7 +95,7 @@ impl FenwickTree {
             inner: [0; BRANCH_FACTOR],
         };
 
-        other.inner[..BRANCH_FACTOR / 2].copy_from_slice(&mut self.inner[BRANCH_FACTOR / 2..]);
+        other.inner[..BRANCH_FACTOR / 2].copy_from_slice(&self.inner[BRANCH_FACTOR / 2..]);
         self.inner[BRANCH_FACTOR / 2..].fill(0);
     
         self.inner[BRANCH_FACTOR - 1] = self.inner[BRANCH_FACTOR / 2 - 1];
@@ -106,130 +106,9 @@ impl FenwickTree {
     }
 }
 
-#[derive(Clone)]
-pub struct FenwickTree2 {
-    inner: [usize; BRANCH_FACTOR],
-}
-
-impl FenwickTree2 {
-    fn init_help(&mut self) {
-        for index in 0..self.inner.len() {
-            let j = index | (index + 1);
-            if j < self.inner.len() {
-                self.inner[j] += self.inner[index];
-            }
-        }
-    }
-
-    fn fini_help(&mut self) {
-        for index in (0..self.inner.len()).rev() {
-            let j = index | (index + 1);
-            if j < self.inner.len() {
-                self.inner[j] -= self.inner[index];
-            }
-        }
-    }
-
-    pub fn new() -> Self {
-        Self {
-            inner: [0; BRANCH_FACTOR],
-        }
-    }
-
-    pub fn into_array(mut self) -> [usize; BRANCH_FACTOR] {
-        self.fini();
-        self.inner
-    }
-
-    pub fn add_wrapping(&mut self, mut index: usize, amount: usize) {
-        self.inner[0] = self.inner[0].wrapping_add(amount);
-        index += BRANCH_FACTOR;
-        for _ in 0..BRANCH_FACTOR.trailing_zeros() {
-            if index & 1 == 0 {
-                self.inner[index / 2] = self.inner[index / 2].wrapping_add(amount);
-            }
-            index >>= 1;
-        }
-    }
-
-    pub fn child_containing_index(&self, mut index: usize) -> (usize, usize) {
-        let mut i = 1;
-        for _ in 0..BRANCH_FACTOR.trailing_zeros() {
-            let v = self.inner[i];
-            i <<= 1;
-            if v <= index {
-                index -= v;
-                i += 1;
-            }
-        }
-        (index, i & (BRANCH_FACTOR - 1))
-    }
-
-    pub fn child_containing_index_inclusive(&self, mut index: usize) -> (usize, usize) {
-        let mut i = 1;
-        for _ in 0..BRANCH_FACTOR.trailing_zeros() {
-            let v = self.inner[i];
-            i <<= 1;
-            if v < index {
-                index -= v;
-                i += 1;
-            }
-        }
-        (index, i & (BRANCH_FACTOR - 1))
-    }
-
-    pub fn total_len(&self) -> usize {
-        *self.inner.first().unwrap()
-    }
-
-    fn init(&mut self) {
-        let mut other = Self::new();
-
-        other.inner = self.inner;
-        other.init_help();
-
-        for i in 0..BRANCH_FACTOR {
-            let k = i.leading_zeros() + BRANCH_FACTOR.trailing_zeros() - 64 + 1;
-            self.inner[i] = other.inner[((i << k) + (1 << (k - 1)) - 1) & (BRANCH_FACTOR - 1)];
-        }
-    }
-
-    fn fini(&mut self) {
-        let mut other = Self::new();
-
-        for i in 0..BRANCH_FACTOR {
-            let k = i.leading_zeros() + BRANCH_FACTOR.trailing_zeros() - 64 + 1;
-            other.inner[((i << k) + (1 << (k - 1)) - 1) & (BRANCH_FACTOR - 1)] = self.inner[i];
-        }
-
-        other.fini_help();
-        self.inner = other.inner;
-    }
-
-    pub fn with_flat_lens<F, R>(&mut self, f: F) -> R
-    where
-        F: FnOnce(&mut [usize; BRANCH_FACTOR]) -> R,
-    {
-        self.fini();
-        let ret = f(&mut self.inner);
-        self.init();
-        ret
-    }
-
-    pub fn split(&mut self) -> Self {
-        self.with_flat_lens(|a| {
-            let mut other = Self::new();
-            other.with_flat_lens(|b| {
-               a[BRANCH_FACTOR / 2..].swap_with_slice(&mut b[..BRANCH_FACTOR / 2]); 
-            });
-            other
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{BRANCH_FACTOR, FenwickTree2 as FenwickTree};
+    use super::{BRANCH_FACTOR, FenwickTree};
 
     #[test]
     fn test_fenwick_into_array() {

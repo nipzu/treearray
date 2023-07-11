@@ -5,7 +5,7 @@ fn main() {
     let start = std::time::Instant::now();
 
     let mut rng = SmallRng::from_seed([0; 32]);
-    let n = 10_000;
+    let n = 10_000_000;
 
     let mut b = BVec::new();
     for value in 0..n {

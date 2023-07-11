@@ -28,7 +28,7 @@ use panics::panic_out_of_bounds;
 
 use crate::node::handle::{free_internal, Leaf};
 
-pub fn foo<'a>(b: &'a mut BVec<i32>, x: usize) -> Option<&i32> {
+pub fn foo(b: &mut BVec<i32>, x: usize) -> Option<&i32> {
     b.get(x)
 }
 

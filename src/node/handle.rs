@@ -498,7 +498,7 @@ impl<T> InternalNode<T> {
     fn split_if_full(&mut self) -> Option<RawNodeWithLen<T>> {
         self.is_full().then(|| {
             let mut new_sibling_node = InternalNode::<T>::new();
-            let mut new_sibling = unsafe { new_sibling_node.internal_mut() };
+            let new_sibling = unsafe { new_sibling_node.internal_mut() };
 
             new_sibling.lengths = self.lengths.split();
             self.children().split(new_sibling.children());

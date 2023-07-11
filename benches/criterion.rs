@@ -55,35 +55,35 @@ fn bench_get_vec(c: &mut Criterion) {
     }
 }
 
-// fn bench_get_im_vec(c: &mut Criterion) {
-//     let mut rng = StdRng::from_seed([0; 32]);
-// 
-//     for size in [1_000, 10_000, 100_000] {
-//         let mut im_vec = im::Vector::new();
-// 
-//         for x in 0..size as i32 {
-//             let i = rng.gen_range(0..=im_vec.len());
-//             im_vec.insert(i, x);
-//         }
-// 
-//         c.bench_with_input(
-//             BenchmarkId::new("im::Vector<i32>::get (random)", size),
-//             &size,
-//             |b, &s| {
-//                 b.iter_batched(
-//                     || rng.gen_range(0..s),
-//                     |i| im_vec.get(i),
-//                     BatchSize::SmallInput,
-//                 )
-//             },
-//         );
-//     }
-// }
+fn bench_get_im_vec(c: &mut Criterion) {
+    let mut rng = StdRng::from_seed([0; 32]);
+
+    for size in [10, 100, 1_000, 10_000, 100_000, 1_000_000] {
+        let mut im_vec = im::Vector::new();
+
+        for x in 0..size as i32 {
+            let i = rng.gen_range(0..=im_vec.len());
+            im_vec.insert(i, x);
+        }
+
+        c.bench_with_input(
+            BenchmarkId::new("im::Vector<i32>::get (random)", size),
+            &size,
+            |b, &s| {
+                b.iter_batched(
+                    || rng.gen_range(0..s),
+                    |i| im_vec.get(i),
+                    BatchSize::SmallInput,
+                )
+            },
+        );
+    }
+}
 
 fn bench_insert(c: &mut Criterion) {
     let mut rng = StdRng::from_seed([0; 32]);
 
-    for size in [1_000, 10_000, 100_000, 1_000_000] {
+    for size in [10, 100, 1_000, 10_000, 100_000, 1_000_000] {
         let mut bvec = BVec::<i32>::new();
         let mut vec = Vec::new();
 
@@ -130,6 +130,6 @@ fn bench_insert(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default().sample_size(500)/*.with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)))*/;
-    targets = bench_get_bvec, bench_get_vec, /*bench_get_im_vec, */ bench_insert
+    targets = bench_get_bvec, bench_get_vec, bench_get_im_vec, bench_insert
 );
 criterion_main!(benches);
