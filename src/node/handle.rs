@@ -5,7 +5,7 @@ use core::{
 
 use crate::{
     node::{InternalNode, LeafBase, LeafBox, NodeBase, NodePtr, BRANCH_FACTOR},
-    ownership,
+    ownership::{self, Reference},
     utils::ArrayVecMut,
 };
 
@@ -31,12 +31,12 @@ impl<'a, T: 'a> LeafRef<'a, T> {
     }
 }
 
-pub struct LeafPtr<O, T>
+pub struct LeafPtr<R, T>
 where
-    O: ownership::Ownership<T>,
+    R: Reference<T>,
 {
     pub node: NonNull<LeafBase<T>>,
-    marker: PhantomData<O>,
+    marker: PhantomData<R>,
 }
 
 pub type LeafRef<'a, T> = LeafPtr<ownership::Immut<'a>, T>;
@@ -61,9 +61,9 @@ impl<'a, T: 'a> Clone for LeafRef<'a, T> {
     }
 }
 
-impl<O, T> LeafPtr<O, T>
+impl<R, T> LeafPtr<R, T>
 where
-    O: ownership::Ownership<T>,
+    R: Reference<T>,
 {
     pub unsafe fn new(ptr: NonNull<LeafBase<T>>) -> Self {
         Self {
@@ -71,12 +71,7 @@ where
             marker: PhantomData,
         }
     }
-}
 
-impl<O, T> LeafPtr<O, T>
-where
-    O: ownership::Ownership<T>,
-{
     pub fn len(&self) -> usize {
         unsafe { usize::from(self.node.as_ref().len) }
     }
