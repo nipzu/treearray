@@ -11,7 +11,7 @@ impl<'a, T> ArrayVecMut<'a, T> {
     pub unsafe fn new(array: *mut T, len: *mut u16, cap: u16) -> Self {
         debug_assert!(unsafe { *len <= cap });
         Self {
-            array: array.cast(),
+            array,
             len,
             cap,
             _p: PhantomData,

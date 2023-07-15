@@ -15,7 +15,10 @@ use alloc::{
     boxed::Box,
 };
 
-use self::fenwick::FenwickTree;
+use self::{
+    fenwick::FenwickTree,
+    handle::{LeafMut, LeafRef},
+};
 
 /// SAFETY: BRANCH_FACTOR must be less than u8::MAX.
 #[cfg(test)]
@@ -47,6 +50,18 @@ impl<T> NodePtr<T> {
 
     pub unsafe fn into_internal(self) -> Box<InternalNode<T>> {
         unsafe { ManuallyDrop::into_inner(self.internal) }
+    }
+
+    pub unsafe fn leaf_ref(&self) -> LeafRef<T> {
+        unsafe { self.leaf.as_ref() }
+    }
+
+    pub unsafe fn leaf_mut(&mut self) -> LeafMut<T> {
+        unsafe { self.leaf.as_mut() }
+    }
+
+    pub unsafe fn into_leaf(self) -> LeafBox<T> {
+        unsafe { ManuallyDrop::into_inner(self.leaf) }
     }
 }
 

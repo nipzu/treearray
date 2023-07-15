@@ -1,4 +1,4 @@
-use super::BRANCH_FACTOR;
+use crate::node::BRANCH_FACTOR;
 
 const OFFSETS: [usize; BRANCH_FACTOR.trailing_zeros() as usize] = {
     let mut offsets = [0; BRANCH_FACTOR.trailing_zeros() as usize];

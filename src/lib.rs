@@ -10,6 +10,7 @@ use core::{
     hash::{Hash, Hasher},
     mem::{ManuallyDrop, MaybeUninit},
     ops::{Index, IndexMut},
+    ptr,
 };
 
 mod cursor;
@@ -23,7 +24,7 @@ use cursor::InboundsCursor;
 pub use cursor::{Cursor, CursorMut};
 
 use iter::Iter;
-use node::{handle::LeafMut, InternalNode, NodeBase, NodePtr, RawNodeWithLen};
+use node::{InternalNode, NodeBase, NodePtr, RawNodeWithLen};
 use panics::panic_out_of_bounds;
 
 pub fn foo(b: &mut BVec<i32>, x: usize) -> Option<&i32> {
@@ -113,7 +114,30 @@ impl<T> BVec<T> {
 
     #[inline]
     pub fn clear(&mut self) {
-        //self.drain(..);
+        fn drop_node<T>(node: NodePtr<T>, h: u16) {
+            unsafe {
+                if h == 0 {
+                    let mut leaf = node.into_leaf();
+                    let len = leaf.as_ref().len();
+                    let p = leaf.as_mut().array_ptr();
+                    ptr::drop_in_place(ptr::slice_from_raw_parts_mut(p, len));
+                    // TODO: do we just keep linked list
+                } else {
+                    let internal = node.into_internal();
+                    for i in 0..internal.children_len {
+                        let child = internal.children[usize::from(i)].assume_init_read();
+                        drop_node(child, h - 1);
+                    }
+                }
+            }
+        }
+
+        let h = self.height;
+        self.height = 0;
+        if self.len != 0 {
+            self.len = 0;
+            unsafe { drop_node(self.root.assume_init_read(), h) }
+        }
     }
 
     /// # Panics
@@ -143,7 +167,7 @@ impl<T> BVec<T> {
             h: u16,
         ) -> Option<RawNodeWithLen<T>> {
             if h == 0 {
-                let mut leaf = unsafe { LeafMut::new(node.leaf.ptr) };
+                let mut leaf = unsafe { node.leaf_mut() };
                 return leaf.insert_value(index, value);
             }
 
@@ -191,9 +215,8 @@ impl<T> BVec<T> {
             unsafe { internal.add_length_wrapping(child_index, 1_usize.wrapping_neg()) };
             debug_assert_ne!(h, 0);
             if h == 1 {
-                let mut child = unsafe {
-                    LeafMut::new(internal.children[child_index].assume_init_mut().leaf.ptr)
-                };
+                let mut child =
+                    unsafe { internal.children[child_index].assume_init_mut().leaf_mut() };
                 let ret = child.remove_child(new_index);
 
                 if child.is_underfull() {
@@ -230,7 +253,7 @@ impl<T> BVec<T> {
                 }
             }
         } else {
-            let mut leaf = unsafe { LeafMut::new(root.leaf.ptr) };
+            let mut leaf = unsafe { root.leaf_mut() };
             ret = leaf.remove_child(index);
             if leaf.len() == 0 {
                 unsafe { ManuallyDrop::drop(&mut root.leaf) };
@@ -527,6 +550,34 @@ mod tests {
         }
 
         assert!(b.is_empty());
+    }
+
+    #[test]
+    fn test_drop() {
+        use alloc::boxed::Box;
+        use core::sync::atomic::{AtomicUsize, Ordering};
+        use rand::{Rng, SeedableRng};
+
+        let drop_count = AtomicUsize::new(0);
+        struct CountDrops<'a>(&'a AtomicUsize);
+        impl<'a> Drop for CountDrops<'a> {
+            fn drop(&mut self) {
+                self.0.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        let n = 1000;
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+        let mut b = BVec::new();
+
+        for _ in 0..n {
+            let index = rng.gen_range(0..=b.len());
+            b.insert(index, Box::new(CountDrops(&drop_count)));
+        }
+
+        drop(b);
+
+        assert_eq!(n, drop_count.load(Ordering::Relaxed));
     }
 
     #[test]

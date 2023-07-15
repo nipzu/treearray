@@ -18,16 +18,7 @@ impl<'a, T: 'a> LeafRef<'a, T> {
         // should not be any mutable references which
         // could cause aliasing problems with taking
         // a reference to the whole array.
-        unsafe {
-            let (_, array_offset) = NodeBase::<T>::leaf_layout();
-            &*self
-                .node
-                .as_ptr()
-                .cast::<u8>()
-                .add(array_offset)
-                .cast::<T>()
-                .add(index)
-        }
+        unsafe { &*self.array_ptr().add(index) }
     }
 }
 
@@ -75,13 +66,25 @@ where
     pub fn len(&self) -> usize {
         unsafe { usize::from(self.node.as_ref().len) }
     }
+
+    pub fn array_ptr(&self) -> *mut T {
+        let (_, array_offset) = NodeBase::<T>::leaf_layout();
+        unsafe {
+            self.node
+                .as_ptr()
+                .cast::<u8>()
+                // SAFETY: array_offset is inbounds of
+                // a Leaf according to leaf_layout()
+                .add(array_offset)
+                .cast::<T>()
+        }
+    }
 }
 
 impl<'a, T: 'a> LeafMut<'a, T> {
     pub fn values_mut(&mut self) -> ArrayVecMut<T> {
+        let array = self.array_ptr();
         unsafe {
-            let (_, offset) = NodeBase::<T>::leaf_layout();
-            let array = self.node.as_ptr().cast::<u8>().add(offset).cast();
             ArrayVecMut::new(
                 array,
                 addr_of_mut!((*self.node.as_ptr()).len),
@@ -94,16 +97,7 @@ impl<'a, T: 'a> LeafMut<'a, T> {
         let len = self.len();
         debug_assert!(len <= NodeBase::<T>::LEAF_CAP);
         debug_assert!(index < len);
-        unsafe {
-            let (_, offset) = NodeBase::<T>::leaf_layout();
-            &mut *self
-                .node
-                .as_ptr()
-                .cast::<u8>()
-                .add(offset)
-                .cast::<T>()
-                .add(index)
-        }
+        unsafe { &mut *self.array_ptr().add(index) }
     }
 
     pub fn is_full(&self) -> bool {
@@ -113,10 +107,6 @@ impl<'a, T: 'a> LeafMut<'a, T> {
 
 impl<T> InternalNode<T> {
     pub const UNDERFULL_LEN: usize = (BRANCH_FACTOR - 1) / 2;
-    /*pub unsafe fn child_mut(&mut self, index: usize) -> LeafMut<T> {
-        let ptr = unsafe { (*self.internal_ptr()).children.as_mut_ptr() };
-        unsafe { LeafMut::new(ptr.add(index).read().assume_init()) }
-    }*/
 
     pub unsafe fn child_pair_at(&mut self, index: usize) -> [NodePtr<T>; 2] {
         let ptr = self.children.as_mut_ptr();
