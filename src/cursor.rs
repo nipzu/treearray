@@ -30,7 +30,7 @@ impl<'a, T> CursorMut<'a, T> {
         }
 
         Some(CursorMut {
-            leaf: unsafe { Some(LeafMut::new(cur_node.leaf)) },
+            leaf: unsafe { Some(LeafMut::new(cur_node.leaf.ptr)) },
             tree,
             leaf_index: index,
         })
@@ -84,7 +84,7 @@ impl<'a, T> Cursor<'a, T> {
         }
 
         Some(Cursor {
-            leaf: unsafe { Some(LeafRef::new(cur_node.leaf)) },
+            leaf: unsafe { Some(LeafRef::new(cur_node.leaf.ptr)) },
             tree,
             leaf_index: index,
         })
@@ -131,11 +131,16 @@ impl<'a, T> InboundsCursor<'a, T> {
             let internal = unsafe { cur_node.internal_ref() };
             let (new_index, child_index) = internal.lengths.child_containing_index(index);
             index = new_index;
-            cur_node = unsafe { internal.children[child_index].assume_init_ref() };
+            cur_node = unsafe {
+                internal
+                    .children
+                    .get_unchecked(child_index)
+                    .assume_init_ref()
+            };
         }
 
         Some(InboundsCursor {
-            leaf: unsafe { LeafRef::new(cur_node.leaf) },
+            leaf: unsafe { LeafRef::new(cur_node.leaf.ptr) },
             marker: PhantomData,
             leaf_index: index,
         })
@@ -157,7 +162,7 @@ impl<'a, T> InboundsCursor<'a, T> {
         }
 
         Some(InboundsCursor {
-            leaf: unsafe { LeafRef::new(cur_node.leaf) },
+            leaf: unsafe { LeafRef::new(cur_node.leaf.ptr) },
             marker: PhantomData,
             leaf_index: 0,
         })
@@ -179,7 +184,7 @@ impl<'a, T> InboundsCursor<'a, T> {
             cur_node = unsafe { internal.children[len - 1].assume_init_ref() };
         }
 
-        let leaf = unsafe { LeafRef::new(cur_node.leaf) };
+        let leaf = unsafe { LeafRef::new(cur_node.leaf.ptr) };
 
         Some(InboundsCursor {
             leaf_index: leaf.len() - 1,

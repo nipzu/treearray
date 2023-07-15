@@ -55,7 +55,7 @@ fn bench_get_vec(c: &mut Criterion) {
     }
 }
 
-fn bench_get_im_vec(c: &mut Criterion) {
+/*fn bench_get_im_vec(c: &mut Criterion) {
     let mut rng = StdRng::from_seed([0; 32]);
 
     for size in [10, 100, 1_000, 10_000, 100_000, 1_000_000] {
@@ -78,7 +78,7 @@ fn bench_get_im_vec(c: &mut Criterion) {
             },
         );
     }
-}
+}*/
 
 fn bench_insert(c: &mut Criterion) {
     let mut rng = StdRng::from_seed([0; 32]);
@@ -94,21 +94,20 @@ fn bench_insert(c: &mut Criterion) {
             vec.push(x);
         }
 
-        // c.bench_with_input(
-        //     BenchmarkId::new("BVec<i32>::insert_remove (random)", size),
-        //     &size,
-        //     |b, &s| {
-        //         b.iter_batched(
-        //             || rng.gen_range(0..=s),
-        //             |i| {
-        //                 let mut cursor = bvec.cursor_at_mut(i);
-        //                 cursor.insert(0);
-        //                 cursor.remove();
-        //             },
-        //             BatchSize::SmallInput,
-        //         )
-        //     },
-        // );
+        c.bench_with_input(
+            BenchmarkId::new("BVec<i32>::insert_remove (random)", size),
+            &size,
+            |b, &s| {
+                b.iter_batched(
+                    || rng.gen_range(0..=s),
+                    |i| {
+                        bvec.insert(i, 0);
+                        bvec.remove(i);
+                    },
+                    BatchSize::SmallInput,
+                )
+            },
+        );
 
         /*c.bench_with_input(
             BenchmarkId::new("std::Vec<i32>::insert_remove (random)", size),
@@ -130,6 +129,6 @@ fn bench_insert(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default().sample_size(500)/*.with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)))*/;
-    targets = bench_get_bvec, bench_get_vec, bench_get_im_vec, bench_insert
+    targets = bench_get_bvec, bench_get_vec, /*bench_get_im_vec,*/ bench_insert
 );
 criterion_main!(benches);

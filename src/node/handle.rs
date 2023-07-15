@@ -4,7 +4,7 @@ use core::{
 };
 
 use crate::{
-    node::{InternalNode, LeafBase, NodeBase, NodePtr, BRANCH_FACTOR},
+    node::{InternalNode, LeafBase, LeafBox, NodeBase, NodePtr, BRANCH_FACTOR},
     ownership,
     utils::ArrayVecMut,
 };
@@ -36,18 +36,27 @@ where
     O: ownership::Ownership<T>,
 {
     pub node: NonNull<LeafBase<T>>,
-    _marker: PhantomData<O>,
+    marker: PhantomData<O>,
 }
 
 pub type LeafRef<'a, T> = LeafPtr<ownership::Immut<'a>, T>;
 pub type LeafMut<'a, T> = LeafPtr<ownership::Mut<'a>, T>;
-pub type Leaf<T> = LeafPtr<ownership::Owned, T>;
+
+impl<T> LeafBox<T> {
+    pub fn as_ref(&self) -> LeafRef<T> {
+        unsafe { LeafPtr::new(self.ptr) }
+    }
+
+    pub fn as_mut(&mut self) -> LeafMut<T> {
+        unsafe { LeafPtr::new(self.ptr) }
+    }
+}
 
 impl<'a, T: 'a> Clone for LeafRef<'a, T> {
     fn clone(&self) -> Self {
         Self {
             node: self.node,
-            _marker: self._marker,
+            marker: self.marker,
         }
     }
 }
@@ -59,7 +68,7 @@ where
     pub unsafe fn new(ptr: NonNull<LeafBase<T>>) -> Self {
         Self {
             node: ptr,
-            _marker: PhantomData,
+            marker: PhantomData,
         }
     }
 }
@@ -104,30 +113,6 @@ impl<'a, T: 'a> LeafMut<'a, T> {
 
     pub fn is_full(&self) -> bool {
         self.len() == NodeBase::<T>::LEAF_CAP
-    }
-}
-
-impl<T> Leaf<T> {
-    pub fn free(self) {
-        unsafe {
-            let ptr = self.node.as_ref();
-            let next = ptr.next;
-            let prev = ptr.prev;
-
-            if let Some(p_next) = next {
-                // TODO: can we take mut ref?
-                debug_assert_eq!((*p_next.as_ptr()).prev, Some(self.node));
-                (*p_next.as_ptr()).prev = prev;
-            }
-
-            if let Some(p_prev) = prev {
-                debug_assert_eq!((*p_prev.as_ptr()).next, Some(self.node));
-                (*p_prev.as_ptr()).next = next;
-            }
-
-            let (layout, _) = NodeBase::<T>::leaf_layout();
-            alloc::alloc::dealloc(self.node.as_ptr().cast(), layout);
-        }
     }
 }
 
@@ -178,13 +163,5 @@ impl<T> InternalNode<T> {
             } = self;
             ArrayVecMut::new(children as *mut _ as _, children_len, BRANCH_FACTOR as u16)
         }
-    }
-}
-
-pub unsafe fn free_internal<T>(mut ptr: NodePtr<T>) {
-    unsafe {
-        debug_assert_eq!(ptr.internal_mut().children_len, 0);
-        // debug_assert_eq!(ptr.internal_mut().lengths.total_len(), 0);
-        drop(ptr.into_internal());
     }
 }

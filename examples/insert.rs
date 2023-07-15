@@ -5,7 +5,7 @@ fn main() {
     let start = std::time::Instant::now();
 
     let mut rng = SmallRng::from_seed([0; 32]);
-    let n = 10_000_000;
+    let n = 20_000_000;
 
     let mut b = BVec::new();
     for value in 0..n {
@@ -15,7 +15,7 @@ fn main() {
     let t1 = start.elapsed().as_millis();
 
     let mut x = 0;
-    for _ in 0..100_000_000 {
+    for _ in 0..100 {
         let index = rng.gen_range(0..b.len());
         x ^= b[index];
     }

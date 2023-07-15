@@ -1,5 +1,9 @@
+use core::mem::ManuallyDrop;
+
+use alloc::boxed::Box;
+
 use super::handle::LeafMut;
-use super::RawNodeWithLen;
+use super::{LeafBox, NodePtr, RawNodeWithLen};
 
 use super::{InternalNode, NodeBase};
 
@@ -11,38 +15,41 @@ impl<'a, T: 'a> LeafMut<'a, T> {
             if index <= self.len() {
                 self.values_mut().insert(index, value);
             } else {
-                unsafe {
-                    LeafMut::new(new_sibling_node.1.leaf)
-                        .values_mut()
-                        .insert(index - self.len(), value)
-                };
-                new_sibling_node.0 += 1;
+                new_sibling_node
+                    .as_mut()
+                    .values_mut()
+                    .insert(index - self.len(), value);
             }
 
-            Some(new_sibling_node)
+            Some(RawNodeWithLen(
+                new_sibling_node.as_ref().len(),
+                NodePtr {
+                    leaf: ManuallyDrop::new(new_sibling_node),
+                },
+            ))
         } else {
             self.values_mut().insert(index, value);
             None
         }
     }
 
-    fn split_if_full(&mut self) -> Option<RawNodeWithLen<T>> {
+    fn split_if_full(&mut self) -> Option<LeafBox<T>> {
         self.is_full().then(|| {
             let mut new_node = NodeBase::new_leaf();
-            let mut new_leaf = unsafe { LeafMut::new(new_node.leaf) };
+            let mut new_leaf = new_node.as_mut();
             self.values_mut().split(new_leaf.values_mut());
 
             unsafe {
                 let old_next = (*self.node.as_ptr()).next;
-                (*self.node.as_ptr()).next = Some(new_node.leaf);
-                new_node.leaf.as_mut().next = old_next;
-                new_node.leaf.as_mut().prev = Some(self.node);
+                (*self.node.as_ptr()).next = Some(new_node.ptr);
+                new_node.ptr.as_mut().next = old_next;
+                new_node.ptr.as_mut().prev = Some(self.node);
                 if let Some(next_of_next) = old_next {
-                    (*next_of_next.as_ptr()).prev = Some(new_node.leaf);
+                    (*next_of_next.as_ptr()).prev = Some(new_node.ptr);
                 }
             };
 
-            RawNodeWithLen(new_leaf.len(), new_node)
+            new_node
         })
     }
 }
@@ -68,11 +75,14 @@ impl<T> InternalNode<T> {
                 if index <= usize::from(self.children_len) {
                     self.insert_fitting(index, node);
                 } else {
-                    let n = new_next_sibling.1.internal_mut();
-                    n.insert_fitting(index - usize::from(self.children_len), node);
-                    new_next_sibling.0 = n.len();
+                    new_next_sibling.insert_fitting(index - usize::from(self.children_len), node);
                 }
-                Some(new_next_sibling)
+                Some(RawNodeWithLen(
+                    new_next_sibling.len(),
+                    NodePtr {
+                        internal: ManuallyDrop::new(new_next_sibling),
+                    },
+                ))
             } else {
                 self.insert_fitting(index, node);
                 None
@@ -89,15 +99,14 @@ impl<T> InternalNode<T> {
         self.children().insert(index, node.1);
     }
 
-    fn split_if_full(&mut self) -> Option<RawNodeWithLen<T>> {
+    fn split_if_full(&mut self) -> Option<Box<InternalNode<T>>> {
         self.is_full().then(|| {
-            let mut new_sibling_node = InternalNode::<T>::new();
-            let new_sibling = unsafe { new_sibling_node.internal_mut() };
+            let mut new_sibling = InternalNode::<T>::new();
 
             new_sibling.lengths = self.lengths.split();
             self.children().split(new_sibling.children());
 
-            RawNodeWithLen(new_sibling.len(), new_sibling_node)
+            new_sibling
         })
     }
 }

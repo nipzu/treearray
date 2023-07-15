@@ -1,6 +1,7 @@
+use core::mem::ManuallyDrop;
 use core::{mem, ptr};
 
-use super::handle::{free_internal, Leaf, LeafMut};
+use super::handle::LeafMut;
 use super::BRANCH_FACTOR;
 use super::{InternalNode, NodeBase, RawNodeWithLen};
 
@@ -81,13 +82,14 @@ impl<T> InternalNode<T> {
 
     pub fn handle_underfull_leaf_child_head(&mut self) {
         let [cur, next] = unsafe { self.child_pair_at(0) };
-        let [mut cur, mut next] = unsafe { [LeafMut::new(cur.leaf), LeafMut::new(next.leaf)] };
+        let [mut cur, mut next] =
+            unsafe { [LeafMut::new(cur.leaf.ptr), LeafMut::new(next.leaf.ptr)] };
 
         unsafe {
             if next.is_almost_underfull() {
                 cur.values_mut().append(next.values_mut());
                 self.merge_length_from_next(0);
-                Leaf::new(self.children().remove(1).leaf).free();
+                ManuallyDrop::drop(&mut self.children().remove(1).leaf);
             } else {
                 cur.push_back_child(next.pop_front_child());
                 self.steal_length_from_next(0, 1);
@@ -97,13 +99,14 @@ impl<T> InternalNode<T> {
 
     pub fn handle_underfull_leaf_child_tail(&mut self, index: usize) {
         let [prev, cur] = unsafe { self.child_pair_at(index - 1) };
-        let [mut prev, mut cur] = unsafe { [LeafMut::new(prev.leaf), LeafMut::new(cur.leaf)] };
+        let [mut prev, mut cur] =
+            unsafe { [LeafMut::new(prev.leaf.ptr), LeafMut::new(cur.leaf.ptr)] };
 
         unsafe {
             if prev.is_almost_underfull() {
                 prev.values_mut().append(cur.values_mut());
                 self.merge_length_from_next(index - 1);
-                Leaf::new(self.children().remove(index).leaf).free();
+                ManuallyDrop::drop(&mut self.children().remove(index).leaf);
             } else {
                 cur.push_front_child(prev.pop_back_child());
                 self.steal_length_from_previous(index, 1);
@@ -138,7 +141,7 @@ impl<T> InternalNode<T> {
             unsafe {
                 cur.append_children(next);
                 self.merge_length_from_next(0);
-                free_internal(self.children().remove(1));
+                drop(self.children().remove(1).into_internal());
             }
         } else {
             unsafe {
@@ -158,7 +161,7 @@ impl<T> InternalNode<T> {
             unsafe {
                 prev.append_children(cur);
                 self.merge_length_from_next(index - 1);
-                free_internal(self.children().remove(index));
+                drop(self.children().remove(index).into_internal());
             }
         } else {
             unsafe {

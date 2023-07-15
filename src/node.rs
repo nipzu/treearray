@@ -27,13 +27,13 @@ const BRANCH_FACTOR: usize = 32;
 #[cfg(test)]
 const LEAF_CAP_BYTES: usize = 16;
 #[cfg(not(test))]
-const LEAF_CAP_BYTES: usize = 256;
+const LEAF_CAP_BYTES: usize = 512;
 
 pub struct RawNodeWithLen<T>(pub usize, pub NodePtr<T>);
 
 pub union NodePtr<T> {
     internal: ManuallyDrop<Box<InternalNode<T>>>,
-    pub leaf: NonNull<LeafBase<T>>,
+    pub leaf: ManuallyDrop<LeafBox<T>>,
 }
 
 impl<T> NodePtr<T> {
@@ -52,6 +52,34 @@ impl<T> NodePtr<T> {
 
 pub struct NodeBase<T> {
     _marker: PhantomData<T>,
+}
+
+pub struct LeafBox<T> {
+    pub ptr: NonNull<LeafBase<T>>,
+}
+
+impl<T> Drop for LeafBox<T> {
+    fn drop(&mut self) {
+        unsafe {
+            let ptr = self.ptr.as_ref();
+            let next = ptr.next;
+            let prev = ptr.prev;
+
+            if let Some(p_next) = next {
+                // TODO: can we take mut ref?
+                debug_assert_eq!((*p_next.as_ptr()).prev, Some(self.ptr));
+                (*p_next.as_ptr()).prev = prev;
+            }
+
+            if let Some(p_prev) = prev {
+                debug_assert_eq!((*p_prev.as_ptr()).next, Some(self.ptr));
+                (*p_prev.as_ptr()).next = next;
+            }
+
+            let (layout, _) = NodeBase::<T>::leaf_layout();
+            alloc::alloc::dealloc(self.ptr.as_ptr().cast(), layout);
+        }
+    }
 }
 
 #[repr(C)]
@@ -99,14 +127,14 @@ impl<T> NodeBase<T> {
         1
     };
 
-    pub fn new_leaf() -> NodePtr<T> {
+    pub fn new_leaf() -> LeafBox<T> {
         let (layout, _) = Self::leaf_layout();
         let ptr = unsafe { alloc(layout).cast::<LeafBase<T>>() };
         let Some(node_ptr) = NonNull::new(ptr) else {
             handle_alloc_error(layout);
         };
         unsafe { node_ptr.as_ptr().write(LeafBase::new()) };
-        NodePtr { leaf: node_ptr }
+        LeafBox { ptr: node_ptr }
     }
 
     pub fn leaf_layout() -> (Layout, usize) {
@@ -121,23 +149,23 @@ impl<T> NodeBase<T> {
 impl<T> InternalNode<T> {
     const UNINIT_NODE: MaybeUninit<NodePtr<T>> = MaybeUninit::uninit();
 
-    pub fn new() -> NodePtr<T> {
-        NodePtr {
-            internal: ManuallyDrop::new(Box::new(Self {
-                children_len: 0,
-                lengths: FenwickTree::new(),
-                children: [Self::UNINIT_NODE; BRANCH_FACTOR],
-            })),
-        }
+    pub fn new() -> Box<InternalNode<T>> {
+        Box::new(Self {
+            children_len: 0,
+            lengths: FenwickTree::new(),
+            children: [Self::UNINIT_NODE; BRANCH_FACTOR],
+        })
     }
 
     pub fn from_child_array<const N: usize>(children: [RawNodeWithLen<T>; N]) -> NodePtr<T> {
+        assert!(N < BRANCH_FACTOR);
         let mut boxed_children = Self::new();
-        let children_mut = unsafe { boxed_children.internal_mut() };
         for child in children {
-            unsafe { children_mut.push_back_child(child) }
+            unsafe { boxed_children.push_back_child(child) }
         }
 
-        boxed_children
+        NodePtr {
+            internal: ManuallyDrop::new(boxed_children),
+        }
     }
 }
