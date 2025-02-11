@@ -38,9 +38,9 @@ impl<'a, T> CursorMut<'a, T> {
 
     pub fn get_mut(&mut self) -> Option<&mut T> {
         let index = self.leaf_index;
-        // TODO: HACK: fix this
-        let leaf = unsafe { core::ptr::read(self.leaf.as_mut()?) };
-        unsafe { Some(leaf.into_value_unchecked_mut(index)) }
+        self.leaf
+            .as_mut()
+            .map(|leaf| unsafe { leaf.value_unchecked_mut(index) })
     }
 
     pub fn into_current(self) -> Option<&'a mut T> {
@@ -147,49 +147,43 @@ impl<'a, T> InboundsCursor<'a, T> {
     }
 
     pub(crate) fn try_new_first(tree: &BVec<T>) -> Option<InboundsCursor<T>> {
-        if tree.is_empty() {
-            return None;
-        }
+        tree.root().map(|mut cur_node| {
+            let height = tree.height;
 
-        let mut cur_node = unsafe { tree.root.assume_init_ref() };
-        let height = tree.height;
+            // the height of `cur_node` is `height`
+            // decrement the height of `cur_node` `height` times
+            for _ in 0..height {
+                let internal = unsafe { cur_node.internal_ref() };
+                cur_node = unsafe { internal.children[0].assume_init_ref() };
+            }
 
-        // the height of `cur_node` is `height`
-        // decrement the height of `cur_node` `height` times
-        for _ in 0..height {
-            let internal = unsafe { cur_node.internal_ref() };
-            cur_node = unsafe { internal.children[0].assume_init_ref() };
-        }
-
-        Some(InboundsCursor {
-            leaf: unsafe { cur_node.leaf_ref() },
-            marker: PhantomData,
-            leaf_index: 0,
+            InboundsCursor {
+                leaf: unsafe { cur_node.leaf_ref() },
+                marker: PhantomData,
+                leaf_index: 0,
+            }
         })
     }
 
     pub(crate) fn try_new_last(tree: &BVec<T>) -> Option<InboundsCursor<T>> {
-        if tree.is_empty() {
-            return None;
-        }
+        tree.root().map(|mut cur_node| {
+            let height = tree.height;
 
-        let mut cur_node = unsafe { tree.root.assume_init_ref() };
-        let height = tree.height;
+            // the height of `cur_node` is `height`
+            // decrement the height of `cur_node` `height` times
+            for _ in 0..height {
+                let internal = unsafe { cur_node.internal_ref() };
+                let len = usize::from(internal.children_len);
+                cur_node = unsafe { internal.children[len - 1].assume_init_ref() };
+            }
 
-        // the height of `cur_node` is `height`
-        // decrement the height of `cur_node` `height` times
-        for _ in 0..height {
-            let internal = unsafe { cur_node.internal_ref() };
-            let len = internal.children_len as usize;
-            cur_node = unsafe { internal.children[len - 1].assume_init_ref() };
-        }
+            let leaf = unsafe { cur_node.leaf_ref() };
 
-        let leaf = unsafe { cur_node.leaf_ref() };
-
-        Some(InboundsCursor {
-            leaf_index: leaf.len() - 1,
-            leaf,
-            marker: PhantomData,
+            InboundsCursor {
+                leaf_index: leaf.len() - 1,
+                leaf,
+                marker: PhantomData,
+            }
         })
     }
 
@@ -214,6 +208,53 @@ impl<'a, T> InboundsCursor<'a, T> {
         unsafe { self.leaf.value_unchecked(self.leaf_index) }
     }
 }
+
+
+
+pub struct InboundsCursorMut<'a, T> {
+    leaf: LeafMut<'a, T>,
+    leaf_index: usize,
+    marker: PhantomData<&'a mut T>,
+}
+
+impl<'a, T> InboundsCursorMut<'a, T> {
+    pub(crate) fn try_new_inbounds(tree: &mut BVec<T>, mut index: usize) -> Option<InboundsCursorMut<T>> {
+        if index >= tree.len() {
+            return None;
+        }
+
+        let mut cur_node = unsafe { tree.root.assume_init_mut() };
+        let height = tree.height;
+
+        // the height of `cur_node` is `height`
+        // decrement the height of `cur_node` `height` times
+        for _ in 0..height {
+            let internal = unsafe { cur_node.internal_mut() };
+            let (new_index, child_index) = internal.lengths.child_containing_index(index);
+            index = new_index;
+            cur_node = unsafe {
+                internal
+                    .children
+                    .get_unchecked_mut(child_index)
+                    .assume_init_mut()
+            };
+        }
+
+        Some(InboundsCursorMut {
+            leaf: unsafe { cur_node.leaf_mut() },
+            marker: PhantomData,
+            leaf_index: index,
+        })
+    }
+
+    #[must_use]
+    pub fn into_current(self) -> &'a mut T {
+        unsafe { self.leaf.into_value_unchecked_mut(self.leaf_index) }
+    }
+}
+
+
+
 
 /*
 // TODO: auto traits: Send, Sync, Unpin, UnwindSafe?

@@ -20,15 +20,15 @@ mod ownership;
 mod panics;
 mod utils;
 
-use cursor::InboundsCursor;
+use cursor::{InboundsCursor, InboundsCursorMut};
 pub use cursor::{Cursor, CursorMut};
 
 use iter::Iter;
 use node::{InternalNode, NodeBase, NodePtr, RawNodeWithLen};
 use panics::panic_out_of_bounds;
 
-pub fn foo(b: &mut BVec<i32>, x: usize) -> Option<&i32> {
-    b.get(x)
+pub fn foo(b: &mut BVec<i32>, x: usize) -> Option<&mut i32> {
+    b.get_mut(x)
 }
 
 pub struct BVec<T> {
@@ -61,6 +61,22 @@ impl<T> BVec<T> {
     }
 
     #[must_use]
+    #[inline]
+    const fn is_not_empty(&self) -> bool {
+        self.len != 0
+    }
+
+    fn root(&self) -> Option<&NodePtr<T>> {
+        self.is_not_empty()
+            .then(|| unsafe { self.root.assume_init_ref() })
+    }
+
+    fn root_mut(&mut self) -> Option<&mut NodePtr<T>> {
+        self.is_not_empty()
+            .then(|| unsafe { self.root.assume_init_mut() })
+    }
+
+    #[must_use]
     pub fn get(&self, index: usize) -> Option<&T> {
         InboundsCursor::try_new_inbounds(self, index)
             .as_ref()
@@ -69,7 +85,7 @@ impl<T> BVec<T> {
 
     #[must_use]
     pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
-        CursorMut::try_new_inbounds(self, index).and_then(CursorMut::into_current)
+        InboundsCursorMut::try_new_inbounds(self, index).map(InboundsCursorMut::into_current)
     }
 
     #[must_use]
@@ -578,6 +594,35 @@ mod tests {
         drop(b);
 
         assert_eq!(n, drop_count.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn test_get_mut() {
+        use alloc::vec::Vec;
+        use rand::{Rng, SeedableRng};
+
+        let n = 1000;
+        let mut rng = rand::rngs::StdRng::from_seed([123; 32]);
+        let mut b = BVec::new();
+
+        for x in 0..n {
+            let index = rng.gen_range(0..=b.len());
+            b.insert(index, x);
+        }
+
+        let mut vals = b.iter().copied().collect::<Vec<_>>();
+
+        for index in 0..b.len() {
+            let r = b.get_mut(index).unwrap();
+            *r += 1;
+        }
+
+        let updated_vals = b.iter().copied().collect::<Vec<_>>();
+        for x in vals.iter_mut() {
+            *x += 1;
+        }
+
+        assert_eq!(vals, updated_vals);
     }
 
     #[test]

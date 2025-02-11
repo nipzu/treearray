@@ -1,6 +1,6 @@
 use core::{
     marker::PhantomData,
-    ptr::{addr_of_mut, NonNull},
+    ptr::NonNull,
 };
 
 use crate::{
@@ -87,13 +87,20 @@ impl<'a, T: 'a> LeafMut<'a, T> {
         unsafe {
             ArrayVecMut::new(
                 array,
-                addr_of_mut!((*self.node.as_ptr()).len),
+                &mut (*self.node.as_ptr()).len,
                 NodeBase::<T>::LEAF_CAP as u16,
             )
         }
     }
 
     pub unsafe fn into_value_unchecked_mut(self, index: usize) -> &'a mut T {
+        let len = self.len();
+        debug_assert!(len <= NodeBase::<T>::LEAF_CAP);
+        debug_assert!(index < len);
+        unsafe { &mut *self.array_ptr().add(index) }
+    }
+
+    pub unsafe fn value_unchecked_mut(&mut self, index: usize) -> &mut T {
         let len = self.len();
         debug_assert!(len <= NodeBase::<T>::LEAF_CAP);
         debug_assert!(index < len);
